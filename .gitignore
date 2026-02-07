@@ -1,9 +1,22 @@
+# ==============================
+# Root
+# ==============================
+.env
+.env.local
+.env.production
+.DS_Store
+Thumbs.db
+.cursor/
+
+# ==============================
+# Mobile (Flutter/Dart)
+# ==============================
+
 # Miscellaneous
 *.class
 *.log
 *.pyc
 *.swp
-.DS_Store
 .atom/
 .buildlog/
 .history
@@ -16,11 +29,6 @@ migrate_working_dir/
 *.iws
 .idea/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
@@ -29,7 +37,8 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-/build/
+mobile/build/
+build/
 
 # Symbolication related
 app.*.symbols
@@ -38,26 +47,20 @@ app.*.symbols
 app.*.map.json
 
 # Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
-
-# Backend / Node.js
-backend/node_modules/
-backend/.env
-backend/dev.sqlite3
-dev.sqlite3
-
-# Environment files
-.env
-.env.local
-.env.production
+mobile/android/app/debug
+mobile/android/app/profile
+mobile/android/app/release
 
 # Flutter SDK archive
 flutter.tar.xz
 
-# OS files
-Thumbs.db
+# ==============================
+# WhatsApp (Node.js Backend)
+# ==============================
+whatsapp/backend/node_modules/
+whatsapp/backend/.env
+whatsapp/backend/dev.sqlite3
 
-# Cursor / Editor
-.cursor/
+# General Node
+node_modules/
+*.sqlite3
