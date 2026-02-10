@@ -15,6 +15,7 @@ const requestRoutes = require('./routes/requests');
 const providerRoutes = require('./routes/providers');
 const paymentRoutes = require('./routes/payments');
 const ratingRoutes = require('./routes/ratings');
+const webhookRoutes = require('./routes/webhook');
 
 const app = express();
 
@@ -25,7 +26,14 @@ app.use(cors({
   credentials: true
 }));
 
-// Rate limiting
+// Body parsing (must come before routes)
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// WhatsApp webhook — registered BEFORE rate limiter so Meta is never blocked
+app.use('/api/webhook', webhookRoutes);
+
+// Rate limiting (for all other routes)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // limit each IP to 100 requests per windowMs
@@ -36,10 +44,6 @@ app.use(limiter);
 // Compression and logging
 app.use(compression());
 app.use(morgan('combined'));
-
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Health check
 app.get('/health', (req, res) => {
