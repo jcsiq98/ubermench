@@ -1,5 +1,6 @@
 const whatsapp = require('../services/whatsappService');
 const sessionManager = require('../services/sessionManager');
+const { startChatSession, endChatSession, getChatSession, markServiceComplete } = require('../services/chatService');
 const { db } = require('../config/database');
 const crypto = require('crypto');
 const { SERVICE_CATEGORIES, getServiceListSections } = require('../constants/serviceCategories');
@@ -17,6 +18,7 @@ const STATES = {
   IDLE: 'IDLE',
   REQUEST_RECEIVED: 'REQUEST_RECEIVED',
   AWAITING_REQUEST_RESPONSE: 'AWAITING_REQUEST_RESPONSE',
+  // Milestone 5 — Chat relay
   CHAT_ACTIVE: 'CHAT_ACTIVE',
 };
 
@@ -82,6 +84,9 @@ const handleProviderMessage = async (phone, waName, message) => {
     case STATES.REQUEST_RECEIVED:
     case STATES.AWAITING_REQUEST_RESPONSE:
       return await handleRequestResponse(phone, waName, message, sessionData);
+
+    case STATES.CHAT_ACTIVE:
+      return await handleProviderChatActive(phone, waName, message, sessionData);
 
     default:
       return await handleUnknownState(phone, waName);
@@ -404,6 +409,9 @@ const handleProviderButtons = async (phone, buttonId, sessionData) => {
 
     case 'btn_decline_request':
       return await declineRequest(phone, sessionData);
+
+    case 'btn_chat_customer':
+      return await startChatFromProvider(phone, sessionData);
 
     default:
       await whatsapp.sendTextMessage(phone, `🤔 Unknown action. Type "help" for available commands.`);
@@ -858,6 +866,106 @@ const handleHelp = async (phone) => {
     `⚙️ *"settings"* — Update your profile\n` +
     `❓ *"help"* — Show this help message\n\n` +
     `When you receive a request, tap Accept or Decline within 5 minutes.`
+  );
+};
+
+/**
+ * Start chat session from provider side (after accepting request).
+ */
+const startChatFromProvider = async (phone, sessionData) => {
+  const requestId = sessionData.requestId;
+  if (!requestId) {
+    await whatsapp.sendTextMessage(phone, `❌ No active request found.`);
+    return;
+  }
+
+  try {
+    // Get request details
+    const request = await db('service_requests').where('id', requestId).first();
+    if (!request || request.status !== 'provider_assigned') {
+      await whatsapp.sendTextMessage(
+        phone,
+        `❌ Chat is not available. The request must be accepted first.`
+      );
+      return;
+    }
+
+    // Get customer details
+    const customer = await db('users').where('id', request.customer_id).first();
+    if (!customer) {
+      await whatsapp.sendTextMessage(phone, `❌ Customer not found.`);
+      return;
+    }
+
+    const providerName = sessionData.name || 'Provider';
+    const customerName = customer.name;
+
+    // Start chat session
+    await startChatSession(
+      requestId,
+      customer.phone,
+      phone,
+      customerName,
+      providerName
+    );
+
+    // Update session state
+    await sessionManager.setSession(phone, STATES.CHAT_ACTIVE, {
+      ...sessionData,
+      requestId,
+      customerPhone: customer.phone,
+      customerName,
+    });
+
+    console.log(`[ProviderHandler] Chat started by provider ${phone}`);
+  } catch (error) {
+    console.error('[ProviderHandler] Error starting chat:', error.message);
+    await whatsapp.sendTextMessage(phone, `❌ Something went wrong starting the chat. Please try again.`);
+  }
+};
+
+/**
+ * Handle messages when provider is in active chat.
+ */
+const handleProviderChatActive = async (phone, waName, message, sessionData) => {
+  const text = extractText(message);
+
+  // Handle "end chat" command
+  if (text === 'end chat' || text === 'cerrar chat') {
+    const requestId = sessionData.requestId;
+    if (requestId) {
+      await endChatSession(requestId, phone);
+      await sessionManager.setSession(phone, STATES.IDLE, sessionData);
+    }
+    return;
+  }
+
+  // Handle "complete" command
+  if (text === 'complete' || text === 'completar') {
+    const requestId = sessionData.requestId;
+    if (requestId) {
+      await markServiceComplete(requestId, phone);
+      await sessionManager.setSession(phone, STATES.IDLE, sessionData);
+    }
+    return;
+  }
+
+  // Check if chat session still exists
+  const chatSession = await getChatSession(phone);
+  if (!chatSession) {
+    await whatsapp.sendTextMessage(
+      phone,
+      `💬 Chat session has ended.\n\nType "menu" to return to your dashboard.`
+    );
+    await sessionManager.setSession(phone, STATES.IDLE, sessionData);
+    return;
+  }
+
+  // Messages are relayed by webhookController before reaching here
+  // This handler is mainly for commands and edge cases
+  await whatsapp.sendTextMessage(
+    phone,
+    `💬 You're in an active chat. Send messages normally and they'll be forwarded to the customer.\n\nType "complete" to mark service as done, or "end chat" to close the conversation.`
   );
 };
 

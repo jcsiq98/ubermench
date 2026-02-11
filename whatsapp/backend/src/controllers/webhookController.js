@@ -3,6 +3,7 @@ const sessionManager = require('../services/sessionManager');
 const { db } = require('../config/database');
 const { handleCustomerMessage } = require('../handlers/customerHandler');
 const { handleProviderMessage } = require('../handlers/providerHandler');
+const { getChatSession, relayMessage } = require('../services/chatService');
 
 /**
  * GET /api/webhook — Webhook verification (Meta challenge)
@@ -85,6 +86,25 @@ const receiveMessage = async (req, res) => {
         content: extractMessageContent(message),
         status: 'received',
       });
+
+      // ── M5: Check for active chat session first ──
+      const chatSession = await getChatSession(senderPhone);
+      if (chatSession) {
+        // Handle chat-specific commands (let handlers process these)
+        const text = message.type === 'text' ? message.text?.body?.trim().toLowerCase() : '';
+        const isChatCommand = text === 'end chat' || text === 'cerrar chat' || 
+                             (text === 'complete' || text === 'completar');
+        
+        if (!isChatCommand) {
+          // Relay message (non-command messages)
+          const result = await relayMessage(senderPhone, message, senderName);
+          if (result.success) {
+            return; // Message relayed, don't process further
+          }
+          // If relay failed, continue to handler for error handling
+        }
+        // If it's a command, continue to handler for proper state management
+      }
 
       // ── Route message based on user role ──
       // Check if user is a provider

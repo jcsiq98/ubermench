@@ -2,6 +2,7 @@ const whatsapp = require('../services/whatsappService');
 const sessionManager = require('../services/sessionManager');
 const providerService = require('../services/providerService');
 const { notifyProviderOfRequest } = require('../handlers/providerHandler');
+const { startChatSession, endChatSession, getChatSession } = require('../services/chatService');
 const { db } = require('../config/database');
 const { getServiceListSections, getCategoryById, extractServiceId } = require('../constants/serviceCategories');
 const crypto = require('crypto');
@@ -22,8 +23,9 @@ const STATES = {
   AWAITING_LOCATION: 'AWAITING_LOCATION',
   AWAITING_DESCRIPTION: 'AWAITING_DESCRIPTION',
   BOOKING_CONFIRMED: 'BOOKING_CONFIRMED',
-  // Future milestones
+  // Milestone 5 — Chat relay
   CHAT_ACTIVE: 'CHAT_ACTIVE',
+  // Future milestones
   RATING: 'RATING',
 };
 
@@ -79,7 +81,10 @@ const handleCustomerMessage = async (phone, waName, message) => {
       return await handleDescriptionInput(phone, waName, message, sessionData);
 
     case STATES.BOOKING_CONFIRMED:
-      return await handlePostBooking(phone, sessionData);
+      return await handlePostBooking(phone, waName, message, sessionData);
+
+    case STATES.CHAT_ACTIVE:
+      return await handleChatActive(phone, waName, message, sessionData);
 
     default:
       return await handleUnknownState(phone, waName);
@@ -618,15 +623,125 @@ const handleDescriptionInput = async (phone, waName, message, sessionData) => {
 
 /**
  * Handle messages after a booking has been confirmed.
- * Show booking status or redirect to menu.
+ * Show booking status or handle "Start Chat" button.
  */
-const handlePostBooking = async (phone, sessionData) => {
+const handlePostBooking = async (phone, waName, message, sessionData) => {
+  // Check for "Start Chat" button
+  if (message.type === 'interactive') {
+    const content = extractInteractiveContent(message);
+    if (content?.type === 'button_reply' && content.id === 'btn_start_chat') {
+      return await startChatFromCustomer(phone, sessionData);
+    }
+  }
+
+  // Check for "Start Chat" text command
+  const text = extractText(message);
+  if (text === 'start chat' || text === 'chat') {
+    return await startChatFromCustomer(phone, sessionData);
+  }
+
   const serviceName = sessionData.serviceName || sessionData.serviceType;
   const providerName = sessionData.selectedProviderName || 'your provider';
 
   await whatsapp.sendTextMessage(
     phone,
     `📋 Your request for *${serviceName}* with *${providerName}* has been submitted!\n\nWe'll notify you when the provider responds.\n\nType "menu" to book another service or "help" for assistance.`
+  );
+};
+
+/**
+ * Start chat session from customer side (after provider accepts).
+ */
+const startChatFromCustomer = async (phone, sessionData) => {
+  const requestId = sessionData.requestId;
+  if (!requestId) {
+    await whatsapp.sendTextMessage(phone, `❌ No active request found.`);
+    return;
+  }
+
+  try {
+    // Get request details
+    const request = await db('service_requests').where('id', requestId).first();
+    if (!request || request.status !== 'provider_assigned') {
+      await whatsapp.sendTextMessage(
+        phone,
+        `❌ Chat is not available yet. The provider must accept your request first.`
+      );
+      return;
+    }
+
+    // Get provider details
+    const provider = await db('providers')
+      .join('users', 'providers.user_id', '=', 'users.id')
+      .where('providers.id', request.provider_id)
+      .select('users.phone', 'users.name')
+      .first();
+
+    if (!provider) {
+      await whatsapp.sendTextMessage(phone, `❌ Provider not found.`);
+      return;
+    }
+
+    const customerName = sessionData.name || 'Customer';
+    const providerName = provider.name;
+
+    // Start chat session
+    await startChatSession(
+      requestId,
+      phone,
+      provider.phone,
+      customerName,
+      providerName
+    );
+
+    // Update session state
+    await sessionManager.setSession(phone, STATES.CHAT_ACTIVE, {
+      ...sessionData,
+      requestId,
+      providerPhone: provider.phone,
+      providerName,
+    });
+
+    console.log(`[CustomerHandler] Chat started by customer ${phone}`);
+  } catch (error) {
+    console.error('[CustomerHandler] Error starting chat:', error.message);
+    await whatsapp.sendTextMessage(phone, `❌ Something went wrong starting the chat. Please try again.`);
+  }
+};
+
+/**
+ * Handle messages when customer is in active chat.
+ */
+const handleChatActive = async (phone, waName, message, sessionData) => {
+  const text = extractText(message);
+
+  // Handle "end chat" command
+  if (text === 'end chat' || text === 'cerrar chat') {
+    const requestId = sessionData.requestId;
+    if (requestId) {
+      await endChatSession(requestId, phone);
+      await sessionManager.setSession(phone, STATES.IDLE, {});
+    }
+    return;
+  }
+
+  // Check if chat session still exists
+  const chatSession = await getChatSession(phone);
+  if (!chatSession) {
+    await whatsapp.sendTextMessage(
+      phone,
+      `💬 Chat session has ended.\n\nType "menu" to start a new service request.`
+    );
+    await sessionManager.setSession(phone, STATES.IDLE, {});
+    return;
+  }
+
+  // Messages are relayed by webhookController before reaching here
+  // This handler is mainly for commands and edge cases
+  // If we reach here, it means the message wasn't relayed (maybe unsupported type)
+  await whatsapp.sendTextMessage(
+    phone,
+    `💬 You're in an active chat. Send messages normally and they'll be forwarded to the provider.\n\nType "end chat" to close the conversation.`
   );
 };
 
