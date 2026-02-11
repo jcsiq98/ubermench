@@ -2,6 +2,7 @@ const whatsapp = require('../services/whatsappService');
 const sessionManager = require('../services/sessionManager');
 const { db } = require('../config/database');
 const { handleCustomerMessage } = require('../handlers/customerHandler');
+const { handleProviderMessage } = require('../handlers/providerHandler');
 
 /**
  * GET /api/webhook — Webhook verification (Meta challenge)
@@ -85,8 +86,22 @@ const receiveMessage = async (req, res) => {
         status: 'received',
       });
 
-      // Route to the customer handler (state machine)
-      await handleCustomerMessage(senderPhone, senderName, message);
+      // ── Route message based on user role ──
+      // Check if user is a provider
+      const user = await db('users').where({ phone: senderPhone }).first();
+      const isProvider = user && user.role === 'provider';
+
+      // Check for provider registration keyword (works even if not registered)
+      const text = message.type === 'text' ? message.text?.body?.trim().toLowerCase() : '';
+      const isProviderRegistration = text === 'register provider' || text === 'registrar proveedor';
+
+      if (isProvider || isProviderRegistration) {
+        // Route to provider handler
+        await handleProviderMessage(senderPhone, senderName, message);
+      } else {
+        // Route to customer handler
+        await handleCustomerMessage(senderPhone, senderName, message);
+      }
     }
   } catch (error) {
     console.error('[Webhook] Error processing message:', error);

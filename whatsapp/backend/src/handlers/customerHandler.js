@@ -1,6 +1,7 @@
 const whatsapp = require('../services/whatsappService');
 const sessionManager = require('../services/sessionManager');
 const providerService = require('../services/providerService');
+const { notifyProviderOfRequest } = require('../handlers/providerHandler');
 const { db } = require('../config/database');
 const { getServiceListSections, getCategoryById, extractServiceId } = require('../constants/serviceCategories');
 const crypto = require('crypto');
@@ -572,6 +573,19 @@ const handleDescriptionInput = async (phone, waName, message, sessionData) => {
     });
 
     console.log(`[CustomerHandler] Service request created: ${requestId}`);
+
+    // ── M4: Create assignment and notify provider ──
+    if (sessionData.selectedProviderId) {
+      const customerName = sessionData.name || 'Customer';
+      await notifyProviderOfRequest(
+        requestId,
+        sessionData.selectedProviderId,
+        customerName,
+        sessionData.serviceType,
+        sessionData.address,
+        description
+      );
+    }
   } catch (error) {
     console.error('[CustomerHandler] Error creating service request:', error.message);
     await whatsapp.sendTextMessage(phone, `❌ Something went wrong creating your request. Please try again.`);
