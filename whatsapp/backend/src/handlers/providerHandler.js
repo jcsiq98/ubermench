@@ -50,6 +50,15 @@ const handleProviderMessage = async (phone, waName, message) => {
     return await startProviderRegistration(phone, waName);
   }
 
+  // ── Mode selection keywords (for providers who want to use as customer)
+  if (text === 'customer mode' || text === 'modo cliente' || text === 'soy cliente') {
+    // Clear provider session and route to customer handler
+    await sessionManager.clearSession(phone);
+    // Import and call customer handler
+    const { handleCustomerMessage } = require('./customerHandler');
+    return await handleCustomerMessage(phone, waName, message);
+  }
+
   // ── If not registered and not starting registration, prompt ──
   if (!isRegisteredProvider && state === STATES.NEW) {
     return await handleNewProvider(phone, waName);
@@ -58,6 +67,10 @@ const handleProviderMessage = async (phone, waName, message) => {
   // ── State machine ──
   switch (state) {
     case STATES.NEW:
+      // If registered provider, show menu with option to use as customer
+      if (isRegisteredProvider) {
+        return await handleProviderMenu(phone, waName);
+      }
       return await handleNewProvider(phone, waName);
 
     case STATES.REGISTRATION_START:
@@ -375,6 +388,26 @@ const handleBioInput = async (phone, waName, message, sessionData) => {
 // ──────────────────────────────────────────────
 
 /**
+ * Show provider dashboard with commands
+ */
+const showProviderDashboard = async (phone, sessionData) => {
+  const provider = await db('providers')
+    .join('users', 'providers.user_id', '=', 'users.id')
+    .where('providers.id', sessionData.providerId)
+    .select('providers.is_online', 'users.name')
+    .first();
+
+  const status = provider?.is_online ? '🟢 Online' : '🔴 Offline';
+
+  await whatsapp.sendTextMessage(
+    phone,
+    `👤 *Provider Dashboard*\n\nStatus: ${status}\n\nAvailable commands:\n\n🟢 "go online" — Make yourself available\n🔴 "go offline" — Go offline\n📋 "my requests" — View your requests\n📊 "my stats" — View your statistics\n⚙️ "settings" — Update your profile\n🛒 "customer mode" — Use as customer\n❓ "help" — Show help`
+  );
+
+  await sessionManager.setSession(phone, STATES.IDLE, sessionData);
+};
+
+/**
  * Handle idle state (provider is registered and online/offline)
  */
 const handleIdleState = async (phone, waName, message, sessionData) => {
@@ -403,18 +436,16 @@ const handleIdleState = async (phone, waName, message, sessionData) => {
   if (text === 'settings') {
     return await showSettings(phone, sessionData);
   }
+  if (text === 'customer mode' || text === 'modo cliente' || text === 'soy cliente') {
+    // Switch to customer mode
+    await sessionManager.clearSession(phone);
+    const { handleCustomerMessage } = require('./customerHandler');
+    const dummyMessage = { type: 'text', text: { body: 'menu' } };
+    return await handleCustomerMessage(phone, waName, dummyMessage);
+  }
 
-  // Default response
-  await whatsapp.sendTextMessage(
-    phone,
-    `👋 Hello! Use these commands:\n\n` +
-    `🟢 *"go online"* — Make yourself available\n` +
-    `🔴 *"go offline"* — Go offline\n` +
-    `📋 *"my requests"* — View your requests\n` +
-    `📊 *"my stats"* — View your statistics\n` +
-    `⚙️ *"settings"* — Update your profile\n` +
-    `❓ *"help"* — Show help`
-  );
+  // Default response - show menu with options
+  return await handleProviderMenu(phone, waName);
 };
 
 /**
@@ -443,6 +474,20 @@ const handleProviderButtons = async (phone, buttonId, sessionData) => {
 
     case 'btn_chat_customer':
       return await startChatFromProvider(phone, sessionData);
+
+    case 'btn_provider_dashboard':
+      return await showProviderDashboard(phone, sessionData);
+
+    case 'btn_customer_mode':
+      // Clear session and route to customer handler
+      await sessionManager.clearSession(phone);
+      const { handleCustomerMessage } = require('./customerHandler');
+      // Create a dummy message to trigger customer welcome
+      const dummyMessage = { type: 'text', text: { body: 'menu' } };
+      return await handleCustomerMessage(phone, waName, dummyMessage);
+
+    case 'btn_help':
+      return await handleHelp(phone);
 
     default:
       await whatsapp.sendTextMessage(phone, `🤔 Unknown action. Type "help" for available commands.`);
@@ -852,9 +897,9 @@ const handleRequestTimeout = async (requestId, providerId, providerPhone) => {
 // ──────────────────────────────────────────────
 
 /**
- * Show main menu
+ * Show provider menu (when provider sends "menu" or starts conversation)
  */
-const handleMenu = async (phone, waName) => {
+const handleProviderMenu = async (phone, waName) => {
   const existingUser = await findUserByPhone(phone);
   if (existingUser && existingUser.role === 'provider') {
     const provider = await db('providers')
@@ -864,8 +909,14 @@ const handleMenu = async (phone, waName) => {
     if (provider) {
       await whatsapp.sendTextMessage(
         phone,
-        `👋 Welcome back, ${existingUser.name}!\n\nUse these commands:\n\n🟢 "go online" — Make yourself available\n🔴 "go offline" — Go offline\n📋 "my requests" — View your requests\n📊 "my stats" — View your statistics\n⚙️ "settings" — Update your profile`
+        `👋 Welcome back, ${existingUser.name}!\n\nYou're registered as a *Provider*.\n\nWhat would you like to do?`
       );
+
+      await whatsapp.sendInteractiveButtons(phone, 'Choose an option:', [
+        { id: 'btn_provider_dashboard', title: '👤 Provider Mode' },
+        { id: 'btn_customer_mode', title: '🛒 Customer Mode' },
+        { id: 'btn_help', title: '❓ Help' },
+      ]);
 
       await sessionManager.setSession(phone, STATES.IDLE, {
         userId: existingUser.id,
@@ -880,6 +931,13 @@ const handleMenu = async (phone, waName) => {
     phone,
     `👋 Hello! To register as a provider, type:\n\n*"register provider"*`
   );
+};
+
+/**
+ * Show main menu
+ */
+const handleMenu = async (phone, waName) => {
+  return await handleProviderMenu(phone, waName);
 };
 
 /**
