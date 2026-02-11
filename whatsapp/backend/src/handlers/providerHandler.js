@@ -961,11 +961,26 @@ const startChatFromProvider = async (phone, sessionData) => {
 const handleProviderChatActive = async (phone, waName, message, sessionData) => {
   const text = extractText(message);
 
+  // Get chat session to access requestId
+  const chatSession = await getChatSession(phone);
+  
   // Handle "end chat" command
   if (text === 'end chat' || text === 'cerrar chat') {
-    const requestId = sessionData.requestId;
+    const requestId = chatSession?.requestId || sessionData.requestId;
     if (requestId) {
-      await endChatSession(requestId, phone);
+      const result = await endChatSession(requestId, phone);
+      if (result.success) {
+        await sessionManager.setSession(phone, STATES.IDLE, {
+          ...sessionData,
+          providerId: sessionData.providerId,
+          name: sessionData.name,
+        });
+        return;
+      } else {
+        await whatsapp.sendTextMessage(phone, `❌ Error ending chat: ${result.error || 'Unknown error'}`);
+      }
+    } else {
+      await whatsapp.sendTextMessage(phone, `❌ No active chat session found.`);
       await sessionManager.setSession(phone, STATES.IDLE, sessionData);
     }
     return;
@@ -973,30 +988,45 @@ const handleProviderChatActive = async (phone, waName, message, sessionData) => 
 
   // Handle "complete" command
   if (text === 'complete' || text === 'completar') {
-    const requestId = sessionData.requestId;
+    const requestId = chatSession?.requestId || sessionData.requestId;
     if (requestId) {
-      await markServiceComplete(requestId, phone);
-      await sessionManager.setSession(phone, STATES.IDLE, sessionData);
+      const result = await markServiceComplete(requestId, phone);
+      if (result.success) {
+        await sessionManager.setSession(phone, STATES.IDLE, {
+          ...sessionData,
+          providerId: sessionData.providerId,
+          name: sessionData.name,
+        });
+        return;
+      } else {
+        await whatsapp.sendTextMessage(phone, `❌ Error marking complete: ${result.error || 'Unknown error'}`);
+      }
+    } else {
+      await whatsapp.sendTextMessage(phone, `❌ No active request found.`);
     }
     return;
   }
 
   // Check if chat session still exists
-  const chatSession = await getChatSession(phone);
   if (!chatSession) {
     await whatsapp.sendTextMessage(
       phone,
       `💬 Chat session has ended.\n\nType "menu" to return to your dashboard.`
     );
-    await sessionManager.setSession(phone, STATES.IDLE, sessionData);
+    await sessionManager.setSession(phone, STATES.IDLE, {
+      ...sessionData,
+      providerId: sessionData.providerId,
+      name: sessionData.name,
+    });
     return;
   }
 
   // Messages are relayed by webhookController before reaching here
   // This handler is mainly for commands and edge cases
+  // If we reach here, it means the message wasn't relayed (maybe unsupported type or error)
   await whatsapp.sendTextMessage(
     phone,
-    `💬 You're in an active chat. Send messages normally and they'll be forwarded to the customer.\n\nType "complete" to mark service as done, or "end chat" to close the conversation.`
+    `💬 You're in an active chat with ${chatSession.customerName}.\n\nSend messages normally and they'll be forwarded.\n\nType "complete" to mark service as done, or "end chat" to close.`
   );
 };
 

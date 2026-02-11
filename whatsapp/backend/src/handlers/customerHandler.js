@@ -715,18 +715,28 @@ const startChatFromCustomer = async (phone, sessionData) => {
 const handleChatActive = async (phone, waName, message, sessionData) => {
   const text = extractText(message);
 
+  // Get chat session to access requestId
+  const chatSession = await getChatSession(phone);
+
   // Handle "end chat" command
   if (text === 'end chat' || text === 'cerrar chat') {
-    const requestId = sessionData.requestId;
+    const requestId = chatSession?.requestId || sessionData.requestId;
     if (requestId) {
-      await endChatSession(requestId, phone);
+      const result = await endChatSession(requestId, phone);
+      if (result.success) {
+        await sessionManager.setSession(phone, STATES.IDLE, {});
+        return;
+      } else {
+        await whatsapp.sendTextMessage(phone, `❌ Error ending chat: ${result.error || 'Unknown error'}`);
+      }
+    } else {
+      await whatsapp.sendTextMessage(phone, `❌ No active chat session found.`);
       await sessionManager.setSession(phone, STATES.IDLE, {});
     }
     return;
   }
 
   // Check if chat session still exists
-  const chatSession = await getChatSession(phone);
   if (!chatSession) {
     await whatsapp.sendTextMessage(
       phone,
@@ -741,7 +751,7 @@ const handleChatActive = async (phone, waName, message, sessionData) => {
   // If we reach here, it means the message wasn't relayed (maybe unsupported type)
   await whatsapp.sendTextMessage(
     phone,
-    `💬 You're in an active chat. Send messages normally and they'll be forwarded to the provider.\n\nType "end chat" to close the conversation.`
+    `💬 You're in an active chat with ${chatSession.providerName}.\n\nSend messages normally and they'll be forwarded.\n\nType "end chat" to close the conversation.`
   );
 };
 
