@@ -15,13 +15,30 @@ const getHeaders = () => ({
 });
 
 /**
+ * Normalize phone numbers for the WhatsApp Cloud API.
+ * Mexican numbers: WhatsApp sometimes sends "521XXXXXXXXXX" (13 digits)
+ * but the API expects "52XXXXXXXXXX" (12 digits) — removes the extra "1".
+ */
+const normalizePhoneNumber = (phone) => {
+  if (!phone) return phone;
+  // Remove any non-digit characters
+  let cleaned = phone.replace(/\D/g, '');
+  // Mexican numbers: if starts with "521" followed by 10 digits → remove the "1"
+  if (cleaned.length === 13 && cleaned.startsWith('521')) {
+    cleaned = '52' + cleaned.slice(3);
+    console.log(`[WhatsApp] Normalized MX phone: ${phone} → ${cleaned}`);
+  }
+  return cleaned;
+};
+
+/**
  * Send a plain text message
  */
 const sendTextMessage = async (to, text) => {
   const payload = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to,
+    to: normalizePhoneNumber(to),
     type: 'text',
     text: { body: text },
   };
@@ -42,7 +59,7 @@ const sendInteractiveList = async (to, headerText, bodyText, footerText, buttonT
   const payload = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to,
+    to: normalizePhoneNumber(to),
     type: 'interactive',
     interactive: {
       type: 'list',
@@ -76,7 +93,7 @@ const sendInteractiveButtons = async (to, bodyText, buttons) => {
   const payload = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to,
+    to: normalizePhoneNumber(to),
     type: 'interactive',
     interactive: {
       type: 'button',
@@ -105,7 +122,7 @@ const sendImage = async (to, imageUrl, caption = '') => {
   const payload = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to,
+    to: normalizePhoneNumber(to),
     type: 'image',
     image: {
       link: imageUrl,
@@ -154,5 +171,6 @@ module.exports = {
   sendImage,
   markAsRead,
   sendMessage,
+  normalizePhoneNumber,
 };
 
