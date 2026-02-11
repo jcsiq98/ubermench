@@ -106,7 +106,22 @@ const receiveMessage = async (req, res) => {
         // If it's a command, continue to handler for proper state management
       }
 
-      // ── Route message based on user role ──
+      // ── Route message based on user role and session state ──
+      // Check session state first (if in provider registration flow, route to provider handler)
+      const session = await sessionManager.getSession(senderPhone);
+      const sessionState = session?.state || 'NEW';
+      
+      // Provider registration states - always route to provider handler
+      const providerRegistrationStates = [
+        'REGISTRATION_START',
+        'AWAITING_PROVIDER_NAME',
+        'AWAITING_SERVICE_TYPES',
+        'AWAITING_BIO',
+        'REGISTERED' // Provider just registered
+      ];
+      
+      const isInProviderRegistration = providerRegistrationStates.includes(sessionState);
+      
       // Check if user is a provider
       const user = await db('users').where({ phone: senderPhone }).first();
       const isProvider = user && user.role === 'provider';
@@ -115,7 +130,11 @@ const receiveMessage = async (req, res) => {
       const text = message.type === 'text' ? message.text?.body?.trim().toLowerCase() : '';
       const isProviderRegistration = text === 'register provider' || text === 'registrar proveedor';
 
-      if (isProvider || isProviderRegistration) {
+      // Route to provider handler if:
+      // 1. User is already a provider, OR
+      // 2. User wrote "register provider", OR
+      // 3. User is in provider registration flow (even if currently a customer)
+      if (isProvider || isProviderRegistration || isInProviderRegistration) {
         // Route to provider handler
         await handleProviderMessage(senderPhone, senderName, message);
       } else {

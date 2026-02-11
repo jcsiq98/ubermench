@@ -101,13 +101,28 @@ const handleProviderMessage = async (phone, waName, message) => {
  * Start provider registration flow
  */
 const startProviderRegistration = async (phone, waName) => {
-  // Check if already registered
+  // Check if already registered as provider
   const existingUser = await findUserByPhone(phone);
   if (existingUser && existingUser.role === 'provider') {
     await whatsapp.sendTextMessage(
       phone,
       `✅ You're already registered as a provider!\n\nType "menu" to see your options.`
     );
+    return;
+  }
+
+  // If user is a customer, they can still register as provider
+  // (they'll need to complete the registration flow)
+  if (existingUser && existingUser.role === 'customer') {
+    await whatsapp.sendTextMessage(
+      phone,
+      `👋 Hello ${existingUser.name}! You're currently registered as a customer.\n\nLet's register you as a provider. What's your name? (You can use a different name or the same: ${existingUser.name})`
+    );
+    await sessionManager.setSession(phone, STATES.AWAITING_PROVIDER_NAME, {
+      waName,
+      existingUserId: existingUser.id,
+      isCustomerUpgrade: true,
+    });
     return;
   }
 
@@ -272,22 +287,38 @@ const handleBioInput = async (phone, waName, message, sessionData) => {
     return;
   }
 
-  // ── Create provider user and profile ──
-  const userId = crypto.randomUUID();
+  // ── Create or update provider user and profile ──
+  let userId;
   const providerId = crypto.randomUUID();
 
   try {
-    // Create user
-    await db('users').insert({
-      id: userId,
-      name: sessionData.name,
-      phone: phone,
-      role: 'provider',
-      whatsapp_name: waName || null,
-      rating_average: 0,
-      created_at: new Date(),
-      updated_at: new Date(),
-    });
+    // Check if user already exists (customer upgrading to provider)
+    if (sessionData.existingUserId && sessionData.isCustomerUpgrade) {
+      userId = sessionData.existingUserId;
+      // Update existing user to provider role
+      await db('users')
+        .where('id', userId)
+        .update({
+          name: sessionData.name,
+          role: 'provider',
+          whatsapp_name: waName || null,
+          updated_at: new Date(),
+        });
+      console.log(`[ProviderHandler] Customer ${userId} upgraded to provider`);
+    } else {
+      // Create new user
+      userId = crypto.randomUUID();
+      await db('users').insert({
+        id: userId,
+        name: sessionData.name,
+        phone: phone,
+        role: 'provider',
+        whatsapp_name: waName || null,
+        rating_average: 0,
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+    }
 
     // Create provider profile
     await db('providers').insert({
