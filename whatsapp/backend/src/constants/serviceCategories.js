@@ -1,5 +1,5 @@
 /**
- * Service categories available in Ubermench.
+ * Service categories available in Handy.
  * Each category has an id (used in DB and session), display title, description, and emoji.
  */
 

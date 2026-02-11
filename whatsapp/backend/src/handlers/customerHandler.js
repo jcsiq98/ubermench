@@ -85,7 +85,7 @@ const handleNewUser = async (phone, waName) => {
   // Brand new user — send welcome + service list
   await whatsapp.sendTextMessage(
     phone,
-    `👋 Welcome to Ubermench!\n\nWe connect you with trusted local service providers.\n\nWhat can we help you with today?`
+    `👋 Welcome to *Handy*!\n\nWe connect you with trusted local service providers.\n\nWhat can we help you with today?`
   );
 
   await sendServiceCategoryList(phone);
@@ -325,12 +325,12 @@ const handleMenu = async (phone, waName) => {
 const handleHelp = async (phone) => {
   await whatsapp.sendTextMessage(
     phone,
-    `❓ *Ubermench Help*\n\nHere's what you can do:\n\n` +
+    `❓ *Handy Help*\n\nHere's what you can do:\n\n` +
     `📋 *"menu"* — Browse available services\n` +
     `❌ *"cancel"* — Cancel and start over\n` +
     `❓ *"help"* — Show this help message\n\n` +
     `Simply select a service category and we'll connect you with the best local providers, complete with ratings and reviews!\n\n` +
-    `Need human assistance? Contact us at support@ubermench.com`
+    `Need human assistance? Contact us at support@handy.com`
   );
 };
 
@@ -365,7 +365,7 @@ const sendServiceCategoryList = async (phone) => {
     phone,
     'Our Services',
     'We offer a wide range of professional services. Tap the button below to browse and select.',
-    'Powered by Ubermench',
+    'Powered by Handy',
     'Browse Services',
     getServiceListSections()
   );
