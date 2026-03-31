@@ -760,6 +760,54 @@ export class WhatsAppProviderHandler {
       return;
     }
 
+    if (action === 'update') {
+      const description = data?.description;
+      if (!description) {
+        await this.whatsapp.sendTextMessage(
+          phone,
+          '🤔 ¿Cuál gasto recurrente quieres modificar? Dime el nombre.',
+        );
+        return;
+      }
+
+      const updates: { amount?: number; frequency?: string; dayOfMonth?: number } = {};
+      if (data?.amount && typeof data.amount === 'number' && data.amount > 0) updates.amount = data.amount;
+      if (data?.frequency) updates.frequency = data.frequency;
+      if (data?.dayOfMonth && typeof data.dayOfMonth === 'number') updates.dayOfMonth = data.dayOfMonth;
+
+      if (Object.keys(updates).length === 0) {
+        await this.whatsapp.sendTextMessage(
+          phone,
+          '🤔 ¿Qué quieres cambiar? Puedes modificar el monto, la frecuencia o el día.\n\nEjemplo: *"Cambia el gasto de Railway al día 15"*',
+        );
+        return;
+      }
+
+      const updated = await this.recurringExpenseService.update(
+        providerProfileId,
+        description,
+        updates,
+      );
+
+      if (updated) {
+        const changes: string[] = [];
+        if (updates.amount) changes.push(`monto: *$${updates.amount.toLocaleString('es-MX')}*`);
+        if (updates.frequency) changes.push(`frecuencia: *${updates.frequency === 'monthly' ? 'mensual' : 'semanal'}*`);
+        if (updates.dayOfMonth) changes.push(`día: *${updates.dayOfMonth}*`);
+
+        await this.whatsapp.sendTextMessage(
+          phone,
+          `✅ Actualicé el gasto de *${description}*:\n${changes.join('\n')}`,
+        );
+      } else {
+        await this.whatsapp.sendTextMessage(
+          phone,
+          `🤔 No encontré un gasto recurrente activo con "${description}". Escribe *"mis gastos fijos"* para ver los que tienes.`,
+        );
+      }
+      return;
+    }
+
     if (action === 'create') {
       const amount = data?.amount;
       if (!amount || typeof amount !== 'number' || amount <= 0) {
@@ -803,7 +851,7 @@ export class WhatsAppProviderHandler {
 
     await this.whatsapp.sendTextMessage(
       phone,
-      '🤔 No entendí qué quieres hacer con gastos recurrentes. Puedes:\n\n• *Crear*: "Gasto fijo de 500 de renta"\n• *Ver*: "Mis gastos fijos"\n• *Cancelar*: "Cancela el gasto de Netflix"',
+      '🤔 No entendí qué quieres hacer con gastos recurrentes. Puedes:\n\n• *Crear*: "Gasto fijo de 500 de renta"\n• *Ver*: "Mis gastos fijos"\n• *Modificar*: "Cambia el gasto de Railway al día 15"\n• *Cancelar*: "Cancela el gasto de Netflix"',
     );
   }
 

@@ -66,6 +66,41 @@ export class RecurringExpenseService {
     return true;
   }
 
+  async update(
+    providerId: string,
+    description: string,
+    updates: { amount?: number; frequency?: string; dayOfMonth?: number },
+  ): Promise<boolean> {
+    const recurring = await this.prisma.recurringExpense.findFirst({
+      where: {
+        providerId,
+        isActive: true,
+        description: { contains: description, mode: 'insensitive' },
+      },
+    });
+
+    if (!recurring) return false;
+
+    const data: Record<string, any> = {};
+    if (updates.amount !== undefined) data.amount = new Prisma.Decimal(updates.amount);
+    if (updates.frequency !== undefined) data.frequency = updates.frequency;
+    if (updates.dayOfMonth !== undefined) {
+      data.dayOfMonth = Math.min(updates.dayOfMonth, 28);
+      data.nextDueDate = this.calculateNextDueDate(
+        updates.frequency || recurring.frequency,
+        data.dayOfMonth,
+      );
+    }
+
+    await this.prisma.recurringExpense.update({
+      where: { id: recurring.id },
+      data,
+    });
+
+    this.logger.log(`Recurring expense updated: ${recurring.description}`);
+    return true;
+  }
+
   async listActive(providerId: string) {
     return this.prisma.recurringExpense.findMany({
       where: { providerId, isActive: true },

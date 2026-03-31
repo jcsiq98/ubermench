@@ -37,7 +37,7 @@ export interface ExpenseData {
 }
 
 export interface RecurringExpenseData {
-  action: 'create' | 'cancel' | 'list';
+  action: 'create' | 'cancel' | 'list' | 'update';
   amount?: number;
   category?: string;
   description?: string;
