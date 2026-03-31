@@ -302,6 +302,40 @@ export class AiService {
     }
   }
 
+  /**
+   * Extract structured data from natural language using LLM.
+   * Used for onboarding and other cases where we need specific info from free text.
+   */
+  async extractFromText(
+    text: string,
+    instruction: string,
+  ): Promise<Record<string, any> | null> {
+    if (!this.client) return null;
+
+    try {
+      const completion = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          {
+            role: 'system',
+            content: instruction + '\nResponde SOLO con JSON válido, sin markdown.',
+          },
+          { role: 'user', content: text },
+        ],
+        response_format: { type: 'json_object' },
+        max_tokens: 150,
+        temperature: 0.3,
+      });
+
+      const raw = completion.choices[0]?.message?.content;
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (err: any) {
+      this.logger.error(`extractFromText failed: ${err.message}`);
+      return null;
+    }
+  }
+
   private async checkRateLimit(providerPhone: string): Promise<boolean> {
     const key = `${RATE_LIMIT_PREFIX}${providerPhone}`;
     const current = await this.redis.get(key);

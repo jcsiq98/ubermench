@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../config/redis.service';
 import { WhatsAppService } from './whatsapp.service';
+import { AiService } from '../ai/ai.service';
 
 export enum OnboardingStep {
   NAME = 'NAME',
@@ -16,7 +17,7 @@ interface OnboardingSession {
 }
 
 const SESSION_PREFIX = 'wa_onboarding:';
-const SESSION_TTL = 86400; // 24 hours
+const SESSION_TTL = 86400;
 
 @Injectable()
 export class WhatsAppOnboardingHandler {
@@ -26,6 +27,7 @@ export class WhatsAppOnboardingHandler {
     private whatsapp: WhatsAppService,
     private prisma: PrismaService,
     private redis: RedisService,
+    private aiService: AiService,
   ) {}
 
   private async getSession(phone: string): Promise<OnboardingSession | null> {
@@ -121,23 +123,33 @@ export class WhatsAppOnboardingHandler {
     if (trimmed.length < 2) {
       await this.whatsapp.sendTextMessage(
         phone,
-        `Escribe tu nombre para que sepa cómo llamarte.`,
+        `Dime tu nombre para que sepa cómo llamarte.`,
       );
       return;
     }
 
-    session.name = trimmed
-      .split(' ')
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-      .join(' ');
+    // Use LLM to extract the actual name from natural language
+    const extracted = await this.aiService.extractFromText(
+      trimmed,
+      `El usuario está respondiendo a la pregunta "¿Cómo te llamas?".
+Extrae SOLO el nombre de la persona de lo que dijo. Ignora frases como "me llamo", "mi nombre es", "soy", etc.
+Responde con JSON: {"name": "Nombre Extraído"}
+Si no puedes identificar un nombre, responde: {"name": null}`,
+    );
+
+    const name = extracted?.name || trimmed;
+
+    session.name = typeof name === 'string'
+      ? name.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+      : trimmed;
+
     session.step = OnboardingStep.TRADE;
     await this.setSession(phone, session);
 
     await this.whatsapp.sendTextMessage(
       phone,
       `Mucho gusto, *${session.name}* 👋\n\n` +
-        `*¿A qué te dedicas?*\n\n` +
-        `_(Ejemplo: plomero, electricista, albañil, pintor, o lo que sea)_`,
+        `*¿A qué te dedicas?*\n_(plomero, electricista, albañil, pintor, lo que sea)_`,
     );
   }
 
@@ -150,17 +162,26 @@ export class WhatsAppOnboardingHandler {
     if (trimmed.length < 2) {
       await this.whatsapp.sendTextMessage(
         phone,
-        `Escríbeme a qué te dedicas. Puede ser cualquier oficio.`,
+        `Dime a qué te dedicas. Puede ser cualquier oficio.`,
       );
       return;
     }
 
-    session.trade = trimmed;
+    // Use LLM to extract the trade/occupation
+    const extracted = await this.aiService.extractFromText(
+      trimmed,
+      `El usuario está respondiendo a la pregunta "¿A qué te dedicas?".
+Extrae el oficio o profesión. Ignora frases como "soy", "me dedico a", "trabajo de", etc.
+Responde con JSON: {"trade": "oficio extraído"}
+Si no puedes identificar un oficio, usa el texto tal cual: {"trade": "${trimmed}"}`,
+    );
+
+    const trade = extracted?.trade || trimmed;
+    session.trade = trade;
 
     try {
       const dbPhone = this.normalizePhoneForDb(phone);
 
-      // Create User + ProviderProfile immediately
       await this.prisma.user.create({
         data: {
           phone: dbPhone,
@@ -169,7 +190,7 @@ export class WhatsAppOnboardingHandler {
           providerProfile: {
             create: {
               bio: session.trade,
-              serviceTypes: [session.trade.toLowerCase()],
+              serviceTypes: [trade.toLowerCase()],
               isVerified: true,
               isAvailable: true,
             },
@@ -177,21 +198,20 @@ export class WhatsAppOnboardingHandler {
         },
       });
 
-      // Save application record for analytics
       await this.prisma.providerApplication.upsert({
         where: { phone: dbPhone },
         update: {
           name: session.name,
           bio: session.trade,
-          categories: [session.trade.toLowerCase()],
+          categories: [trade.toLowerCase()],
           onboardingStep: 'DONE',
           verificationStatus: 'APPROVED',
         },
         create: {
           phone: dbPhone,
           name: session.name,
-          bio: session.trade,
-          categories: [session.trade.toLowerCase()],
+          bio: trade,
+          categories: [trade.toLowerCase()],
           serviceZones: [],
           onboardingStep: 'DONE',
           verificationStatus: 'APPROVED',
@@ -205,7 +225,7 @@ export class WhatsAppOnboardingHandler {
         `¡Listo, *${session.name}*! Ya tienes tu asistente. 🎉\n\n` +
           `Esto es lo que puedo hacer por ti:\n\n` +
           `💰 *Registrar ingresos* — "Cobré 1,200 por un tinaco"\n` +
-          `📅 *Agendar citas* — "Mañana tengo trabajo a las 10 en Polanco"\n` +
+          `📅 *Agendar citas* — "Mañana tengo trabajo a las 10"\n` +
           `📊 *Ver tu resumen* — "¿Cuánto llevo esta semana?"\n` +
           `📋 *Ver tu agenda* — "¿Qué tengo hoy?"\n` +
           `⚙️ *Configurar tu negocio* — "Cobro 800 por visita"\n\n` +
