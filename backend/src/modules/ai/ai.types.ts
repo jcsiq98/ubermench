@@ -1,5 +1,6 @@
 export enum AiIntent {
   REGISTRAR_INGRESO = 'registrar_ingreso',
+  REGISTRAR_GASTO = 'registrar_gasto',
   VER_RESUMEN = 'ver_resumen',
   AGENDAR_CITA = 'agendar_cita',
   CONFIRMAR_CLIENTE = 'confirmar_cliente',
@@ -26,6 +27,12 @@ export interface IncomeData {
   description?: string;
   paymentMethod?: 'CASH' | 'TRANSFER' | 'CARD' | 'OTHER';
   clientName?: string;
+}
+
+export interface ExpenseData {
+  amount?: number;
+  category?: string;
+  description?: string;
 }
 
 export interface AppointmentData {

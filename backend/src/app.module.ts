@@ -19,6 +19,7 @@ import { ZonesModule } from './modules/zones/zones.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { AiModule } from './modules/ai/ai.module';
 import { IncomeModule } from './modules/income/income.module';
+import { ExpenseModule } from './modules/expense/expense.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { AddressesModule } from './modules/addresses/addresses.module';
@@ -88,6 +89,9 @@ const isProd = process.env.NODE_ENV === 'production';
 
     // Income tracking (global)
     IncomeModule,
+
+    // Expense tracking (global)
+    ExpenseModule,
 
     // Appointments (global)
     AppointmentsModule,

@@ -225,6 +225,7 @@ Si no puedes identificar un oficio, usa el texto tal cual: {"trade": "${trimmed}
         `¡Listo, *${session.name}*! Ya tienes tu asistente. 🎉\n\n` +
           `Esto es lo que puedo hacer por ti:\n\n` +
           `💰 *Registrar ingresos* — "Cobré 1,200 por un tinaco"\n` +
+          `💸 *Registrar gastos* — "Gasté 200 en material"\n` +
           `📅 *Agendar citas* — "Mañana tengo trabajo a las 10"\n` +
           `📊 *Ver tu resumen* — "¿Cuánto llevo esta semana?"\n` +
           `📋 *Ver tu agenda* — "¿Qué tengo hoy?"\n` +

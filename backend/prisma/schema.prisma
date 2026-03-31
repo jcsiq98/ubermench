@@ -79,6 +79,7 @@ model ProviderProfile {
   user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   bookings         Booking[]             @relation("ProviderBookings")
   incomes          Income[]
+  expenses         Expense[]
   appointments     Appointment[]
   serviceZones     ProviderServiceZone[]
   trustScore       TrustScore?
@@ -155,6 +156,26 @@ enum PaymentMethod {
   TRANSFER
   CARD
   OTHER
+}
+
+// ──────────────────────────────────────────────
+// Expenses (provider spending tracking)
+// ──────────────────────────────────────────────
+model Expense {
+  id          String   @id @default(uuid())
+  providerId  String   @map("provider_id")
+  amount      Decimal  @db.Decimal(12, 2)
+  category    String?
+  description String?
+  date        DateTime @default(now())
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@index([providerId, date])
+  @@index([date])
+  @@map("expenses")
 }
 
 // ──────────────────────────────────────────────

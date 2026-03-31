@@ -10,6 +10,7 @@ import { RatingsService } from '../_marketplace/ratings/ratings.service';
 import { AiService } from '../ai/ai.service';
 import { AiIntent, WorkspaceConfigData } from '../ai/ai.types';
 import { IncomeService } from '../income/income.service';
+import { ExpenseService } from '../expense/expense.service';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { BookingStatus, PaymentMethod } from '@prisma/client';
@@ -57,6 +58,7 @@ export class WhatsAppProviderHandler {
     private onboardingHandler: WhatsAppOnboardingHandler,
     private aiService: AiService,
     private incomeService: IncomeService,
+    private expenseService: ExpenseService,
     private appointmentsService: AppointmentsService,
     private workspaceService: WorkspaceService,
   ) {}
@@ -498,6 +500,9 @@ export class WhatsAppProviderHandler {
         case AiIntent.REGISTRAR_INGRESO:
           return this.handleRegistrarIngreso(phone, aiResponse.data, providerProfileId);
 
+        case AiIntent.REGISTRAR_GASTO:
+          return this.handleRegistrarGasto(phone, aiResponse.data, providerProfileId);
+
         case AiIntent.VER_RESUMEN:
           return this.handleVerResumen(phone, aiResponse.data, providerProfileId);
 
@@ -612,6 +617,54 @@ export class WhatsAppProviderHandler {
     }
   }
 
+  // ─── Expense: registrar gasto ───────────────────────────
+
+  private async handleRegistrarGasto(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.whatsapp.sendTextMessage(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
+      return;
+    }
+
+    const amount = data?.amount;
+    if (!amount || typeof amount !== 'number' || amount <= 0) {
+      await this.whatsapp.sendTextMessage(
+        phone,
+        '🤔 No pude detectar el monto. ¿Podrías decirme cuánto gastaste?\n\nEjemplo: *"Gasté 200 en material"*',
+      );
+      return;
+    }
+
+    try {
+      await this.expenseService.create({
+        providerId: providerProfileId,
+        amount,
+        category: data?.category,
+        description: data?.description,
+      });
+
+      const confirmation = this.expenseService.formatExpenseConfirmation(
+        amount,
+        data?.category,
+        data?.description,
+      );
+
+      await this.whatsapp.sendTextMessage(phone, confirmation);
+    } catch (error: any) {
+      this.logger.error(`Error creating expense: ${error.message}`);
+      await this.whatsapp.sendTextMessage(
+        phone,
+        '❌ No se pudo registrar el gasto. Intenta de nuevo.',
+      );
+    }
+  }
+
   // ─── Income: ver resumen ────────────────────────────────
 
   private async handleVerResumen(
@@ -628,16 +681,35 @@ export class WhatsAppProviderHandler {
     }
 
     try {
-      const weekSummary = await this.incomeService.getWeekSummary(providerProfileId);
-      const monthSummary = await this.incomeService.getMonthSummary(providerProfileId);
+      const [weekIncome, monthIncome, weekExpense, monthExpense] =
+        await Promise.all([
+          this.incomeService.getWeekSummary(providerProfileId),
+          this.incomeService.getMonthSummary(providerProfileId),
+          this.expenseService.getWeekSummary(providerProfileId),
+          this.expenseService.getMonthSummary(providerProfileId),
+        ]);
 
-      const weekMsg = this.incomeService.formatSummaryMessage(weekSummary);
-      const monthMsg = this.incomeService.formatSummaryMessage(monthSummary);
+      const weekIncomeMsg = this.incomeService.formatSummaryMessage(weekIncome);
+      const weekExpenseMsg = this.expenseService.formatExpenseSummaryMessage(weekExpense);
+      const weekNet = weekIncome.total - weekExpense.total;
 
-      await this.whatsapp.sendTextMessage(
-        phone,
-        `${weekMsg}\n\n${monthMsg}`,
-      );
+      const monthIncomeMsg = this.incomeService.formatSummaryMessage(monthIncome);
+      const monthExpenseMsg = this.expenseService.formatExpenseSummaryMessage(monthExpense);
+      const monthNet = monthIncome.total - monthExpense.total;
+
+      let msg = weekIncomeMsg;
+      if (weekExpense.count > 0) {
+        msg += `\n${weekExpenseMsg}`;
+        msg += `\n💰 *Balance semana: $${weekNet.toLocaleString('es-MX')}*`;
+      }
+
+      msg += `\n\n${monthIncomeMsg}`;
+      if (monthExpense.count > 0) {
+        msg += `\n${monthExpenseMsg}`;
+        msg += `\n💰 *Balance mes: $${monthNet.toLocaleString('es-MX')}*`;
+      }
+
+      await this.whatsapp.sendTextMessage(phone, msg);
     } catch (error: any) {
       this.logger.error(`Error getting summary: ${error.message}`);
       await this.whatsapp.sendTextMessage(
@@ -1562,13 +1634,6 @@ export class WhatsAppProviderHandler {
     }
 
     if (message.type === 'audio' && message.audio?.id) {
-      if (senderPhone) {
-        await this.whatsapp.sendTextMessage(
-          senderPhone,
-          '🎙️ Recibí tu nota de voz, transcribiendo...',
-        );
-      }
-
       const mediaUrl = await this.whatsapp.getMediaUrl(message.audio.id);
       if (!mediaUrl) {
         this.logger.warn(`Could not resolve media URL for audio ${message.audio.id}`);
