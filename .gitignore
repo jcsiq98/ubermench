@@ -1,66 +1,42 @@
-# ==============================
-# Root
-# ==============================
+# Dependencies
+node_modules/
+
+# Environment
 .env
 .env.local
 .env.production
-.DS_Store
-Thumbs.db
-.cursor/
 
-# ==============================
-# Mobile (Flutter/Dart)
-# ==============================
-
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
-.atom/
-.buildlog/
-.history
-.svn/
-migrate_working_dir/
-
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
-mobile/build/
+# Build artifacts
+dist/
+.next/
+out/
 build/
 
-# Symbolication related
-app.*.symbols
+# Embedded PostgreSQL (dev)
+tmp-pg-data/
 
-# Obfuscation related
-app.*.map.json
+# IDE
+.vscode/
+.idea/
 
-# Android Studio will place build artifacts here
-mobile/android/app/debug
-mobile/android/app/profile
-mobile/android/app/release
+# OS
+.DS_Store
+Thumbs.db
 
-# Flutter SDK archive
-flutter.tar.xz
+# Logs
+*.log
+npm-debug.log*
 
-# ==============================
-# WhatsApp (Node.js Backend)
-# ==============================
-whatsapp/backend/node_modules/
-whatsapp/backend/.env
-whatsapp/backend/dev.sqlite3
+# Prisma
+prisma/migrations/**/migration_lock.toml
 
-# General Node
-node_modules/
-*.sqlite3
+# PWA
+sw.js
+workbox-*.js
+
+# Cursor
+.cursor/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts

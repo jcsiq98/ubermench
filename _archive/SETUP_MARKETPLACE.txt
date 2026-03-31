@@ -1,0 +1,221 @@
+═══════════════════════════════════════════════════════════════
+  HANDY — Guía para levantar el proyecto localmente
+═══════════════════════════════════════════════════════════════
+
+Necesitas 4 terminales abiertas. Sigue este orden exacto.
+
+
+───────────────────────────────────────────────────────────────
+  TERMINAL 1 — Base de datos (PostgreSQL embebida)
+───────────────────────────────────────────────────────────────
+
+  cd ~/ubermench/handy
+  node scripts/start-db.js
+
+  → Espera a ver: "✅ PostgreSQL is running!"
+  → Déjala corriendo (no la cierres)
+
+
+───────────────────────────────────────────────────────────────
+  TERMINAL 2 — Backend (NestJS API en puerto 3000)
+───────────────────────────────────────────────────────────────
+
+  cd ~/ubermench/handy/backend
+  npm run start:dev
+
+  → Espera a ver:
+    "✅ WhatsApp token is valid"
+    "🚀 Handy API running on http://localhost:3000"
+  → Déjala corriendo
+
+  ─ SOLO LA PRIMERA VEZ (o si borras la BD): ─────────────────
+  npm install                         # instalar dependencias
+  npx prisma migrate dev              # aplicar migraciones
+  npx prisma db seed                  # datos iniciales
+  npm run register-provider           # registra tu tel como proveedor
+
+
+───────────────────────────────────────────────────────────────
+  TERMINAL 3 — Frontend (Next.js en puerto 3001)
+───────────────────────────────────────────────────────────────
+
+  cd ~/ubermench/handy/app
+  npm run dev
+
+  → Espera a ver: "Ready on http://localhost:3001"
+  → Abre http://localhost:3001 en tu navegador
+
+  ─ SOLO LA PRIMERA VEZ: ─────────────────────────────────────
+  npm install                         # instalar dependencias
+
+
+───────────────────────────────────────────────────────────────
+  TERMINAL 4 — ngrok (túnel para recibir mensajes de WhatsApp)
+───────────────────────────────────────────────────────────────
+
+  ⚠️  SIN ESTO, el proveedor NO puede responder desde WhatsApp.
+      El backend puede ENVIAR mensajes, pero no RECIBIRLOS.
+
+  ngrok http 3000
+
+  → Verás algo como:
+    "Forwarding https://xxxxx.ngrok-free.dev -> http://localhost:3000"
+  → Déjala corriendo
+
+  ⚠️  IMPORTANTE: Cada vez que reinicies ngrok, la URL cambia.
+      Si la URL cambió, actualízala en Meta Developer:
+      developers.facebook.com → Tu App → WhatsApp → Configuration
+      → Callback URL: https://TU-NUEVA-URL.ngrok-free.dev/api/webhook
+      → Click "Verify and save"
+
+  💡 TIP: Para evitar que la URL cambie, usa un dominio fijo (gratis):
+     1. Ve a dashboard.ngrok.com → Domains → New Domain
+     2. Copia tu dominio (ej: mi-dominio.ngrok-free.dev)
+     3. Ejecuta: ngrok http 3000 --domain=mi-dominio.ngrok-free.dev
+     Así la URL nunca cambia y no necesitas actualizar Meta.
+
+
+═══════════════════════════════════════════════════════════════
+  PARA DETENER TODO
+═══════════════════════════════════════════════════════════════
+
+  Presiona Ctrl+C en cada terminal (4, 3, 2, 1 en ese orden)
+
+
+═══════════════════════════════════════════════════════════════
+  VERIFICAR QUE TODO FUNCIONA
+═══════════════════════════════════════════════════════════════
+
+  Abre en el navegador:
+
+  http://localhost:3000/api/health
+
+  Deberías ver:
+  {
+    "status": "ok",
+    "components": {
+      "database":  "✅ connected",
+      "redis":     "✅ connected",
+      "whatsapp":  "✅ active"
+    }
+  }
+
+  Si WhatsApp dice "❌ token expired":
+  → Ve a developers.facebook.com → Tu App → WhatsApp → API Setup
+  → Genera un nuevo token → Pégalo en backend/.env → Reinicia backend
+
+  Para verificar solo WhatsApp:
+  http://localhost:3000/api/health/whatsapp
+
+
+═══════════════════════════════════════════════════════════════
+  CONFIGURACIÓN DE WHATSAPP (archivo backend/.env)
+═══════════════════════════════════════════════════════════════
+
+  Estas variables deben estar en backend/.env:
+
+  WHATSAPP_TOKEN=<token permanente de System User de Meta>
+  WHATSAPP_PHONE_NUMBER_ID=<ID del número de WhatsApp Business>
+  WHATSAPP_VERIFY_TOKEN=handy-2026-verify
+  WHATSAPP_API_URL=https://graph.facebook.com/v21.0
+
+  ─ Obtener token permanente: ────────────────────────────────
+  1. business.facebook.com → Configuración → Usuarios del sistema
+  2. Crear System User (admin) → Asignar tu app con control total
+  3. Generar token con permisos:
+     whatsapp_business_messaging, whatsapp_business_management
+  4. Copiar el token y pegarlo en WHATSAPP_TOKEN
+
+
+═══════════════════════════════════════════════════════════════
+  CONFIGURACIÓN DEL WEBHOOK (una sola vez)
+═══════════════════════════════════════════════════════════════
+
+  1. Asegúrate de que ngrok está corriendo (Terminal 4)
+  2. Copia la URL https de ngrok
+  3. Ve a developers.facebook.com → Tu App → WhatsApp → Configuration
+  4. En la sección Webhook:
+     - Callback URL: https://TU-URL.ngrok-free.dev/api/webhook
+     - Verify token: handy-2026-verify
+     - Click "Verify and save"
+  5. En Webhook fields, activa (Subscribe) el campo: messages
+
+
+═══════════════════════════════════════════════════════════════
+  PROBAR EL FLUJO COMPLETO
+═══════════════════════════════════════════════════════════════
+
+  1. Abre http://localhost:3001 en el navegador
+  2. Inicia sesión con un número DIFERENTE al tuyo
+     (el OTP aparece en la consola del backend: "📱 OTP CODE for +52...")
+  3. Busca "Proveedor Demo" en la lista de proveedores
+  4. Solicita un servicio (llena descripción y dirección)
+  5. Te llegará la notificación a TU WhatsApp
+  6. Escribe "aceptar" en WhatsApp → el booking se acepta
+  7. Escribe "en camino" → el cliente ve el cambio de estado
+  8. Escribe "empezar" → trabajo en progreso
+  9. Escribe "completar" → trabajo terminado
+  10. Califica al cliente (1-5) desde WhatsApp
+  11. El cliente puede calificar al proveedor desde la app
+
+  Comandos del proveedor vía WhatsApp:
+  ─────────────────────────────────────
+  "aceptar"    → Aceptar el trabajo
+  "rechazar"   → Rechazar el trabajo
+  "en camino"  → Indicar que va en camino
+  "empezar"    → Iniciar el trabajo
+  "completar"  → Marcar como terminado
+  "ayuda"      → Ver todos los comandos
+  "menu"       → Ver menú principal
+
+
+═══════════════════════════════════════════════════════════════
+  COMANDOS ÚTILES (ejecutar desde ~/ubermench/handy/backend)
+═══════════════════════════════════════════════════════════════
+
+  npx prisma studio                → Explorador visual de la BD (puerto 5555)
+  npx prisma migrate reset --force → Borra y recrea la BD desde cero
+  npx prisma db seed               → Re-insertar datos iniciales
+  npm run register-provider        → Registrar tu tel como proveedor demo
+                                     (por defecto: +526565884840)
+  npm run register-provider +52XXXXXXXXXX "Nombre" "plumbing,electrical"
+                                   → Registrar otro número como proveedor
+
+
+═══════════════════════════════════════════════════════════════
+  PUERTOS USADOS
+═══════════════════════════════════════════════════════════════
+
+  5433  → PostgreSQL
+  3000  → Backend API (NestJS)
+  3001  → Frontend (Next.js)
+  4040  → ngrok dashboard (http://localhost:4040)
+  5555  → Prisma Studio (solo si lo abres)
+
+
+═══════════════════════════════════════════════════════════════
+  SOLUCIÓN DE PROBLEMAS
+═══════════════════════════════════════════════════════════════
+
+  ❌ "Failed to start PostgreSQL"
+  → Ejecuta: rm -f tmp-pg-data/postmaster.pid
+  → Vuelve a correr: node scripts/start-db.js
+
+  ❌ "WhatsApp token expired" o mensajes no llegan
+  → Abre http://localhost:3000/api/health/whatsapp
+  → Si dice tokenValid: false → renueva el token en backend/.env
+
+  ❌ El proveedor escribe "aceptar" pero nada pasa
+  → Verifica que ngrok esté corriendo (Terminal 4)
+  → Verifica que la URL en Meta Developer coincida con la de ngrok
+  → Revisa los logs del backend (Terminal 2) para errores
+
+  ❌ "Unauthorized" o pantalla blanca en la app
+  → Abre DevTools (F12) → Console → localStorage.clear()
+  → Recarga la página → Inicia sesión de nuevo
+
+  ❌ El OTP no llega por WhatsApp
+  → Busca en la consola del backend: "📱 OTP CODE for..."
+  → El código aparece ahí como fallback
+
++5215512345001,+5215512345002,+5215512345003,+5215512345004,+5215512345005,+5215512345006,+5215512345007,+5215512345008,+5215500000001,+5215500000002,+5215500000003

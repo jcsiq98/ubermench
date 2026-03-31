@@ -1,0 +1,97 @@
+# CHECK 1 — Structural Verification (Workspace Personalization)
+# Corre este prompt en otra ventana de Cursor con el workspace abierto.
+# Modo: Ask mode (read-only). No modifica archivos.
+
+Eres un verificador de código. Tu trabajo es revisar que la feature "Workspace Personalization" fue implementada correctamente a nivel estructural. NO modifiques nada — solo lee y reporta.
+
+## Checklist de verificación
+
+Ejecuta cada check y reporta PASS/FAIL con evidencia:
+
+### CHECK 1.1 — Schema Prisma
+Lee `backend/prisma/schema.prisma`. Verifica:
+- [ ] Existe el modelo `WorkspaceProfile` con campos: `id`, `providerId` (unique), `services` (Json), `schedule` (Json), `autoReply` (Json), `notes` (String?), `createdAt`, `updatedAt`
+- [ ] Tiene relación `provider ProviderProfile @relation(...)` con `onDelete: Cascade`
+- [ ] `ProviderProfile` tiene la relación inversa `workspaceProfile WorkspaceProfile?`
+- [ ] Tiene `@@map("workspace_profiles")` e `@@index([providerId])`
+
+### CHECK 1.2 — Migración
+Lee `backend/prisma/migrations/` y encuentra la migración `add_workspace_profile`. Verifica:
+- [ ] El SQL crea la tabla `workspace_profiles`
+- [ ] Crea el unique constraint en `provider_id`
+- [ ] Crea la foreign key hacia `provider_profiles`
+
+### CHECK 1.3 — AI Types
+Lee `backend/src/modules/ai/ai.types.ts`. Verifica:
+- [ ] `AiIntent` enum incluye `CONFIGURAR_PERFIL = 'configurar_perfil'`
+- [ ] Existe interface `WorkspaceConfigData` con `action: WorkspaceConfigAction`
+- [ ] Las acciones válidas son: `add_service`, `remove_service`, `set_schedule`, `set_auto_reply`, `add_note`
+- [ ] Existe interface `WorkspaceContextDto` con campos: `services`, `schedule`, `autoReply`, `notes`
+- [ ] Los sub-types `WorkspaceService`, `WorkspaceSchedule`, `WorkspaceAutoReply` están definidos
+
+### CHECK 1.4 — Workspace Module
+Lee `backend/src/modules/workspace/workspace.module.ts`. Verifica:
+- [ ] Es `@Global()` (para que WhatsApp handler pueda inyectar WorkspaceService)
+- [ ] Exporta `WorkspaceService`
+
+### CHECK 1.5 — Workspace Service
+Lee `backend/src/modules/workspace/workspace.service.ts`. Verifica:
+- [ ] Inyecta `PrismaService` y `RedisService`
+- [ ] Método `getWorkspace(providerId)`: cache-first (Redis → DB → create if missing)
+- [ ] Método `getWorkspaceContext(providerId)`: retorna `WorkspaceContextDto`
+- [ ] Método `applyConfig(providerId, config)`: switch con 5 acciones (add_service, remove_service, set_schedule, set_auto_reply, add_note)
+- [ ] Método `getWorkspaceSummary(providerId)`: retorna string formateado para WhatsApp
+- [ ] Después de cada escritura a DB, llama `invalidateCache(providerId)`
+- [ ] Cache key pattern: `workspace:{providerId}`, TTL 24 horas (86400)
+
+### CHECK 1.6 — AI Service
+Lee `backend/src/modules/ai/ai.service.ts`. Verifica:
+- [ ] `buildSystemPrompt()` acepta parámetro opcional `workspaceContext?: WorkspaceContextDto`
+- [ ] El system prompt incluye el intent `configurar_perfil` con su descripción y ejemplos
+- [ ] El system prompt incluye el formato de data para `configurar_perfil`
+- [ ] El intent string incluye `configurar_perfil` en la lista del JSON format
+- [ ] Existe función `buildWorkspaceSection(ctx?)` que genera la sección de perfil del proveedor
+- [ ] `processMessage()` acepta 5to parámetro opcional `workspaceContext?: WorkspaceContextDto`
+- [ ] Pasa `workspaceContext` a `buildSystemPrompt()`
+
+### CHECK 1.7 — WhatsApp Handler
+Lee `backend/src/modules/whatsapp/whatsapp-provider.handler.ts`. Verifica:
+- [ ] Importa `WorkspaceService` y `WorkspaceConfigData`
+- [ ] Constructor inyecta `workspaceService: WorkspaceService`
+- [ ] Keywords: `'mis servicios'`, `'mi negocio'`, `'mi workspace'`, `'configuracion'` muestran workspace summary
+- [ ] En `handleAiConversation()`: carga workspace context ANTES de llamar a `processMessage()`
+- [ ] Pasa `workspaceContext` como 5to argumento a `processMessage()`
+- [ ] Switch de intents incluye `case AiIntent.CONFIGURAR_PERFIL`
+- [ ] Existe método `handleConfigurarPerfil()` que llama a `workspaceService.applyConfig()`
+
+### CHECK 1.8 — App Module
+Lee `backend/src/app.module.ts`. Verifica:
+- [ ] Importa `WorkspaceModule` de `./modules/workspace/workspace.module`
+- [ ] `WorkspaceModule` está en el array de imports
+
+### CHECK 1.9 — Compilation
+Corre: `cd backend && npx tsc --noEmit`
+- [ ] Sale sin errores (exit code 0)
+
+## Formato de reporte
+
+```
+## Workspace Personalization — Structural Verification Report
+Date: [fecha]
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| 1.1 Schema | PASS/FAIL | ... |
+| 1.2 Migration | PASS/FAIL | ... |
+| 1.3 AI Types | PASS/FAIL | ... |
+| 1.4 Workspace Module | PASS/FAIL | ... |
+| 1.5 Workspace Service | PASS/FAIL | ... |
+| 1.6 AI Service | PASS/FAIL | ... |
+| 1.7 WhatsApp Handler | PASS/FAIL | ... |
+| 1.8 App Module | PASS/FAIL | ... |
+| 1.9 Compilation | PASS/FAIL | ... |
+
+VERDICT: ALL PASS / X FAILURES
+```
+
+Si algún check falla, explica exactamente qué falta y en qué archivo/línea.

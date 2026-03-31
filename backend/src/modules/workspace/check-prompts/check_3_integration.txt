@@ -1,0 +1,105 @@
+# CHECK 3 — Integration Verification (Workspace Personalization)
+# Corre este prompt en otra ventana de Cursor con el workspace abierto.
+# Modo: Ask mode (read-only). Verificación por lectura de código.
+
+Eres un verificador de integración. Tu trabajo es leer el código y verificar que el flujo end-to-end funciona correctamente — desde que llega un mensaje de WhatsApp hasta que se guarda la configuración y se inyecta al LLM.
+
+## Flujo esperado
+
+```
+Mensaje WhatsApp ("cobro 800 de plomería por visita")
+  ↓
+whatsapp-provider.handler.ts → handleAiConversation()
+  ↓ carga workspace context de Redis/DB
+  ↓ pasa workspaceContext a processMessage()
+  ↓
+ai.service.ts → processMessage()
+  ↓ buildSystemPrompt(workspaceContext)
+  ↓   → incluye perfil del proveedor en el prompt
+  ↓   → incluye configurar_perfil como intent válido
+  ↓ LLM responde: { intent: "configurar_perfil", data: { action: "add_service", ... } }
+  ↓
+handleAiConversation() → switch → case CONFIGURAR_PERFIL
+  ↓ handleConfigurarPerfil()
+  ↓
+workspace.service.ts → applyConfig()
+  ↓ modifica JSON en WorkspaceProfile
+  ↓ escribe a PostgreSQL
+  ↓ invalida cache Redis
+  ↓
+Respuesta de confirmación → WhatsApp
+```
+
+## Checks
+
+### CHECK 3.1 — Flow: Message → Workspace Context → LLM
+Lee `whatsapp-provider.handler.ts`, método `handleAiConversation`. Verifica que:
+- [ ] Antes de llamar a `aiService.processMessage()`, carga el workspace context con `workspaceService.getWorkspaceContext()`
+- [ ] El workspace context se pasa como argumento a `processMessage()`
+- [ ] Si falla la carga del workspace, NO bloquea el flujo (try/catch con warn log)
+
+### CHECK 3.2 — Flow: LLM System Prompt includes Workspace
+Lee `ai.service.ts`, funciones `buildSystemPrompt` y `buildWorkspaceSection`. Verifica que:
+- [ ] `buildSystemPrompt(workspaceContext)` pasa el context a `buildWorkspaceSection()`
+- [ ] `buildWorkspaceSection()` genera texto con servicios, horarios, auto-reply y notas
+- [ ] Si no hay workspace context (undefined), retorna string vacío — no rompe el prompt
+- [ ] Si el workspace está vacío (services=[], schedule={}, etc.), retorna string vacío
+
+### CHECK 3.3 — Flow: Intent Detection → Handler
+Lee ambos archivos. Verifica que:
+- [ ] El system prompt lista `configurar_perfil` como intent válido con ejemplos naturales
+- [ ] El prompt especifica el formato de `data` para cada action del intent
+- [ ] `parseAiResponse()` validará el intent contra `Object.values(AiIntent)` — y `CONFIGURAR_PERFIL` está en el enum
+- [ ] El switch en `handleAiConversation` tiene `case AiIntent.CONFIGURAR_PERFIL`
+- [ ] El case llama a `handleConfigurarPerfil(phone, aiResponse, providerProfileId)`
+
+### CHECK 3.4 — Flow: Handler → Service → DB → Cache
+Lee `whatsapp-provider.handler.ts` método `handleConfigurarPerfil` y `workspace.service.ts` método `applyConfig`. Verifica:
+- [ ] `handleConfigurarPerfil` valida que exista `providerProfileId`
+- [ ] Si `configData.action` es undefined, envía `aiResponse.message` como fallback
+- [ ] `applyConfig` lee el workspace actual antes de modificar
+- [ ] Después de cada update a DB, invalida Redis cache
+- [ ] Retorna `confirmationMessage` que se envía por WhatsApp
+
+### CHECK 3.5 — Flow: Keywords → Summary
+Lee `whatsapp-provider.handler.ts`, sección de keywords. Verifica:
+- [ ] Keywords `'mis servicios'`, `'mi negocio'`, `'mi workspace'`, `'configuracion'` están registradas
+- [ ] Se ejecutan ANTES del routing a AI (para evitar consumir tokens del LLM)
+- [ ] Llaman a `workspaceService.getWorkspaceSummary()`
+- [ ] El summary incluye servicios, horarios, auto-reply, notas, y un mensaje de ayuda al final
+
+### CHECK 3.6 — Cache Strategy
+Lee `workspace.service.ts`. Verifica la coherencia del cache:
+- [ ] `getWorkspace()` lee Redis primero, luego DB
+- [ ] Si no existe en DB, crea un workspace vacío
+- [ ] Después de leer de DB, popula Redis con TTL 86400
+- [ ] `applyConfig()` escribe a DB y luego invalida Redis
+- [ ] El próximo `getWorkspace()` después de un update irá a DB (cache miss) y repopulará
+
+### CHECK 3.7 — No Regressions
+Verifica que los intents existentes NO fueron afectados:
+- [ ] `processMessage()` sigue aceptando la firma anterior (providerPhone, userMessage, providerName) — el 5to param es opcional
+- [ ] El switch de intents no cambió el handling de REGISTRAR_INGRESO, VER_RESUMEN, AGENDAR_CITA, VER_AGENDA, CONFIRMAR_CLIENTE
+- [ ] El default case sigue enviando `aiResponse.message` directamente
+- [ ] El keyword `'perfil'` sigue mapeando a `sendAccountInfo` (no se sobreescribió)
+
+## Formato de reporte
+
+```
+## Workspace Personalization — Integration Verification Report
+Date: [fecha]
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| 3.1 Message → Context → LLM | PASS/FAIL | ... |
+| 3.2 System Prompt includes Workspace | PASS/FAIL | ... |
+| 3.3 Intent Detection → Handler | PASS/FAIL | ... |
+| 3.4 Handler → Service → DB → Cache | PASS/FAIL | ... |
+| 3.5 Keywords → Summary | PASS/FAIL | ... |
+| 3.6 Cache Strategy | PASS/FAIL | ... |
+| 3.7 No Regressions | PASS/FAIL | ... |
+
+VERDICT: ALL PASS / X FAILURES
+```
+
+Si algún check falla, explica exactamente qué parte del flujo está rota y sugiere el fix.

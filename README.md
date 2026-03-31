@@ -1,95 +1,101 @@
-# Ubermench — Service Marketplace Platform
+# Ubermench
 
-A comprehensive service marketplace that connects customers with trusted local service providers (plumbing, electrical, cleaning, gardening, repair, and more). Available in two versions:
+AI Business Assistant para trabajadores de oficios independientes en México.
+Asistente de negocios por WhatsApp: ingresos, agenda, cobros, CRM.
 
-## 📁 Project Structure
+## Estructura
 
 ```
 ubermench/
-├── mobile/          # Flutter/Dart cross-platform mobile app
-├── whatsapp/        # WhatsApp-based "light" version
-└── README.md        # You are here
+├── backend/        API principal (NestJS + TypeScript + Prisma + PostgreSQL)
+├── web/            Dashboard del provider (Next.js) — en desarrollo
+├── scripts/        Utilidades (start-db.js)
+├── _archive/       Prototipos anteriores preservados (no activos)
+└── docker-compose.yml
 ```
 
----
+## Stack activo
 
-## 📱 Mobile App (`mobile/`)
+- **Backend**: NestJS, PostgreSQL, Prisma, Redis, BullMQ
+- **Frontend**: Next.js (App Router)
+- **Mensajería**: WhatsApp Cloud API
+- **AI**: OpenAI (gpt-4o-mini), intent detection, contexto conversacional
 
-A full-featured cross-platform mobile application built with **Flutter (Dart)**.
+## Levantar el proyecto (primera vez)
 
-### Tech Stack
-- **Flutter** — Cross-platform UI (iOS + Android)
-- **Riverpod** — State management
-- **Firebase** — Authentication, push notifications
-- **Google Maps** — Location services and tracking
-- **Go Router** — Navigation
-- **Hive** — Local storage
-
-### Getting Started
 ```bash
-cd mobile
-flutter pub get
-flutter run
+# 1. Instalar dependencias
+cd backend && npm install
+cd ../web && npm install
+cd ..
+
+# 2. Configurar variables de entorno
+cp backend/.env.example backend/.env
+# Editar backend/.env con tus credenciales (ver comentarios en el archivo)
+
+# 3. Levantar PostgreSQL (elegir UNA opción)
+# Opción A — PostgreSQL embebida (sin instalar nada):
+node scripts/start-db.js    # Deja corriendo en esta terminal
+
+# Opción B — Docker (también levanta Redis):
+docker-compose up -d
+# Si usas Docker, cambia DATABASE_URL en .env (ver instrucciones en .env.example)
+
+# 4. Aplicar migraciones y seed (en otra terminal)
+cd backend
+npx prisma migrate dev
+npm run db:seed              # Datos iniciales (categorías, zonas, admin)
+# npm run db:seed:demo       # (Opcional) Datos demo realistas para CDMX
+
+# 5. Arrancar backend (puerto 3000)
+npm run start:dev
+
+# 6. Arrancar frontend (en otra terminal, puerto 3001)
+cd web && npm run dev
 ```
 
-> See [`mobile/`](./mobile/) for full details.
+## Levantar el proyecto (ya configurado)
 
----
-
-## 💬 WhatsApp Edition (`whatsapp/`)
-
-A "light" version of the platform that runs entirely through **WhatsApp**, powered by the [Meta WhatsApp Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api). Inspired by platforms like [MiChamba](https://www.michamba.ai/).
-
-### How It Works
-
-**For Customers:**
-1. Message the bot on WhatsApp → Select a service category
-2. Browse providers with ratings and reviews
-3. Book a provider → Chat directly with them
-4. Rate the provider after the service is completed
-
-**For Providers:**
-1. Register via WhatsApp → Set services and bio
-2. Receive customer request notifications
-3. Accept/decline requests → Chat with customer
-4. Get rated after completing the service
-
-### Tech Stack
-- **Node.js + Express** — Backend API & webhook handler
-- **WhatsApp Cloud API** — Messaging interface (interactive lists, buttons, media)
-- **PostgreSQL** — Database (SQLite for development)
-- **Redis** — Session management & caching
-- **Knex.js** — Query builder & migrations
-- **Docker** — Containerized infrastructure
-
-### Getting Started
 ```bash
-cd whatsapp/backend
-npm install
-cp env.example .env    # Configure your environment
-npm run dev
+node scripts/start-db.js           # Terminal 1: DB
+cd backend && npm run start:dev    # Terminal 2: API
+cd web && npm run dev              # Terminal 3: Web
 ```
 
-> See [`whatsapp/milestone.md`](./whatsapp/milestone.md) for the full development roadmap and milestones.
+## Para desarrollo con WhatsApp
 
----
-
-## 🛠️ Development
-
-### Prerequisites
-- **Mobile:** Flutter SDK (>=3.0.0), Firebase project
-- **WhatsApp:** Node.js (>=18.0.0), Meta Developer account, PostgreSQL, Redis
-
-### Repository Workflow
-Each change should be committed with a descriptive message referencing the milestone:
 ```bash
-git add -A
-git commit -m "M1: Add WhatsApp webhook endpoint and message service"
-git push origin main
+# Necesitas exponer el backend para recibir webhooks de Meta
+ngrok http 3000
+# Configura la URL de ngrok en Meta for Developers → WhatsApp → Webhook
 ```
 
----
+## URLs útiles (en dev)
 
-## 📄 License
+| URL | Qué es |
+|-----|--------|
+| http://localhost:3000/api/docs | Swagger / documentación API |
+| http://localhost:3000/api/health | Health check |
+| http://localhost:3000/api/health/whatsapp | Estado del token de WhatsApp |
+| http://localhost:3001 | Dashboard web |
+| http://localhost:3001/admin | Panel de administración |
 
-This project is licensed under the MIT License.
+## Qué funciona sin credenciales externas
+
+| Servicio | Sin credenciales |
+|----------|-----------------|
+| PostgreSQL | Requiere DB (embebida o Docker) |
+| Redis | Fallback a in-memory (funcional para dev) |
+| WhatsApp | Recibe webhooks, pero no envía mensajes |
+| OpenAI | Responde con mensaje fallback genérico |
+| Cloudinary | Retorna URL placeholder (no truena) |
+| Firebase | Push notifications deshabilitadas |
+
+## Módulos del backend
+
+Los módulos activos viven en `backend/src/modules/`.
+Los módulos del modelo marketplace anterior están en `backend/src/modules/_marketplace/` (preservados, no activos en el nuevo roadmap).
+
+## Documentación estratégica
+
+Los documentos de estrategia, roadmap del pivot, y plan de ejecución viven en el repositorio `ubermench-docs`.

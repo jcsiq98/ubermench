@@ -1,0 +1,35 @@
+# ── Database ──
+# Local: postgresql://handy:handy_dev@localhost:5432/handy_dev?schema=public
+# Neon:  postgresql://neondb_owner:xxx@ep-xxx.us-east-2.aws.neon.tech/handy_prod?sslmode=require
+DATABASE_URL="postgresql://handy:handy_dev@localhost:5432/handy_dev?schema=public"
+
+# ── Redis ──
+# Local:   redis://localhost:6379
+# Upstash: rediss://default:xxx@xxx.upstash.io:6379
+# Empty = uses in-memory fallback (fine for dev)
+REDIS_URL=""
+
+# ── Backend ──
+PORT=3000
+NODE_ENV=development
+JWT_SECRET=change-me-to-a-random-secret
+JWT_REFRESH_SECRET=change-me-to-another-random-secret
+OTP_EXPIRY_MINUTES=5
+
+# ── WhatsApp Cloud API ──
+WHATSAPP_TOKEN=your_permanent_system_user_token
+WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id
+WHATSAPP_VERIFY_TOKEN=handy-2026-verify
+WHATSAPP_API_URL=https://graph.facebook.com/v21.0
+
+# ── AI / LLM ──
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-4o-mini
+
+# ── Frontend ──
+# Local:      http://localhost:3001
+# Production: https://your-app.railway.app
+FRONTEND_URL=http://localhost:3001
+
+# ── Frontend env (set in Vercel) ──
+# NEXT_PUBLIC_API_URL=https://your-app.railway.app

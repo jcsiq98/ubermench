@@ -1,0 +1,240 @@
+# CHECK 2 — Logic Verification (Workspace Personalization)
+# Corre este prompt en otra ventana de Cursor con el workspace abierto.
+# Modo: Agent mode. Este check ejecuta código para verificar la lógica.
+
+Eres un verificador de lógica. Tu trabajo es verificar que el WorkspaceService funciona correctamente creando y corriendo un script de prueba. Sigue estos pasos EXACTAMENTE:
+
+## Paso 1 — Crear script de prueba
+
+Crea el archivo `backend/src/modules/workspace/workspace-verify.ts` con el siguiente contenido. Este script prueba la lógica del servicio directamente contra la DB:
+
+```typescript
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
+
+async function verify() {
+  const results: { test: string; status: 'PASS' | 'FAIL'; detail: string }[] = [];
+
+  try {
+    // Setup: ensure we have a test provider
+    const testUser = await prisma.user.upsert({
+      where: { phone: '+5200000000000' },
+      update: {},
+      create: {
+        phone: '+5200000000000',
+        name: 'Test Workspace Provider',
+        role: 'PROVIDER',
+      },
+    });
+
+    const testProvider = await prisma.providerProfile.upsert({
+      where: { userId: testUser.id },
+      update: {},
+      create: {
+        userId: testUser.id,
+        serviceTypes: ['plomería'],
+      },
+    });
+
+    // ── TEST 1: Create empty workspace ──
+    const created = await prisma.workspaceProfile.create({
+      data: {
+        providerId: testProvider.id,
+        services: [],
+        schedule: {},
+        autoReply: { enabled: false, message: '' },
+      },
+    });
+    results.push({
+      test: 'Create empty workspace',
+      status: created.id ? 'PASS' : 'FAIL',
+      detail: `Created with id: ${created.id}`,
+    });
+
+    // ── TEST 2: Unique constraint on providerId ──
+    try {
+      await prisma.workspaceProfile.create({
+        data: {
+          providerId: testProvider.id,
+          services: [],
+          schedule: {},
+          autoReply: { enabled: false, message: '' },
+        },
+      });
+      results.push({
+        test: 'Unique constraint on providerId',
+        status: 'FAIL',
+        detail: 'Should have thrown unique constraint error',
+      });
+    } catch (e: any) {
+      results.push({
+        test: 'Unique constraint on providerId',
+        status: e.code === 'P2002' ? 'PASS' : 'FAIL',
+        detail: `Error code: ${e.code}`,
+      });
+    }
+
+    // ── TEST 3: Update services (JSON field) ──
+    const updated = await prisma.workspaceProfile.update({
+      where: { providerId: testProvider.id },
+      data: {
+        services: [
+          { name: 'plomería', price: 800, unit: 'visita' },
+          { name: 'electricidad', price: 600, unit: 'hora' },
+        ],
+      },
+    });
+    const services = updated.services as any[];
+    results.push({
+      test: 'Update services JSON',
+      status: services.length === 2 && services[0].price === 800 ? 'PASS' : 'FAIL',
+      detail: `Services count: ${services.length}, first price: ${services[0]?.price}`,
+    });
+
+    // ── TEST 4: Update schedule (JSON field) ──
+    const scheduleUpdate = await prisma.workspaceProfile.update({
+      where: { providerId: testProvider.id },
+      data: {
+        schedule: {
+          days: ['lunes', 'martes', 'miércoles', 'jueves', 'viernes'],
+          timeStart: '08:00',
+          timeEnd: '18:00',
+        },
+      },
+    });
+    const sched = scheduleUpdate.schedule as any;
+    results.push({
+      test: 'Update schedule JSON',
+      status: sched.days?.length === 5 && sched.timeStart === '08:00' ? 'PASS' : 'FAIL',
+      detail: `Days: ${sched.days?.length}, start: ${sched.timeStart}`,
+    });
+
+    // ── TEST 5: Update autoReply (JSON field) ──
+    const arUpdate = await prisma.workspaceProfile.update({
+      where: { providerId: testProvider.id },
+      data: {
+        autoReply: { enabled: true, message: 'Les llamo en una hora' },
+      },
+    });
+    const ar = arUpdate.autoReply as any;
+    results.push({
+      test: 'Update autoReply JSON',
+      status: ar.enabled === true && ar.message === 'Les llamo en una hora' ? 'PASS' : 'FAIL',
+      detail: `enabled: ${ar.enabled}, message: "${ar.message}"`,
+    });
+
+    // ── TEST 6: Update notes ──
+    const notesUpdate = await prisma.workspaceProfile.update({
+      where: { providerId: testProvider.id },
+      data: { notes: 'Tengo camioneta propia' },
+    });
+    results.push({
+      test: 'Update notes',
+      status: notesUpdate.notes === 'Tengo camioneta propia' ? 'PASS' : 'FAIL',
+      detail: `notes: "${notesUpdate.notes}"`,
+    });
+
+    // ── TEST 7: Cascade delete ──
+    await prisma.workspaceProfile.delete({
+      where: { providerId: testProvider.id },
+    });
+    const afterDelete = await prisma.workspaceProfile.findUnique({
+      where: { providerId: testProvider.id },
+    });
+    results.push({
+      test: 'Delete workspace',
+      status: afterDelete === null ? 'PASS' : 'FAIL',
+      detail: `Workspace after delete: ${afterDelete}`,
+    });
+
+    // ── TEST 8: Relation from ProviderProfile ──
+    await prisma.workspaceProfile.create({
+      data: {
+        providerId: testProvider.id,
+        services: [{ name: 'test', price: 100, unit: 'visita' }],
+        schedule: {},
+        autoReply: { enabled: false, message: '' },
+      },
+    });
+    const providerWithWs = await prisma.providerProfile.findUnique({
+      where: { id: testProvider.id },
+      include: { workspaceProfile: true },
+    });
+    results.push({
+      test: 'Relation from ProviderProfile',
+      status: providerWithWs?.workspaceProfile?.id ? 'PASS' : 'FAIL',
+      detail: `Has workspace: ${!!providerWithWs?.workspaceProfile}`,
+    });
+
+    // Cleanup
+    await prisma.workspaceProfile.deleteMany({ where: { providerId: testProvider.id } });
+    await prisma.providerProfile.delete({ where: { id: testProvider.id } });
+    await prisma.user.delete({ where: { id: testUser.id } });
+
+  } catch (error: any) {
+    results.push({
+      test: 'UNEXPECTED ERROR',
+      status: 'FAIL',
+      detail: error.message,
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+
+  // Report
+  console.log('\n══════════════════════════════════════════════');
+  console.log(' Workspace Personalization — Logic Verification');
+  console.log('══════════════════════════════════════════════\n');
+
+  let failures = 0;
+  for (const r of results) {
+    const icon = r.status === 'PASS' ? '✅' : '❌';
+    console.log(`${icon} ${r.test}: ${r.status} — ${r.detail}`);
+    if (r.status === 'FAIL') failures++;
+  }
+
+  console.log(`\n──────────────────────────────────────────────`);
+  console.log(`TOTAL: ${results.length} tests, ${results.length - failures} passed, ${failures} failed`);
+  console.log(`VERDICT: ${failures === 0 ? 'ALL PASS ✅' : `${failures} FAILURES ❌`}`);
+  console.log('──────────────────────────────────────────────\n');
+
+  process.exit(failures > 0 ? 1 : 0);
+}
+
+verify();
+```
+
+## Paso 2 — Ejecutar
+
+```bash
+cd backend && npx ts-node --compiler-options '{"module":"commonjs"}' src/modules/workspace/workspace-verify.ts
+```
+
+## Paso 3 — Reportar
+
+Muestra la tabla de resultados completa. Si hay failures, investiga la causa y repórtala.
+
+## Paso 4 — Limpiar
+
+Elimina el archivo `workspace-verify.ts` después de correr el test. No debe quedar en el codebase.
+
+## Formato de reporte final
+
+```
+## Workspace Personalization — Logic Verification Report
+Date: [fecha]
+
+| Test | Status | Detail |
+|------|--------|--------|
+| Create empty workspace | PASS/FAIL | ... |
+| Unique constraint | PASS/FAIL | ... |
+| Update services | PASS/FAIL | ... |
+| Update schedule | PASS/FAIL | ... |
+| Update autoReply | PASS/FAIL | ... |
+| Update notes | PASS/FAIL | ... |
+| Delete workspace | PASS/FAIL | ... |
+| Relation from Provider | PASS/FAIL | ... |
+
+VERDICT: ALL PASS / X FAILURES
+```
