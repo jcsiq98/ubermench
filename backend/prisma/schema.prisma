@@ -79,7 +79,8 @@ model ProviderProfile {
   user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   bookings         Booking[]             @relation("ProviderBookings")
   incomes          Income[]
-  expenses         Expense[]
+  expenses           Expense[]
+  recurringExpenses  RecurringExpense[]
   appointments     Appointment[]
   serviceZones     ProviderServiceZone[]
   trustScore       TrustScore?
@@ -177,6 +178,29 @@ model Expense {
   @@index([providerId, date])
   @@index([date])
   @@map("expenses")
+}
+
+// ──────────────────────────────────────────────
+// Recurring Expenses (automatic monthly/weekly)
+// ──────────────────────────────────────────────
+model RecurringExpense {
+  id              String   @id @default(uuid())
+  providerId      String   @map("provider_id")
+  amount          Decimal  @db.Decimal(12, 2)
+  category        String?
+  description     String
+  frequency       String   @default("monthly") // "monthly" | "weekly"
+  dayOfMonth      Int?     @default(1) @map("day_of_month")
+  isActive        Boolean  @default(true) @map("is_active")
+  nextDueDate     DateTime @map("next_due_date")
+  lastProcessedAt DateTime? @map("last_processed_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@index([isActive, nextDueDate])
+  @@map("recurring_expenses")
 }
 
 // ──────────────────────────────────────────────

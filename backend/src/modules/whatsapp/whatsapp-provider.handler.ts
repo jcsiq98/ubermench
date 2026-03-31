@@ -12,6 +12,7 @@ import { AiContextService } from '../ai/ai-context.service';
 import { AiIntent, WorkspaceConfigData } from '../ai/ai.types';
 import { IncomeService } from '../income/income.service';
 import { ExpenseService } from '../expense/expense.service';
+import { RecurringExpenseService } from '../expense/recurring-expense.service';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { BookingStatus, PaymentMethod } from '@prisma/client';
@@ -61,6 +62,7 @@ export class WhatsAppProviderHandler {
     private aiContextService: AiContextService,
     private incomeService: IncomeService,
     private expenseService: ExpenseService,
+    private recurringExpenseService: RecurringExpenseService,
     private appointmentsService: AppointmentsService,
     private workspaceService: WorkspaceService,
   ) {}
@@ -513,6 +515,9 @@ export class WhatsAppProviderHandler {
         case AiIntent.REGISTRAR_GASTO:
           return this.handleRegistrarGasto(phone, aiResponse.data, providerProfileId);
 
+        case AiIntent.GESTIONAR_GASTO_RECURRENTE:
+          return this.handleGastoRecurrente(phone, aiResponse.data, providerProfileId);
+
         case AiIntent.VER_RESUMEN:
           return this.handleVerResumen(phone, aiResponse.data, providerProfileId);
 
@@ -673,6 +678,106 @@ export class WhatsAppProviderHandler {
         '❌ No se pudo registrar el gasto. Intenta de nuevo.',
       );
     }
+  }
+
+  // ─── Recurring Expense: gestionar gasto recurrente ──────
+
+  private async handleGastoRecurrente(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.whatsapp.sendTextMessage(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
+      return;
+    }
+
+    const action = data?.action;
+
+    if (action === 'list' || !action) {
+      const expenses = await this.recurringExpenseService.listActive(providerProfileId);
+      const msg = this.recurringExpenseService.formatRecurringList(expenses);
+      await this.whatsapp.sendTextMessage(phone, msg);
+      return;
+    }
+
+    if (action === 'cancel') {
+      const description = data?.description;
+      if (!description) {
+        await this.whatsapp.sendTextMessage(
+          phone,
+          '🤔 ¿Cuál gasto recurrente quieres cancelar? Dime el nombre.',
+        );
+        return;
+      }
+
+      const cancelled = await this.recurringExpenseService.cancel(
+        providerProfileId,
+        description,
+      );
+
+      if (cancelled) {
+        await this.whatsapp.sendTextMessage(
+          phone,
+          `✅ Cancelé el gasto recurrente de *${description}*.`,
+        );
+      } else {
+        await this.whatsapp.sendTextMessage(
+          phone,
+          `🤔 No encontré un gasto recurrente activo con "${description}". Escribe *"mis gastos fijos"* para ver los que tienes.`,
+        );
+      }
+      return;
+    }
+
+    if (action === 'create') {
+      const amount = data?.amount;
+      if (!amount || typeof amount !== 'number' || amount <= 0) {
+        await this.whatsapp.sendTextMessage(
+          phone,
+          '🤔 No pude detectar el monto. ¿Cuánto es el gasto recurrente?\n\nEjemplo: *"Gasto fijo de 500 de Railway cada mes"*',
+        );
+        return;
+      }
+
+      const description = data?.description || 'Gasto recurrente';
+
+      try {
+        const recurring = await this.recurringExpenseService.create({
+          providerId: providerProfileId,
+          amount,
+          category: data?.category,
+          description,
+          frequency: data?.frequency || 'monthly',
+          dayOfMonth: data?.dayOfMonth,
+        });
+
+        const freq = recurring.frequency === 'monthly' ? 'mensual' : 'semanal';
+        const day = recurring.frequency === 'monthly' && recurring.dayOfMonth
+          ? ` (día ${recurring.dayOfMonth})`
+          : '';
+
+        await this.whatsapp.sendTextMessage(
+          phone,
+          `✅ *¡Gasto recurrente creado!*\n\n💸 *$${amount.toLocaleString('es-MX')}* — ${description}\n🔄 ${freq}${day}\n\nSe registrará automáticamente cada ${freq === 'mensual' ? 'mes' : 'semana'}. Para cancelarlo, dime *"cancela el gasto de ${description}"*.`,
+        );
+      } catch (error: any) {
+        this.logger.error(`Error creating recurring expense: ${error.message}`);
+        await this.whatsapp.sendTextMessage(
+          phone,
+          '❌ No se pudo crear el gasto recurrente. Intenta de nuevo.',
+        );
+      }
+      return;
+    }
+
+    await this.whatsapp.sendTextMessage(
+      phone,
+      '🤔 No entendí qué quieres hacer con gastos recurrentes. Puedes:\n\n• *Crear*: "Gasto fijo de 500 de renta"\n• *Ver*: "Mis gastos fijos"\n• *Cancelar*: "Cancela el gasto de Netflix"',
+    );
   }
 
   // ─── Income: ver resumen ────────────────────────────────
