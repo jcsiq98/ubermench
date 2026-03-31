@@ -760,7 +760,7 @@ export class WhatsAppProviderHandler {
       return;
     }
 
-    if (action === 'update') {
+    if (action === 'update' || action === 'modify' || action === 'change' || action === 'edit') {
       const description = data?.description;
       if (!description) {
         await this.whatsapp.sendTextMessage(

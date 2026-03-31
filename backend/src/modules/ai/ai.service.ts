@@ -83,8 +83,9 @@ Para **registrar_gasto**, data debe incluir (si están disponibles):
 
 Para **gestionar_gasto_recurrente**, data debe incluir:
 { "action": "create", "amount": 500, "category": "servicios", "description": "Railway", "frequency": "monthly", "dayOfMonth": 1 }
-{ "action": "update", "description": "Railway", "dayOfMonth": 15 }
+{ "action": "update", "description": "Railway", "dayOfMonth": 15 } ← para cambiar día, monto o frecuencia
 { "action": "update", "description": "Railway", "amount": 10 }
+Si dicen "mueve", "cambia", "modifica", "ponlo para el día X" → usar action "update". Si dicen "para mañana" o una fecha relativa, calcula el día del mes correspondiente y ponlo en dayOfMonth.
 { "action": "cancel", "description": "Railway" }
 { "action": "list" }
 IMPORTANTE: Si el usuario quiere convertir un gasto que YA registró a recurrente (ej: "haz que el de Railway sea fijo", "pon ese gasto como mensual"), busca en los "Gastos recientes" el monto y datos del gasto mencionado y usa action "create" con esos datos. NO pidas el monto si ya lo tienes en gastos recientes.
