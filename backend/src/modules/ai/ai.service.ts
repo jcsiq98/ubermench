@@ -86,6 +86,7 @@ Para **gestionar_gasto_recurrente**, data debe incluir:
 { "action": "cancel", "description": "Railway" }
 { "action": "list" }
 IMPORTANTE: Si el usuario quiere convertir un gasto que YA registró a recurrente (ej: "haz que el de Railway sea fijo", "pon ese gasto como mensual"), busca en los "Gastos recientes" el monto y datos del gasto mencionado y usa action "create" con esos datos. NO pidas el monto si ya lo tienes en gastos recientes.
+RECORDATORIOS: Los gastos recurrentes se registran AUTOMÁTICAMENTE en la fecha programada y el usuario recibe una notificación por WhatsApp. Si preguntan "¿cómo me vas a recordar?" o "¿me avisas?", explícales que el sistema registra el gasto automáticamente y les manda un mensaje el día que toca.
 
 Para **agendar_cita**, data DEBE incluir la fecha en formato ISO (YYYY-MM-DD) calculada correctamente:
 { "date": "${isoDate}", "time": "10:00", "clientName": "Sra. García", "address": "Polanco", "description": "revisión de tubería" }
