@@ -111,6 +111,25 @@ model WorkspaceProfile {
 }
 
 // ──────────────────────────────────────────────
+// Conversation Log (permanent WhatsApp message history)
+// ──────────────────────────────────────────────
+model ConversationLog {
+  id        String   @id @default(uuid())
+  phone     String
+  role      String   // "user" | "assistant" | "system"
+  content   String   @db.Text
+  intent    String?  // detected intent (registrar_ingreso, agendar_cita, etc.)
+  metadata  Json?    // extra context: voice note, error, etc.
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([phone])
+  @@index([phone, createdAt])
+  @@index([createdAt])
+  @@index([intent])
+  @@map("conversation_logs")
+}
+
+// ──────────────────────────────────────────────
 // Income (provider earnings tracking)
 // ──────────────────────────────────────────────
 model Income {

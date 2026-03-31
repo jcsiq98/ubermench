@@ -254,12 +254,13 @@ export class AiService {
       // Parse JSON response
       const parsed = this.parseAiResponse(raw);
 
-      // Save to conversation history
-      await this.contextService.addMessage(providerPhone, 'user', userMessage);
+      // Save to conversation history (Redis for context + PostgreSQL for permanent log)
+      await this.contextService.addMessage(providerPhone, 'user', userMessage, parsed.intent);
       await this.contextService.addMessage(
         providerPhone,
         'assistant',
         parsed.message,
+        parsed.intent,
       );
 
       this.logger.log(
