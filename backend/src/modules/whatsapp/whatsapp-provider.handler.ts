@@ -1622,19 +1622,22 @@ export class WhatsAppProviderHandler {
   private async sendHelpMenu(phone: string) {
     await this.whatsapp.sendTextMessage(
       phone,
-      `❓ *Ayuda — Handy Proveedor*\n\n` +
-        `Cuando recibas una solicitud:\n` +
-        `✅ Toca *Aceptar* o escribe "aceptar"\n` +
-        `❌ Toca *Rechazar* o escribe "rechazar"\n\n` +
-        `Durante un trabajo:\n` +
-        `📍 *"en camino"* — Indicar que vas en camino\n` +
-        `🔧 *"empezar"* — Iniciar el trabajo\n` +
-        `✅ *"completar"* — Marcar como terminado\n\n` +
-        `General:\n` +
-        `📋 *"menu"* — Ver menú principal\n` +
-        `📊 *"dashboard"* — Ver tus estadísticas\n` +
-        `📝 *"trabajos"* — Ver tus trabajos recientes\n` +
-        `❓ *"ayuda"* — Ver este mensaje`,
+      `❓ *Ayuda — Handy*\n\n` +
+        `💰 *Finanzas:*\n` +
+        `  "Cobré 1,200 en efectivo" — registrar ingreso\n` +
+        `  "Gasté 200 en material" — registrar gasto\n` +
+        `  "Gasto fijo de 500 de renta" — crear gasto recurrente\n` +
+        `  "Cambia el gasto de Railway al día 15" — modificar\n` +
+        `  "Mis gastos fijos" — ver recurrentes\n` +
+        `  "¿Cómo voy esta semana?" — ver resumen\n\n` +
+        `📅 *Agenda:*\n` +
+        `  "Mañana a las 10 con la señora García" — agendar\n` +
+        `  "¿Qué tengo hoy?" — ver agenda\n\n` +
+        `⚙️ *Perfil:*\n` +
+        `  "Cobro 800 por visita" — configurar servicios\n` +
+        `  "Trabajo lunes a viernes de 8 a 6" — horarios\n` +
+        `  "Mis servicios" — ver tu perfil\n\n` +
+        `🔄 *"reset"* — limpiar historial de conversación`,
     );
   }
 
