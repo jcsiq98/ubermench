@@ -46,7 +46,7 @@ Fecha ISO de hoy: ${isoDate}
 Puedes entender y responder a estas intenciones:
 1. **registrar_ingreso** — cuando el usuario dice cuánto cobró (ej: "cobré 1,200", "me pagaron 500 por una fuga", "hoy gané 3 mil")
 2. **registrar_gasto** — cuando el usuario dice cuánto gastó UNA VEZ (ej: "gasté 200 en material", "pagué 500 de gasolina", "me salió 150 el uber")
-3. **gestionar_gasto_recurrente** — cuando el usuario habla de gastos FIJOS, RECURRENTES o MENSUALES (ej: "tengo un gasto fijo de 500 de Railway", "gasto 200 mensuales de gasolina", "cancela mi gasto recurrente de Netflix", "¿cuáles son mis gastos fijos?"). IMPORTANTE: si mencionan "fijo", "mensual", "recurrente", "cada mes", "cada semana" → usar este intent, NO registrar_gasto ni agendar_cita
+3. **gestionar_gasto_recurrente** — cuando el usuario habla de gastos FIJOS, RECURRENTES o MENSUALES (ej: "tengo un gasto fijo de 500 de Railway", "gasto 200 mensuales de gasolina", "cancela mi gasto recurrente de Netflix", "¿cuáles son mis gastos fijos?", "haz que el gasto de Railway sea fijo", "convierte mi gasto de X a recurrente"). IMPORTANTE: si mencionan "fijo", "mensual", "recurrente", "cada mes", "cada semana", o quieren CONVERTIR un gasto existente a recurrente → usar este intent, NO registrar_gasto ni agendar_cita. Si el usuario quiere convertir un gasto ya registrado, busca los datos (monto, categoría, descripción) en la sección "Gastos recientes" de abajo y usa action "create" con esos datos
 4. **ver_resumen** — cuando pregunta por sus finanzas, ganancias o gastos (ej: "¿cuánto llevo?", "resumen de la semana", "¿cómo voy este mes?", "¿cuánto he gastado?")
 5. **agendar_cita** — cuando menciona un TRABAJO futuro con fecha/hora (ej: "mañana tengo trabajo a las 10 en Polanco", "agenda para el jueves"). NO usar para gastos fijos
 6. **confirmar_cliente** — cuando quiere confirmar o contactar a un cliente (ej: "confírmale a la señora García", "mándale mensaje al cliente")
@@ -85,6 +85,7 @@ Para **gestionar_gasto_recurrente**, data debe incluir:
 { "action": "create", "amount": 500, "category": "servicios", "description": "Railway", "frequency": "monthly", "dayOfMonth": 1 }
 { "action": "cancel", "description": "Railway" }
 { "action": "list" }
+IMPORTANTE: Si el usuario quiere convertir un gasto que YA registró a recurrente (ej: "haz que el de Railway sea fijo", "pon ese gasto como mensual"), busca en los "Gastos recientes" el monto y datos del gasto mencionado y usa action "create" con esos datos. NO pidas el monto si ya lo tienes en gastos recientes.
 
 Para **agendar_cita**, data DEBE incluir la fecha en formato ISO (YYYY-MM-DD) calculada correctamente:
 { "date": "${isoDate}", "time": "10:00", "clientName": "Sra. García", "address": "Polanco", "description": "revisión de tubería" }
@@ -138,10 +139,28 @@ function buildWorkspaceSection(ctx?: WorkspaceContextDto): string {
     }
   }
 
+  if (ctx.recentExpenses && ctx.recentExpenses.length > 0) {
+    lines.push('\n## Gastos recientes del proveedor');
+    for (const e of ctx.recentExpenses) {
+      const cat = e.category ? ` (${e.category})` : '';
+      const desc = e.description || 'Sin descripción';
+      lines.push(`- $${e.amount}${cat} — ${desc} — ${e.date}`);
+    }
+  }
+
+  if (ctx.activeRecurringExpenses && ctx.activeRecurringExpenses.length > 0) {
+    lines.push('\n## Gastos recurrentes activos');
+    for (const e of ctx.activeRecurringExpenses) {
+      const freq = e.frequency === 'monthly' ? 'mensual' : 'semanal';
+      const day = e.dayOfMonth ? ` (día ${e.dayOfMonth})` : '';
+      lines.push(`- $${e.amount} — ${e.description} — ${freq}${day}`);
+    }
+  }
+
   if (lines.length === 1) return '';
 
   lines.push(
-    '\nUsa este contexto para personalizar tus respuestas. Si preguntan por precios, usa los del proveedor.',
+    '\nUsa este contexto para personalizar tus respuestas. Si preguntan por precios, usa los del proveedor. Si quieren convertir un gasto reciente a recurrente, usa los datos de "Gastos recientes".',
   );
 
   return lines.join('\n');

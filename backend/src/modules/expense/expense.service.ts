@@ -91,6 +91,20 @@ export class ExpenseService {
     return { period, total, count: expenses.length, byCategory };
   }
 
+  async getRecent(providerId: string, limit = 5) {
+    return this.prisma.expense.findMany({
+      where: { providerId },
+      orderBy: { date: 'desc' },
+      take: limit,
+      select: {
+        amount: true,
+        category: true,
+        description: true,
+        date: true,
+      },
+    });
+  }
+
   formatExpenseConfirmation(
     amount: number,
     category?: string,

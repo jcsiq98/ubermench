@@ -91,10 +91,26 @@ export interface WorkspaceAutoReply {
   message: string;
 }
 
+export interface RecentExpenseContext {
+  amount: number;
+  category?: string;
+  description?: string;
+  date: string; // ISO date
+}
+
+export interface ActiveRecurringContext {
+  amount: number;
+  description: string;
+  frequency: string;
+  dayOfMonth?: number | null;
+}
+
 export interface WorkspaceContextDto {
   services: WorkspaceService[];
   schedule: WorkspaceSchedule;
   autoReply: WorkspaceAutoReply;
   notes?: string | null;
   learnedFacts?: string[];
+  recentExpenses?: RecentExpenseContext[];
+  activeRecurringExpenses?: ActiveRecurringContext[];
 }

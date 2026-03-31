@@ -481,12 +481,31 @@ export class WhatsAppProviderHandler {
     const provider = await this.findProviderByPhone(phone);
     const providerProfileId = provider?.providerProfile?.id;
 
-    // Load workspace context for personalized AI responses
+    // Load workspace context + financial data for personalized AI responses
     let workspaceContext;
     if (providerProfileId) {
       try {
-        workspaceContext =
-          await this.workspaceService.getWorkspaceContext(providerProfileId);
+        const [wsCtx, recentExpenses, activeRecurring] = await Promise.all([
+          this.workspaceService.getWorkspaceContext(providerProfileId),
+          this.expenseService.getRecent(providerProfileId, 5),
+          this.recurringExpenseService.listActive(providerProfileId),
+        ]);
+
+        workspaceContext = {
+          ...wsCtx,
+          recentExpenses: recentExpenses.map((e) => ({
+            amount: Number(e.amount),
+            category: e.category ?? undefined,
+            description: e.description ?? undefined,
+            date: e.date.toISOString().split('T')[0],
+          })),
+          activeRecurringExpenses: activeRecurring.map((e) => ({
+            amount: Number(e.amount),
+            description: e.description,
+            frequency: e.frequency,
+            dayOfMonth: e.dayOfMonth,
+          })),
+        };
       } catch (err: any) {
         this.logger.warn(`Failed to load workspace context: ${err.message}`);
       }
