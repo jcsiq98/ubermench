@@ -32,6 +32,9 @@ export class WorkspaceService {
         message: '',
       },
       notes: workspace.notes,
+      learnedFacts: Array.isArray(workspace.learnedFacts)
+        ? (workspace.learnedFacts as string[])
+        : [],
     };
   }
 
@@ -216,6 +219,22 @@ export class WorkspaceService {
     );
 
     return lines.join('\n');
+  }
+
+  async updateLearnedFacts(
+    providerId: string,
+    facts: string[],
+  ): Promise<void> {
+    await this.prisma.workspaceProfile.update({
+      where: { providerId },
+      data: {
+        learnedFacts: facts as unknown as Prisma.InputJsonValue,
+      },
+    });
+    await this.invalidateCache(providerId);
+    this.logger.log(
+      `Learned facts updated for provider ${providerId}: ${facts.length} facts`,
+    );
   }
 
   private async invalidateCache(providerId: string): Promise<void> {

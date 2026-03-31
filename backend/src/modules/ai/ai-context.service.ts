@@ -8,6 +8,10 @@ const CONTEXT_PREFIX = 'ai_conv:';
 const CONTEXT_TTL = 3600; // 1 hour
 const MAX_MESSAGES = 20;
 
+const MEMORY_COUNTER_PREFIX = 'memory_counter:';
+const MEMORY_EXTRACTION_THRESHOLD = 10;
+const MEMORY_COUNTER_TTL = 86400; // 24 hours
+
 @Injectable()
 export class AiContextService {
   private readonly logger = new Logger(AiContextService.name);
@@ -65,5 +69,31 @@ export class AiContextService {
 
   async clearHistory(providerPhone: string): Promise<void> {
     await this.redis.del(`${CONTEXT_PREFIX}${providerPhone}`);
+  }
+
+  /**
+   * Increment message counter and return true when threshold is reached
+   * (signals it's time to extract learned facts).
+   */
+  async incrementAndCheckMemoryCounter(
+    providerPhone: string,
+  ): Promise<boolean> {
+    const key = `${MEMORY_COUNTER_PREFIX}${providerPhone}`;
+    const current = await this.redis.get(key);
+    const count = current ? parseInt(current, 10) : 0;
+    const next = count + 1;
+
+    if (next >= MEMORY_EXTRACTION_THRESHOLD) {
+      await this.redis.del(key);
+      return true;
+    }
+
+    if (count === 0) {
+      await this.redis.set(key, '1', MEMORY_COUNTER_TTL);
+    } else {
+      await this.redis.incr(key);
+    }
+
+    return false;
   }
 }

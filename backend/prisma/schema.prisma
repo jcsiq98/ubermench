@@ -99,8 +99,9 @@ model WorkspaceProfile {
 
   services   Json     @default("[]")
   schedule   Json     @default("{}")
-  autoReply  Json     @default("{\"enabled\":false,\"message\":\"\"}") @map("auto_reply")
-  notes      String?
+  autoReply     Json     @default("{\"enabled\":false,\"message\":\"\"}") @map("auto_reply")
+  notes         String?
+  learnedFacts  Json     @default("[]") @map("learned_facts")
 
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")

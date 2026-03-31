@@ -86,4 +86,5 @@ export interface WorkspaceContextDto {
   schedule: WorkspaceSchedule;
   autoReply: WorkspaceAutoReply;
   notes?: string | null;
+  learnedFacts?: string[];
 }

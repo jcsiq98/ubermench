@@ -8,6 +8,7 @@ import { BookingsGateway } from '../_marketplace/bookings/bookings.gateway';
 import { MessagesService } from '../_marketplace/messages/messages.service';
 import { RatingsService } from '../_marketplace/ratings/ratings.service';
 import { AiService } from '../ai/ai.service';
+import { AiContextService } from '../ai/ai-context.service';
 import { AiIntent, WorkspaceConfigData } from '../ai/ai.types';
 import { IncomeService } from '../income/income.service';
 import { ExpenseService } from '../expense/expense.service';
@@ -57,6 +58,7 @@ export class WhatsAppProviderHandler {
     private ratingsService: RatingsService,
     private onboardingHandler: WhatsAppOnboardingHandler,
     private aiService: AiService,
+    private aiContextService: AiContextService,
     private incomeService: IncomeService,
     private expenseService: ExpenseService,
     private appointmentsService: AppointmentsService,
@@ -495,6 +497,14 @@ export class WhatsAppProviderHandler {
         providerName,
         workspaceContext,
       );
+
+      // Fire-and-forget: check if it's time to extract learned facts
+      if (providerProfileId) {
+        this.maybeExtractLearnedFacts(phone, providerProfileId, workspaceContext)
+          .catch((err) =>
+            this.logger.warn(`Learned facts extraction failed: ${err.message}`),
+          );
+      }
 
       switch (aiResponse.intent) {
         case AiIntent.REGISTRAR_INGRESO:
@@ -1615,6 +1625,37 @@ export class WhatsAppProviderHandler {
     await this.prisma.providerProfile.update({ where: { id: session.providerProfileId }, data: { bio: text } });
     await this.setSession(phone, { ...session, state: ProviderState.IDLE });
     await this.whatsapp.sendTextMessage(phone, `✅ Bio actualizada.\n\nEscribe *"menu"* para continuar.`);
+  }
+
+  // ─── Learned Memory extraction ─────────────────────────
+
+  private async maybeExtractLearnedFacts(
+    phone: string,
+    providerProfileId: string,
+    workspaceContext?: import('../ai/ai.types').WorkspaceContextDto,
+  ): Promise<void> {
+    const shouldExtract =
+      await this.aiContextService.incrementAndCheckMemoryCounter(phone);
+    if (!shouldExtract) return;
+
+    const history = await this.aiContextService.getHistory(phone);
+    if (history.length < 4) return;
+
+    const currentFacts = workspaceContext?.learnedFacts || [];
+    const newFacts = await this.aiService.extractLearnedFacts(
+      history,
+      currentFacts,
+    );
+
+    if (
+      JSON.stringify(newFacts) !== JSON.stringify(currentFacts) &&
+      newFacts.length > 0
+    ) {
+      await this.workspaceService.updateLearnedFacts(
+        providerProfileId,
+        newFacts,
+      );
+    }
   }
 
   // ─── Helpers ─────────────────────────────────────────────

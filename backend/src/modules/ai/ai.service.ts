@@ -3,7 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { RedisService } from '../../config/redis.service';
 import { AiContextService } from './ai-context.service';
-import { AiIntent, AiResponse, WorkspaceContextDto } from './ai.types';
+import {
+  AiIntent,
+  AiResponse,
+  ConversationMessage,
+  WorkspaceContextDto,
+} from './ai.types';
 
 const RATE_LIMIT_PREFIX = 'ai_rate:';
 const RATE_LIMIT_MAX = 30;
@@ -115,6 +120,16 @@ function buildWorkspaceSection(ctx?: WorkspaceContextDto): string {
 
   if (ctx.notes) {
     lines.push(`- Notas: ${ctx.notes}`);
+  }
+
+  if (ctx.learnedFacts && ctx.learnedFacts.length > 0) {
+    lines.push('\n## Lo que sabes de este proveedor');
+    lines.push(
+      'Estos son datos que has aprendido de conversaciones anteriores. Úsalos para personalizar tus respuestas:',
+    );
+    for (const fact of ctx.learnedFacts) {
+      lines.push(`- ${fact}`);
+    }
   }
 
   if (lines.length === 1) return '';
@@ -338,6 +353,68 @@ export class AiService {
     } catch (err: any) {
       this.logger.error(`extractFromText failed: ${err.message}`);
       return null;
+    }
+  }
+
+  /**
+   * Analyze recent conversation history and extract/update learned facts about the provider.
+   * Returns an updated array of facts (max 30).
+   */
+  async extractLearnedFacts(
+    history: ConversationMessage[],
+    currentFacts: string[],
+  ): Promise<string[]> {
+    if (!this.client || history.length === 0) return currentFacts;
+
+    const conversationText = history
+      .map((m) => `${m.role === 'user' ? 'Proveedor' : 'Asistente'}: ${m.content}`)
+      .join('\n');
+
+    const prompt = `Analiza esta conversación entre un trabajador de oficios y su asistente de negocios.
+Extrae o actualiza facts útiles sobre el proveedor: patrones de pago, clientes frecuentes, zonas de trabajo, preferencias, hábitos, gastos recurrentes.
+
+Facts actuales del proveedor:
+${currentFacts.length > 0 ? currentFacts.map((f, i) => `${i + 1}. ${f}`).join('\n') : '(ninguno todavía)'}
+
+Conversación reciente:
+${conversationText}
+
+Reglas:
+- Máximo 30 facts en total
+- Solo facts que se puedan inferir con confianza de la conversación
+- Mantén facts existentes que sigan siendo válidos
+- Elimina facts que la conversación contradiga
+- Cada fact debe ser una oración corta y clara en español
+- NO incluyas información obvia que ya esté en el perfil de servicios/horarios
+- Responde SOLO con JSON válido: { "facts": ["fact1", "fact2", ...] }`;
+
+    try {
+      const completion = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          { role: 'system', content: prompt },
+        ],
+        response_format: { type: 'json_object' },
+        max_tokens: 500,
+        temperature: 0.3,
+      });
+
+      const raw = completion.choices[0]?.message?.content;
+      if (!raw) return currentFacts;
+
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.facts)) {
+        const trimmed = parsed.facts
+          .filter((f: unknown) => typeof f === 'string' && f.trim().length > 0)
+          .slice(0, 30);
+        this.logger.log(`Extracted ${trimmed.length} learned facts`);
+        return trimmed;
+      }
+
+      return currentFacts;
+    } catch (err: any) {
+      this.logger.error(`extractLearnedFacts failed: ${err.message}`);
+      return currentFacts;
     }
   }
 
