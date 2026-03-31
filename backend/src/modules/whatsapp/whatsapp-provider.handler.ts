@@ -270,6 +270,14 @@ export class WhatsAppProviderHandler {
     if (text === 'menu' || text === 'inicio') {
       return this.sendProviderDashboard(senderPhone, provider.name || senderName);
     }
+    if (text === 'reset' || text === 'limpiar historial' || text === 'limpiar') {
+      await this.aiContextService.clearHistory(senderPhone);
+      await this.whatsapp.sendTextMessage(
+        senderPhone,
+        '🔄 Historial de conversación limpiado. Puedes empezar de nuevo.',
+      );
+      return;
+    }
     if (text === 'dashboard' || text === 'estadisticas' || text === 'stats') {
       return this.sendDashboardStats(senderPhone, provider.providerProfile!.id);
     }
@@ -716,7 +724,7 @@ export class WhatsAppProviderHandler {
 
     const action = data?.action;
 
-    if (action === 'list' || !action) {
+    if (action === 'list') {
       const expenses = await this.recurringExpenseService.listActive(providerProfileId);
       const msg = this.recurringExpenseService.formatRecurringList(expenses);
       await this.whatsapp.sendTextMessage(phone, msg);

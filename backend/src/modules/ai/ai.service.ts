@@ -287,7 +287,7 @@ export class AiService {
         messages,
         response_format: { type: 'json_object' },
         max_tokens: 500,
-        temperature: 0.7,
+        temperature: 0.4,
       });
 
       const raw = completion.choices[0]?.message?.content;
