@@ -10,8 +10,6 @@ import { WhatsAppWeeklySummaryService } from './whatsapp-weekly-summary.service'
 import { BookingsModule } from '../_marketplace/bookings/bookings.module';
 import { MessagesModule } from '../_marketplace/messages/messages.module';
 import { RatingsModule } from '../_marketplace/ratings/ratings.module';
-import { ZonesModule } from '../zones/zones.module';
-import { OnboardingModule } from '../onboarding/onboarding.module';
 
 /**
  * WhatsApp integration module.
@@ -24,8 +22,6 @@ import { OnboardingModule } from '../onboarding/onboarding.module';
     BookingsModule, // To access BookingsGateway
     forwardRef(() => MessagesModule), // To save bridged messages
     RatingsModule, // For WA rating flow
-    ZonesModule, // For onboarding zone matching
-    OnboardingModule, // For verification token generation
   ],
   controllers: [WhatsAppController],
   providers: [
