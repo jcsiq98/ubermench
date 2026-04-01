@@ -56,7 +56,26 @@ data: { "amount": 1200, "description": "fuga en baño", "paymentMethod": "CASH|T
 Trigger: gastó UNA VEZ (no fijo, no recurrente, no mensual).
 data: { "amount": 200, "category": "material|herramienta|transporte|servicios|comida|otro", "description": "tubo de cobre" }
 
-### 3. gestionar_gasto_recurrente
+### 3. gestionar_gasto
+Trigger: borrar, eliminar, quitar un gasto ya registrado. También: corregir, editar, cambiar el monto de un gasto.
+NUNCA usar registrar_gasto ni gestionar_gasto_recurrente para borrar/editar gastos puntuales.
+
+data según action:
+
+**delete_last** — borrar el último gasto registrado:
+{ "action": "delete_last" }
+Trigger: "borra el último gasto", "elimina el último gasto", "quita el último gasto"
+
+**delete_by_description** — borrar un gasto por descripción o categoría:
+{ "action": "delete_by_description", "description": "material" }
+Trigger: "borra el gasto de material", "elimina el gasto de Railway", "quita el gasto de tubo"
+IMPORTANTE: Si el gasto aparece en "Gastos recientes", usa la descripción EXACTA de ahí. Si no aparece, usa lo que diga el usuario.
+
+**edit_last** — corregir el monto del último gasto:
+{ "action": "edit_last", "amount": 300 }
+Trigger: "el último gasto era 300, no 200", "corrige el gasto a 300", "el monto era 300"
+
+### 4. gestionar_gasto_recurrente (gastos FIJOS/recurrentes, no puntuales)
 Trigger: cualquier mención de gasto fijo, recurrente, mensual, semanal. También: convertir, mover, cambiar, modificar un gasto existente. Palabras clave: "fijo", "mensual", "recurrente", "cada mes", "cada semana", "mueve", "cambia", "modifica".
 NUNCA usar registrar_gasto ni agendar_cita para gastos fijos.
 
@@ -73,27 +92,28 @@ Si quieren convertir un gasto que ya existe en "Gastos recientes", usa los datos
 
 **cancel** — cancelar gasto recurrente:
 { "action": "cancel", "description": "Railway" }
+IMPORTANTE: Para cancel/update, usa la descripción EXACTA de "Gastos recurrentes activos". No parafrasees.
 
 **list** — ver gastos recurrentes activos:
 { "action": "list" }
 
 Sobre recordatorios: el sistema envía 3 notificaciones automáticas (8pm recordatorio, medianoche registro, 7am briefing). Si preguntan, explica esto.
 
-### 4. ver_resumen
+### 5. ver_resumen
 Trigger: cuánto llevo, resumen, cómo voy, cuánto he gastado/ganado.
 data: {}
 IMPORTANTE: Si el usuario ACABA de recibir un resumen y hace una pregunta de seguimiento ("por qué", "explícame", "desglose", "detalle", "no entiendo"), NO re-disparar ver_resumen. Usar conversacion_general y explicar usando los datos de "Gastos recientes" del contexto.
 
-### 5. agendar_cita
+### 6. agendar_cita
 Trigger: trabajo futuro con fecha/hora. NUNCA para gastos fijos.
 data: { "date": "YYYY-MM-DD", "time": "HH:MM", "clientName": "Sra. García", "address": "Polanco", "description": "revisión de tubería" }
 Hoy = ${isoDate}. "Mañana" = día siguiente. Siempre calcular la fecha ISO correcta.
 
-### 6. ver_agenda
+### 7. ver_agenda
 Trigger: qué tengo hoy, mis citas, mi agenda.
 data: {}
 
-### 7. configurar_perfil
+### 8. configurar_perfil
 Trigger: cambiar servicios, precios, horarios.
 data (según action):
 - { "action": "add_service", "serviceName": "plomería", "servicePrice": 800, "serviceUnit": "visita" }
@@ -101,15 +121,15 @@ data (según action):
 - { "action": "set_schedule", "days": ["lunes","martes","miércoles","jueves","viernes"], "timeStart": "08:00", "timeEnd": "18:00" }
 - { "action": "add_note", "note": "texto libre" }
 
-### 8. ayuda
+### 9. ayuda
 Trigger: ayuda, qué puedes hacer, help.
 data: {}
 
-### 9. confirmar_cliente
+### 10. confirmar_cliente
 Trigger: confirmar cita, contactar cliente.
 data: {}
 
-### 10. conversacion_general
+### 11. conversacion_general
 Cualquier cosa que no encaje arriba.
 data: {}
 
@@ -392,6 +412,58 @@ export class AiService {
       return JSON.parse(raw);
     } catch (err: any) {
       this.logger.error(`extractFromText failed: ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Match a user's natural language description to one of the provided options.
+   * Handles synonyms, paraphrases, and voice transcription errors.
+   * Returns the exact matching description or null if no confident match.
+   */
+  async matchToList(
+    userDescription: string,
+    options: string[],
+  ): Promise<string | null> {
+    if (!this.client || options.length === 0) return null;
+
+    const optionsList = options.map((o, i) => `${i + 1}. "${o}"`).join('\n');
+
+    try {
+      const completion = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          {
+            role: 'system',
+            content: `Eres un matcher. El usuario se refiere a un gasto de una lista. Identifica cuál es.
+
+Opciones:
+${optionsList}
+
+Reglas:
+- Si hay una coincidencia clara (sinónimos, paráfrasis, errores de transcripción), responde con la descripción EXACTA de la lista.
+- Si no hay coincidencia clara, responde null.
+- Responde SOLO con JSON: { "match": "descripción exacta" } o { "match": null }`,
+          },
+          { role: 'user', content: userDescription },
+        ],
+        response_format: { type: 'json_object' },
+        max_tokens: 80,
+        temperature: 0.1,
+      });
+
+      const raw = completion.choices[0]?.message?.content;
+      if (!raw) return null;
+
+      const parsed = JSON.parse(raw);
+      if (parsed.match && options.includes(parsed.match)) {
+        this.logger.log(`matchToList: "${userDescription}" → "${parsed.match}"`);
+        return parsed.match;
+      }
+
+      return null;
+    } catch (err: any) {
+      this.logger.error(`matchToList failed: ${err.message}`);
       return null;
     }
   }

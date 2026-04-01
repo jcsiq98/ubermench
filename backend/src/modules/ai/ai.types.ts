@@ -1,6 +1,7 @@
 export enum AiIntent {
   REGISTRAR_INGRESO = 'registrar_ingreso',
   REGISTRAR_GASTO = 'registrar_gasto',
+  GESTIONAR_GASTO = 'gestionar_gasto',
   GESTIONAR_GASTO_RECURRENTE = 'gestionar_gasto_recurrente',
   VER_RESUMEN = 'ver_resumen',
   AGENDAR_CITA = 'agendar_cita',
@@ -34,6 +35,12 @@ export interface ExpenseData {
   amount?: number;
   category?: string;
   description?: string;
+}
+
+export interface GestionarGastoData {
+  action: 'delete_last' | 'delete_by_description' | 'edit_last';
+  description?: string;
+  amount?: number;
 }
 
 export interface RecurringExpenseData {

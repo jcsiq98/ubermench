@@ -91,6 +91,65 @@ export class ExpenseService {
     return { period, total, count: expenses.length, byCategory };
   }
 
+  async deleteLast(providerId: string) {
+    const last = await this.prisma.expense.findFirst({
+      where: { providerId },
+      orderBy: { date: 'desc' },
+    });
+
+    if (!last) return null;
+
+    await this.prisma.expense.delete({ where: { id: last.id } });
+    this.logger.log(`Deleted last expense (${last.id}) for provider ${providerId}`);
+    return last;
+  }
+
+  async deleteByDescription(providerId: string, description: string) {
+    const expenses = await this.prisma.expense.findMany({
+      where: { providerId },
+      orderBy: { date: 'desc' },
+      take: 20,
+    });
+
+    const needle = description.toLowerCase();
+    const match = expenses.find((e) => {
+      const desc = (e.description || '').toLowerCase();
+      const cat = (e.category || '').toLowerCase();
+      return desc.includes(needle) || needle.includes(desc) ||
+             cat.includes(needle) || needle.includes(cat);
+    });
+
+    if (!match) return null;
+
+    await this.prisma.expense.delete({ where: { id: match.id } });
+    this.logger.log(`Deleted expense by description "${description}" (${match.id}) for provider ${providerId}`);
+    return match;
+  }
+
+  async editLast(providerId: string, updates: { amount?: number }) {
+    const last = await this.prisma.expense.findFirst({
+      where: { providerId },
+      orderBy: { date: 'desc' },
+    });
+
+    if (!last) return null;
+
+    const data: any = {};
+    if (updates.amount && updates.amount > 0) {
+      data.amount = new Prisma.Decimal(updates.amount);
+    }
+
+    if (Object.keys(data).length === 0) return null;
+
+    const updated = await this.prisma.expense.update({
+      where: { id: last.id },
+      data,
+    });
+
+    this.logger.log(`Edited last expense (${last.id}): amount → ${updates.amount} for provider ${providerId}`);
+    return { previous: last, updated };
+  }
+
   async getRecent(providerId: string, limit = 5) {
     return this.prisma.expense.findMany({
       where: { providerId },

@@ -513,6 +513,9 @@ export class WhatsAppProviderHandler {
         case AiIntent.REGISTRAR_GASTO:
           return this.handleRegistrarGasto(phone, aiResponse.data, providerProfileId);
 
+        case AiIntent.GESTIONAR_GASTO:
+          return this.handleGestionarGasto(phone, aiResponse.data, providerProfileId);
+
         case AiIntent.GESTIONAR_GASTO_RECURRENTE:
           return this.handleGastoRecurrente(phone, aiResponse.data, providerProfileId);
 
@@ -678,6 +681,133 @@ export class WhatsAppProviderHandler {
     }
   }
 
+  // ─── Expense: gestionar gasto (borrar/editar) ──────────
+
+  private async handleGestionarGasto(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.whatsapp.sendTextMessage(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
+      return;
+    }
+
+    const action = data?.action;
+
+    if (action === 'delete_last') {
+      try {
+        const deleted = await this.expenseService.deleteLast(providerProfileId);
+        if (deleted) {
+          const desc = deleted.description || deleted.category || 'Sin descripción';
+          await this.whatsapp.sendTextMessage(
+            phone,
+            `🗑️ *Gasto eliminado:*\n\n💸 $${Number(deleted.amount).toLocaleString('es-MX')} — ${desc}`,
+          );
+        } else {
+          await this.whatsapp.sendTextMessage(
+            phone,
+            '🤔 No tienes gastos registrados para borrar.',
+          );
+        }
+      } catch (error: any) {
+        this.logger.error(`Error deleting last expense: ${error.message}`);
+        await this.whatsapp.sendTextMessage(phone, '❌ No se pudo borrar el gasto. Intenta de nuevo.');
+      }
+      return;
+    }
+
+    if (action === 'delete_by_description') {
+      const description = data?.description;
+      if (!description) {
+        await this.whatsapp.sendTextMessage(
+          phone,
+          '🤔 ¿Cuál gasto quieres borrar? Dime la descripción.\n\nEjemplo: *"Borra el gasto de material"*',
+        );
+        return;
+      }
+
+      try {
+        let deleted = await this.expenseService.deleteByDescription(providerProfileId, description);
+
+        if (!deleted) {
+          const recent = await this.expenseService.getRecent(providerProfileId, 10);
+          const options = recent
+            .map((e) => e.description || e.category)
+            .filter((d): d is string => !!d);
+
+          if (options.length > 0) {
+            const matched = await this.aiService.matchToList(description, options);
+            if (matched) {
+              deleted = await this.expenseService.deleteByDescription(providerProfileId, matched);
+            }
+          }
+        }
+
+        if (deleted) {
+          const desc = deleted.description || deleted.category || 'Sin descripción';
+          await this.whatsapp.sendTextMessage(
+            phone,
+            `🗑️ *Gasto eliminado:*\n\n💸 $${Number(deleted.amount).toLocaleString('es-MX')} — ${desc}`,
+          );
+        } else {
+          await this.whatsapp.sendTextMessage(
+            phone,
+            `🤔 No encontré un gasto con "${description}". Escribe *"¿cómo voy?"* para ver tus gastos recientes.`,
+          );
+        }
+      } catch (error: any) {
+        this.logger.error(`Error deleting expense by description: ${error.message}`);
+        await this.whatsapp.sendTextMessage(phone, '❌ No se pudo borrar el gasto. Intenta de nuevo.');
+      }
+      return;
+    }
+
+    if (action === 'edit_last') {
+      const amount = data?.amount;
+      if (!amount || typeof amount !== 'number' || amount <= 0) {
+        await this.whatsapp.sendTextMessage(
+          phone,
+          '🤔 ¿A cuánto quieres corregir el último gasto?\n\nEjemplo: *"El último gasto era 300, no 200"*',
+        );
+        return;
+      }
+
+      try {
+        const result = await this.expenseService.editLast(providerProfileId, { amount });
+        if (result) {
+          const desc = result.previous.description || result.previous.category || 'Sin descripción';
+          await this.whatsapp.sendTextMessage(
+            phone,
+            `✏️ *Gasto corregido:*\n\n` +
+            `💸 $${Number(result.previous.amount).toLocaleString('es-MX')} → *$${amount.toLocaleString('es-MX')}*\n` +
+            `📝 ${desc}`,
+          );
+        } else {
+          await this.whatsapp.sendTextMessage(
+            phone,
+            '🤔 No tienes gastos registrados para editar.',
+          );
+        }
+      } catch (error: any) {
+        this.logger.error(`Error editing last expense: ${error.message}`);
+        await this.whatsapp.sendTextMessage(phone, '❌ No se pudo editar el gasto. Intenta de nuevo.');
+      }
+      return;
+    }
+
+    await this.whatsapp.sendTextMessage(
+      phone,
+      '🤔 No entendí qué quieres hacer con el gasto. Puedes:\n\n' +
+      '• *"Borra el último gasto"*\n' +
+      '• *"Borra el gasto de material"*\n' +
+      '• *"El último gasto era 300, no 200"*',
+    );
+  }
+
   // ─── Recurring Expense: gestionar gasto recurrente ──────
 
   private async handleGastoRecurrente(
@@ -712,10 +842,21 @@ export class WhatsAppProviderHandler {
         return;
       }
 
-      const cancelled = await this.recurringExpenseService.cancel(
+      let cancelled = await this.recurringExpenseService.cancel(
         providerProfileId,
         description,
       );
+
+      if (!cancelled) {
+        const active = await this.recurringExpenseService.listActive(providerProfileId);
+        const options = active.map((e) => e.description);
+        if (options.length > 0) {
+          const matched = await this.aiService.matchToList(description, options);
+          if (matched) {
+            cancelled = await this.recurringExpenseService.cancel(providerProfileId, matched);
+          }
+        }
+      }
 
       if (cancelled) {
         await this.whatsapp.sendTextMessage(
@@ -754,11 +895,22 @@ export class WhatsAppProviderHandler {
         return;
       }
 
-      const updated = await this.recurringExpenseService.update(
+      let updated = await this.recurringExpenseService.update(
         providerProfileId,
         description,
         updates,
       );
+
+      if (!updated) {
+        const active = await this.recurringExpenseService.listActive(providerProfileId);
+        const options = active.map((e) => e.description);
+        if (options.length > 0) {
+          const matched = await this.aiService.matchToList(description, options);
+          if (matched) {
+            updated = await this.recurringExpenseService.update(providerProfileId, matched, updates);
+          }
+        }
+      }
 
       if (updated) {
         const changes: string[] = [];
@@ -1596,9 +1748,10 @@ export class WhatsAppProviderHandler {
         `💰 *Finanzas:*\n` +
         `  "Cobré 1,200 en efectivo" — registrar ingreso\n` +
         `  "Gasté 200 en material" — registrar gasto\n` +
-        `  "Gasto fijo de 500 de renta" — crear gasto recurrente\n` +
-        `  "Cambia el gasto de Railway al día 15" — modificar\n` +
-        `  "Mis gastos fijos" — ver recurrentes\n` +
+        `  "Borra el último gasto" — eliminar\n` +
+        `  "El último gasto era 300" — corregir monto\n` +
+        `  "Borra el gasto de material" — eliminar por nombre\n` +
+        `  "Gasto fijo de 500 de renta" — gasto recurrente\n` +
         `  "¿Cómo voy esta semana?" — ver resumen\n\n` +
         `📅 *Agenda:*\n` +
         `  "Mañana a las 10 con la señora García" — agendar\n` +

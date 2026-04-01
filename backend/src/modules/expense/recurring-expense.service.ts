@@ -47,14 +47,7 @@ export class RecurringExpenseService {
   }
 
   async cancel(providerId: string, description: string): Promise<boolean> {
-    const recurring = await this.prisma.recurringExpense.findFirst({
-      where: {
-        providerId,
-        isActive: true,
-        description: { contains: description, mode: 'insensitive' },
-      },
-    });
-
+    const recurring = await this.findByFuzzyDescription(providerId, description);
     if (!recurring) return false;
 
     await this.prisma.recurringExpense.update({
@@ -71,14 +64,7 @@ export class RecurringExpenseService {
     description: string,
     updates: { amount?: number; frequency?: string; dayOfMonth?: number },
   ): Promise<boolean> {
-    const recurring = await this.prisma.recurringExpense.findFirst({
-      where: {
-        providerId,
-        isActive: true,
-        description: { contains: description, mode: 'insensitive' },
-      },
-    });
-
+    const recurring = await this.findByFuzzyDescription(providerId, description);
     if (!recurring) return false;
 
     const data: Record<string, any> = {};
@@ -106,6 +92,22 @@ export class RecurringExpenseService {
       where: { providerId, isActive: true },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /**
+   * Bidirectional fuzzy match: "suscripción de Railway" matches DB record "Railway"
+   * and vice versa. Prisma's `contains` only works one way.
+   */
+  private async findByFuzzyDescription(providerId: string, description: string) {
+    const all = await this.prisma.recurringExpense.findMany({
+      where: { providerId, isActive: true },
+    });
+
+    const needle = description.toLowerCase();
+    return all.find((e) => {
+      const desc = e.description.toLowerCase();
+      return desc.includes(needle) || needle.includes(desc);
+    }) || null;
   }
 
   formatRecurringList(
