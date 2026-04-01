@@ -205,17 +205,16 @@ export class RecurringExpenseService {
    */
   @Cron('0 20 * * *', { timeZone: 'America/Mexico_City' })
   async sendExpenseReminders(): Promise<void> {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(0, 0, 0, 0);
+    const { start: tomorrowStart, end: tomorrowEnd } = this.getCDMXDayRange(1);
 
-    const endOfTomorrow = new Date(tomorrow);
-    endOfTomorrow.setHours(23, 59, 59, 999);
+    this.logger.log(
+      `Checking reminders for tomorrow CDMX: ${tomorrowStart.toISOString()} — ${tomorrowEnd.toISOString()}`,
+    );
 
     const upcoming = await this.prisma.recurringExpense.findMany({
       where: {
         isActive: true,
-        nextDueDate: { gte: tomorrow, lte: endOfTomorrow },
+        nextDueDate: { gte: tomorrowStart, lte: tomorrowEnd },
       },
       include: {
         provider: {
@@ -262,11 +261,11 @@ export class RecurringExpenseService {
    */
   @Cron('0 7 * * *', { timeZone: 'America/Mexico_City' })
   async sendMorningBriefing(): Promise<void> {
-    const now = new Date();
-    const startOfDay = new Date(now);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(now);
-    endOfDay.setHours(23, 59, 59, 999);
+    const { start: startOfDay, end: endOfDay } = this.getCDMXDayRange(0);
+
+    this.logger.log(
+      `Morning briefing for CDMX today: ${startOfDay.toISOString()} — ${endOfDay.toISOString()}`,
+    );
 
     const [todayExpenses, todayAppointments] = await Promise.all([
       this.prisma.recurringExpense.findMany({
@@ -368,24 +367,48 @@ export class RecurringExpenseService {
     this.logger.log(`Sent morning briefings to ${briefings.size} providers.`);
   }
 
+  /**
+   * Returns { year, month (0-indexed), day } in CDMX timezone.
+   * Ensures all cron date logic uses CDMX calendar dates regardless of server TZ.
+   */
+  private getCDMXDate(date?: Date): { year: number; month: number; day: number } {
+    const d = date || new Date();
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Mexico_City',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+    const [year, month, day] = parts.split('-').map(Number);
+    return { year, month: month - 1, day };
+  }
+
+  /**
+   * Returns start (00:00 UTC) and end (23:59:59.999 UTC) for a CDMX calendar date.
+   * nextDueDate is stored at midnight UTC, so this range captures it.
+   */
+  private getCDMXDayRange(offsetDays: number = 0): { start: Date; end: Date } {
+    const { year, month, day } = this.getCDMXDate();
+    const start = new Date(Date.UTC(year, month, day + offsetDays, 0, 0, 0, 0));
+    const end = new Date(Date.UTC(year, month, day + offsetDays, 23, 59, 59, 999));
+    return { start, end };
+  }
+
   private calculateNextDueDate(
     frequency: string,
     dayOfMonth: number,
   ): Date {
-    const now = new Date();
+    const { year, month, day } = this.getCDMXDate();
 
     if (frequency === 'weekly') {
-      const next = new Date(now);
-      next.setDate(next.getDate() + 7);
-      next.setHours(0, 0, 0, 0);
-      return next;
+      return new Date(Date.UTC(year, month, day + 7, 0, 0, 0, 0));
     }
 
-    // Monthly: next occurrence of dayOfMonth
     const safeDay = Math.min(dayOfMonth, 28);
-    let next = new Date(now.getFullYear(), now.getMonth(), safeDay, 0, 0, 0, 0);
-    if (next <= now) {
-      next = new Date(now.getFullYear(), now.getMonth() + 1, safeDay, 0, 0, 0, 0);
+    let next = new Date(Date.UTC(year, month, safeDay, 0, 0, 0, 0));
+    const today = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+    if (next <= today) {
+      next = new Date(Date.UTC(year, month + 1, safeDay, 0, 0, 0, 0));
     }
     return next;
   }

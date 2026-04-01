@@ -58,7 +58,6 @@ export type WorkspaceConfigAction =
   | 'add_service'
   | 'remove_service'
   | 'set_schedule'
-  | 'set_auto_reply'
   | 'add_note';
 
 export interface WorkspaceConfigData {
@@ -69,8 +68,6 @@ export interface WorkspaceConfigData {
   days?: string[];
   timeStart?: string;
   timeEnd?: string;
-  autoReplyEnabled?: boolean;
-  autoReplyMessage?: string;
   note?: string;
 }
 

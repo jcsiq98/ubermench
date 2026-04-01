@@ -93,12 +93,11 @@ Trigger: qué tengo hoy, mis citas, mi agenda.
 data: {}
 
 ### 7. configurar_perfil
-Trigger: cambiar servicios, precios, horarios, respuesta automática.
+Trigger: cambiar servicios, precios, horarios.
 data (según action):
 - { "action": "add_service", "serviceName": "plomería", "servicePrice": 800, "serviceUnit": "visita" }
 - { "action": "remove_service", "serviceName": "gas" }
 - { "action": "set_schedule", "days": ["lunes","martes","miércoles","jueves","viernes"], "timeStart": "08:00", "timeEnd": "18:00" }
-- { "action": "set_auto_reply", "autoReplyEnabled": true, "autoReplyMessage": "Les llamo en una hora" }
 - { "action": "add_note", "note": "texto libre" }
 
 ### 8. ayuda
@@ -137,12 +136,6 @@ function buildWorkspaceSection(ctx?: WorkspaceContextDto): string {
   if (ctx.schedule.days?.length) {
     lines.push(
       `- Disponibilidad: ${ctx.schedule.days.join(', ')}, ${ctx.schedule.timeStart} - ${ctx.schedule.timeEnd}`,
-    );
-  }
-
-  if (ctx.autoReply?.enabled) {
-    lines.push(
-      `- Respuesta automática activa: "${ctx.autoReply.message}"`,
     );
   }
 

@@ -139,17 +139,6 @@ export class WorkspaceService {
         break;
       }
 
-      case 'set_auto_reply': {
-        if (config.autoReplyEnabled !== undefined)
-          autoReply.enabled = config.autoReplyEnabled;
-        if (config.autoReplyMessage)
-          autoReply.message = config.autoReplyMessage;
-        confirmationMessage = autoReply.enabled
-          ? `Respuesta automática activada: "${autoReply.message}"`
-          : 'Respuesta automática desactivada';
-        break;
-      }
-
       case 'add_note': {
         await this.prisma.workspaceProfile.update({
           where: { providerId },

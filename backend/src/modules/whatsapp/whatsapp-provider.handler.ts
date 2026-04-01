@@ -278,37 +278,8 @@ export class WhatsAppProviderHandler {
       );
       return;
     }
-    if (text === 'dashboard' || text === 'estadisticas' || text === 'stats') {
-      return this.sendDashboardStats(senderPhone, provider.providerProfile!.id);
-    }
-    if (text === 'trabajos' || text === 'jobs' || text === 'mis trabajos') {
-      return this.sendJobsList(senderPhone, provider.providerProfile!.id);
-    }
-    if (text === 'cuenta' || text === 'mi cuenta' || text === 'perfil') {
-      return this.sendAccountInfo(senderPhone, provider.providerProfile!.id);
-    }
-
-    // ── Handle menu button presses ──
+    // ── Handle legacy button presses (marketplace) ──
     if (buttonReply) {
-      if (buttonReply.id === 'menu_dashboard' && provider.providerProfile) {
-        return this.sendDashboardStats(senderPhone, provider.providerProfile.id);
-      }
-      if (buttonReply.id === 'menu_jobs' && provider.providerProfile) {
-        return this.sendJobsList(senderPhone, provider.providerProfile.id);
-      }
-      if (buttonReply.id === 'menu_account' && provider.providerProfile) {
-        return this.sendAccountInfo(senderPhone, provider.providerProfile.id);
-      }
-      if (buttonReply.id === 'edit_name') {
-        await this.setSession(senderPhone, { ...session, state: ProviderState.EDITING_NAME });
-        await this.whatsapp.sendTextMessage(senderPhone, '✏️ Escribe tu nuevo nombre:');
-        return;
-      }
-      if (buttonReply.id === 'edit_bio') {
-        await this.setSession(senderPhone, { ...session, state: ProviderState.EDITING_BIO });
-        await this.whatsapp.sendTextMessage(senderPhone, '📝 Escribe tu nueva bio profesional:');
-        return;
-      }
       const toggleMatch = buttonReply.id.match(/^toggle_avail_(.+)$/);
       if (toggleMatch) {
         const profileId = toggleMatch[1];
@@ -1606,23 +1577,22 @@ export class WhatsAppProviderHandler {
   // ─── Dashboard / Help ───────────────────────────────────
 
   private async sendProviderDashboard(phone: string, name: string) {
-    await this.whatsapp.sendInteractiveButtons(
+    await this.whatsapp.sendTextMessage(
       phone,
-      `👋 Hola *${name}*! Bienvenido a *Handy*.\n\n` +
-        `Recibirás notificaciones aquí cuando un cliente solicite tus servicios.\n\n` +
-        `¿Qué deseas hacer?`,
-      [
-        { id: 'menu_dashboard', title: '📊 Mi Dashboard' },
-        { id: 'menu_jobs', title: '📝 Mis Trabajos' },
-        { id: 'menu_account', title: '⚙️ Mi Cuenta' },
-      ],
+      `👋 Hola *${name}*! Soy tu asistente de negocios.\n\n` +
+        `Puedo ayudarte con:\n` +
+        `💰 Registrar ingresos y gastos\n` +
+        `📅 Agendar citas y recordatorios\n` +
+        `📊 Resúmenes de tu negocio\n` +
+        `⚙️ Configurar servicios y horarios\n\n` +
+        `Escribe *"ayuda"* para ver ejemplos, o simplemente dime qué necesitas.`,
     );
   }
 
   private async sendHelpMenu(phone: string) {
     await this.whatsapp.sendTextMessage(
       phone,
-      `❓ *Ayuda — Handy*\n\n` +
+      `❓ *Ayuda — Tu Asistente de Negocios*\n\n` +
         `💰 *Finanzas:*\n` +
         `  "Cobré 1,200 en efectivo" — registrar ingreso\n` +
         `  "Gasté 200 en material" — registrar gasto\n` +
