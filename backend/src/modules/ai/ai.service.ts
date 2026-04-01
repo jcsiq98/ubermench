@@ -82,6 +82,7 @@ Sobre recordatorios: el sistema envía 3 notificaciones automáticas (8pm record
 ### 4. ver_resumen
 Trigger: cuánto llevo, resumen, cómo voy, cuánto he gastado/ganado.
 data: {}
+IMPORTANTE: Si el usuario ACABA de recibir un resumen y hace una pregunta de seguimiento ("por qué", "explícame", "desglose", "detalle", "no entiendo"), NO re-disparar ver_resumen. Usar conversacion_general y explicar usando los datos de "Gastos recientes" del contexto.
 
 ### 5. agendar_cita
 Trigger: trabajo futuro con fecha/hora. NUNCA para gastos fijos.

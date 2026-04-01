@@ -271,7 +271,7 @@ export class RecurringExpenseService {
       this.prisma.recurringExpense.findMany({
         where: {
           isActive: true,
-          nextDueDate: { gte: startOfDay, lte: endOfDay },
+          lastProcessedAt: { gte: startOfDay, lte: endOfDay },
         },
         include: {
           provider: {
