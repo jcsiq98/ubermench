@@ -264,11 +264,18 @@ export class WhatsAppProviderHandler {
     }
 
     // ── Recurring expenses keyword (bypass LLM) ──
+    // Only bypass for pure listing queries — no amount/description mixed in
     if (
       text === 'mis gastos fijos' ||
       text === 'mis gastos fijos por favor' ||
       text === 'gastos fijos' ||
-      text === 'gastos recurrentes'
+      text === 'gastos recurrentes' ||
+      text === 'ver gastos fijos' ||
+      text === 'ver mis gastos fijos' ||
+      text === 'cuáles son mis gastos fijos' ||
+      text === 'cuales son mis gastos fijos' ||
+      text === 'qué gastos fijos tengo' ||
+      text === 'que gastos fijos tengo'
     ) {
       if (provider.providerProfile) {
         const expenses = await this.recurringExpenseService.listActive(

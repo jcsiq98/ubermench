@@ -9,6 +9,7 @@ import {
   ConversationMessage,
   WorkspaceContextDto,
 } from './ai.types';
+import { AI_TOOLS, TOOL_TO_INTENT } from './ai.tools';
 
 const RATE_LIMIT_PREFIX = 'ai_rate:';
 const RATE_LIMIT_MAX = 30;
@@ -28,7 +29,7 @@ function buildSystemPrompt(workspaceContext?: WorkspaceContextDto): string {
     hour12: true,
     timeZone: 'America/Mexico_City',
   });
-  const isoDate = now.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' }); // YYYY-MM-DD
+  const isoDate = now.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
 
   const dayOfMonth = now.getDate();
   const tomorrowDay = new Date(now.getTime() + 86400000).getDate();
@@ -39,114 +40,14 @@ Fecha: **${dateStr}**, ${timeStr} (CDMX). ISO: ${isoDate}. Día del mes: ${dayOf
 
 Personalidad: español mexicano natural, conciso, profesional, emojis con moderación.
 
----
-
-## RESPUESTA — siempre JSON válido:
-{ "intent": "<intent>", "message": "<texto para WhatsApp>", "data": { ... } }
-
----
-
-## INTENTS
-
-### 1. registrar_ingreso
-Trigger: cobró, le pagaron, ganó dinero.
-data: { "amount": 1200, "description": "fuga en baño", "paymentMethod": "CASH|TRANSFER|CARD|OTHER", "clientName": "Sr. Ramírez" }
-
-### 2. registrar_gasto
-Trigger: gastó UNA VEZ (no fijo, no recurrente, no mensual).
-data: { "amount": 200, "category": "material|herramienta|transporte|servicios|comida|otro", "description": "tubo de cobre" }
-
-### 3. gestionar_gasto
-Trigger: borrar, eliminar, quitar un gasto ya registrado. También: corregir, editar, cambiar el monto de un gasto.
-NUNCA usar registrar_gasto ni gestionar_gasto_recurrente para borrar/editar gastos puntuales.
-
-data según action:
-
-**delete_last** — borrar el último gasto registrado:
-{ "action": "delete_last" }
-Trigger: "borra el último gasto", "elimina el último gasto", "quita el último gasto"
-
-**delete_by_description** — borrar un gasto por descripción o categoría:
-{ "action": "delete_by_description", "description": "material" }
-Trigger: "borra el gasto de material", "elimina el gasto de Railway", "quita el gasto de tubo"
-IMPORTANTE: Si el gasto aparece en "Gastos recientes", usa la descripción EXACTA de ahí. Si no aparece, usa lo que diga el usuario.
-
-**edit_last** — corregir el monto del último gasto:
-{ "action": "edit_last", "amount": 300 }
-Trigger: "el último gasto era 300, no 200", "corrige el gasto a 300", "el monto era 300"
-
-### 4. gestionar_gasto_recurrente (gastos FIJOS/recurrentes, no puntuales)
-Trigger: cualquier mención de gasto fijo, recurrente, mensual, semanal. Palabras clave: "fijo", "mensual", "recurrente", "cada mes", "cada semana".
-NUNCA usar registrar_gasto ni agendar_cita para gastos fijos.
-
-**REGLA CLAVE para elegir action:**
-- Si el usuario menciona monto + descripción + frecuencia (o dice "gasto fijo de...") → **create** (SIEMPRE, aunque ya exista uno similar)
-- Si dice "cancela", "elimina", "quita", "borra" un gasto fijo → **cancel**
-- Si dice "cambia", "modifica", "mueve" uno existente → **update**
-- Si dice "mis gastos fijos", "ver", "listar" → **list**
-- REGLA POR DEFECTO: si hay monto y NO hay verbo de cancelar/modificar → **create**
-
-data según action:
-
-**create** — crear nuevo gasto recurrente:
-{ "action": "create", "amount": 500, "category": "servicios", "description": "Railway", "frequency": "monthly", "dayOfMonth": 1 }
-
-**update** — modificar gasto existente (día, monto, o frecuencia):
-{ "action": "update", "description": "Railway", "dayOfMonth": 15 }
-"Mueve para mañana" = dayOfMonth: ${tomorrowDay}. "Ponlo el día 15" = dayOfMonth: 15.
-
-**cancel** — cancelar gasto recurrente:
-{ "action": "cancel", "description": "Railway" }
-{ "action": "cancel", "description": "Railway", "dayOfMonth": 15 }
-Para cancel/update, usa la descripción EXACTA de "Gastos recurrentes activos".
-Si hay varios con el mismo nombre, incluye "dayOfMonth" para desambiguar.
-
-**list** — ver gastos recurrentes activos:
-{ "action": "list" }
-
-Sobre recordatorios: el sistema envía 3 notificaciones automáticas (8pm recordatorio, medianoche registro, 7am briefing). Si preguntan, explica esto.
-
-### 5. ver_resumen
-Trigger: cuánto llevo, resumen, cómo voy, cuánto he gastado/ganado.
-data: {}
-IMPORTANTE: Si el usuario ACABA de recibir un resumen y hace una pregunta de seguimiento ("por qué", "explícame", "desglose", "detalle", "no entiendo"), NO re-disparar ver_resumen. Usar conversacion_general y explicar usando los datos de "Gastos recientes" del contexto.
-
-### 6. agendar_cita
-Trigger: trabajo futuro con fecha/hora. NUNCA para gastos fijos.
-data: { "date": "YYYY-MM-DD", "time": "HH:MM", "clientName": "Sra. García", "address": "Polanco", "description": "revisión de tubería" }
-Hoy = ${isoDate}. "Mañana" = día siguiente. Siempre calcular la fecha ISO correcta.
-
-### 7. ver_agenda
-Trigger: qué tengo hoy, mis citas, mi agenda.
-data: {}
-
-### 8. configurar_perfil
-Trigger: cambiar servicios, precios, horarios.
-data (según action):
-- { "action": "add_service", "serviceName": "plomería", "servicePrice": 800, "serviceUnit": "visita" }
-- { "action": "remove_service", "serviceName": "gas" }
-- { "action": "set_schedule", "days": ["lunes","martes","miércoles","jueves","viernes"], "timeStart": "08:00", "timeEnd": "18:00" }
-- { "action": "add_note", "note": "texto libre" }
-
-### 9. ayuda
-Trigger: ayuda, qué puedes hacer, help.
-data: {}
-
-### 10. confirmar_cliente
-Trigger: confirmar cita, contactar cliente.
-data: {}
-
-### 11. conversacion_general
-Cualquier cosa que no encaje arriba.
-data: {}
-
----
-
-## REGLAS
-1. Siempre responde en español.
+## Reglas
+1. Siempre responde en español mexicano.
 2. No inventes datos — pide clarificación si falta info.
-3. Montos: "tres mil" = 3000, "mil doscientos" = 1200.
-4. No des consejos legales, fiscales ni médicos.` + buildWorkspaceSection(workspaceContext);
+3. Montos en palabras: "tres mil" = 3000, "mil doscientos" = 1200.
+4. No des consejos legales, fiscales ni médicos.
+5. Usa las tools disponibles para acciones. Si no aplica ninguna tool, responde conversacionalmente.
+6. Si el usuario acaba de recibir un resumen y hace una pregunta de seguimiento ("por qué", "explícame"), NO uses ver_resumen de nuevo — responde con texto usando los datos del contexto.
+7. Sobre gastos recurrentes: el sistema envía 3 notificaciones automáticas (8pm recordatorio, medianoche registro, 7am briefing). Si preguntan, explica esto.` + buildWorkspaceSection(workspaceContext);
 }
 
 function buildWorkspaceSection(ctx?: WorkspaceContextDto): string {
@@ -306,13 +207,11 @@ export class AiService {
     }
 
     try {
-      // Build conversation context
       const history = await this.contextService.getHistory(providerPhone);
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         { role: 'system', content: buildSystemPrompt(workspaceContext) },
       ];
 
-      // Add conversation history
       for (const msg of history) {
         messages.push({
           role: msg.role,
@@ -320,28 +219,26 @@ export class AiService {
         });
       }
 
-      // Add current message
       messages.push({ role: 'user', content: userMessage });
 
-      // Call OpenAI
       const completion = await this.client.chat.completions.create({
         model: this.model,
         messages,
-        response_format: { type: 'json_object' },
+        tools: AI_TOOLS,
+        tool_choice: 'auto',
+        parallel_tool_calls: false,
         max_tokens: 500,
-        temperature: 0.4,
+        temperature: 0.3,
       });
 
-      const raw = completion.choices[0]?.message?.content;
-      if (!raw) {
+      const choice = completion.choices[0]?.message;
+      if (!choice) {
         this.logger.warn('Empty response from OpenAI');
         return FALLBACK_RESPONSE;
       }
 
-      // Parse JSON response
-      const parsed = this.parseAiResponse(raw);
+      const parsed = this.parseToolCallResponse(choice);
 
-      // Save to conversation history (Redis for context + PostgreSQL for permanent log)
       await this.contextService.addMessage(providerPhone, 'user', userMessage, parsed.intent);
       await this.contextService.addMessage(
         providerPhone,
@@ -350,8 +247,12 @@ export class AiService {
         parsed.intent,
       );
 
+      const firstTool = choice.tool_calls?.[0];
+      const toolLabel = firstTool && firstTool.type === 'function'
+        ? ` (tool: ${firstTool.function.name})`
+        : ' (text)';
       this.logger.log(
-        `AI response for ${providerPhone}: intent=${parsed.intent}`,
+        `AI response for ${providerPhone}: intent=${parsed.intent}${toolLabel}`,
       );
 
       return parsed;
@@ -370,23 +271,45 @@ export class AiService {
     }
   }
 
-  private parseAiResponse(raw: string): AiResponse {
-    try {
-      const parsed = JSON.parse(raw);
-      const intent =
-        Object.values(AiIntent).includes(parsed.intent)
-          ? (parsed.intent as AiIntent)
-          : AiIntent.CONVERSACION_GENERAL;
+  private parseToolCallResponse(
+    message: OpenAI.Chat.Completions.ChatCompletionMessage,
+  ): AiResponse {
+    const toolCall = message.tool_calls?.[0];
 
+    if (!toolCall || toolCall.type !== 'function') {
       return {
-        intent,
-        message: parsed.message || FALLBACK_RESPONSE.message,
-        data: parsed.data || {},
+        intent: AiIntent.CONVERSACION_GENERAL,
+        message: message.content || FALLBACK_RESPONSE.message,
+        data: {},
       };
-    } catch {
-      this.logger.warn(`Failed to parse AI JSON: ${raw.slice(0, 200)}`);
-      return FALLBACK_RESPONSE;
     }
+
+    const toolName = toolCall.function.name;
+    const mapping = TOOL_TO_INTENT[toolName];
+
+    if (!mapping) {
+      this.logger.warn(`Unknown tool called: ${toolName}`);
+      return {
+        intent: AiIntent.CONVERSACION_GENERAL,
+        message: message.content || FALLBACK_RESPONSE.message,
+        data: {},
+      };
+    }
+
+    let args: Record<string, any> = {};
+    try {
+      args = JSON.parse(toolCall.function.arguments);
+    } catch {
+      this.logger.warn(`Failed to parse tool arguments for ${toolName}: ${toolCall.function.arguments}`);
+    }
+
+    const data = { ...mapping.defaultData, ...args };
+
+    return {
+      intent: mapping.intent,
+      message: message.content || '',
+      data,
+    };
   }
 
   /**
