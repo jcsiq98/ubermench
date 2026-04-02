@@ -46,8 +46,8 @@ export class RecurringExpenseService {
     return recurring;
   }
 
-  async cancel(providerId: string, description: string): Promise<boolean> {
-    const recurring = await this.findByFuzzyDescription(providerId, description);
+  async cancel(providerId: string, description: string, dayOfMonth?: number): Promise<boolean> {
+    const recurring = await this.findByFuzzyDescription(providerId, description, dayOfMonth);
     if (!recurring) return false;
 
     await this.prisma.recurringExpense.update({
@@ -63,8 +63,9 @@ export class RecurringExpenseService {
     providerId: string,
     description: string,
     updates: { amount?: number; frequency?: string; dayOfMonth?: number },
+    filterDayOfMonth?: number,
   ): Promise<boolean> {
-    const recurring = await this.findByFuzzyDescription(providerId, description);
+    const recurring = await this.findByFuzzyDescription(providerId, description, filterDayOfMonth);
     if (!recurring) return false;
 
     const data: Record<string, any> = {};
@@ -95,19 +96,34 @@ export class RecurringExpenseService {
   }
 
   /**
-   * Bidirectional fuzzy match: "suscripción de Railway" matches DB record "Railway"
-   * and vice versa. Prisma's `contains` only works one way.
+   * Bidirectional fuzzy match with optional dayOfMonth disambiguation.
+   * When multiple expenses share the same description (e.g. two "Railway"),
+   * dayOfMonth picks the right one.
    */
-  private async findByFuzzyDescription(providerId: string, description: string) {
+  private async findByFuzzyDescription(
+    providerId: string,
+    description: string,
+    dayOfMonth?: number,
+  ) {
     const all = await this.prisma.recurringExpense.findMany({
       where: { providerId, isActive: true },
     });
 
     const needle = description.toLowerCase();
-    return all.find((e) => {
+    const matches = all.filter((e) => {
       const desc = e.description.toLowerCase();
       return desc.includes(needle) || needle.includes(desc);
-    }) || null;
+    });
+
+    if (matches.length === 0) return null;
+    if (matches.length === 1) return matches[0];
+
+    if (dayOfMonth) {
+      const byDay = matches.find((e) => e.dayOfMonth === dayOfMonth);
+      if (byDay) return byDay;
+    }
+
+    return matches[0];
   }
 
   formatRecurringList(

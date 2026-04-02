@@ -92,7 +92,9 @@ Si quieren convertir un gasto que ya existe en "Gastos recientes", usa los datos
 
 **cancel** — cancelar gasto recurrente:
 { "action": "cancel", "description": "Railway" }
+{ "action": "cancel", "description": "Railway", "dayOfMonth": 15 }
 IMPORTANTE: Para cancel/update, usa la descripción EXACTA de "Gastos recurrentes activos". No parafrasees.
+Si hay varios con el mismo nombre, incluye "dayOfMonth" para desambiguar. Ejemplo: "elimina el del día 15" → incluye dayOfMonth: 15.
 
 **list** — ver gastos recurrentes activos:
 { "action": "list" }

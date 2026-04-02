@@ -263,6 +263,23 @@ export class WhatsAppProviderHandler {
       }
     }
 
+    // ── Recurring expenses keyword (bypass LLM) ──
+    if (
+      text === 'mis gastos fijos' ||
+      text === 'mis gastos fijos por favor' ||
+      text === 'gastos fijos' ||
+      text === 'gastos recurrentes'
+    ) {
+      if (provider.providerProfile) {
+        const expenses = await this.recurringExpenseService.listActive(
+          provider.providerProfile.id,
+        );
+        const msg = this.recurringExpenseService.formatRecurringList(expenses);
+        await this.whatsapp.sendTextMessage(senderPhone, msg);
+        return;
+      }
+    }
+
     // ── Global keywords ──
     if (text === 'help' || text === 'ayuda') {
       return this.sendHelpMenu(senderPhone);
@@ -834,6 +851,8 @@ export class WhatsAppProviderHandler {
 
     if (action === 'cancel') {
       const description = data?.description;
+      const cancelDay = data?.dayOfMonth as number | undefined;
+
       if (!description) {
         await this.whatsapp.sendTextMessage(
           phone,
@@ -845,6 +864,7 @@ export class WhatsAppProviderHandler {
       let cancelled = await this.recurringExpenseService.cancel(
         providerProfileId,
         description,
+        cancelDay,
       );
 
       if (!cancelled) {
@@ -853,7 +873,7 @@ export class WhatsAppProviderHandler {
         if (options.length > 0) {
           const matched = await this.aiService.matchToList(description, options);
           if (matched) {
-            cancelled = await this.recurringExpenseService.cancel(providerProfileId, matched);
+            cancelled = await this.recurringExpenseService.cancel(providerProfileId, matched, cancelDay);
           }
         }
       }
