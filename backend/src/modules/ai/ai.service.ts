@@ -76,25 +76,30 @@ IMPORTANTE: Si el gasto aparece en "Gastos recientes", usa la descripción EXACT
 Trigger: "el último gasto era 300, no 200", "corrige el gasto a 300", "el monto era 300"
 
 ### 4. gestionar_gasto_recurrente (gastos FIJOS/recurrentes, no puntuales)
-Trigger: cualquier mención de gasto fijo, recurrente, mensual, semanal. También: convertir, mover, cambiar, modificar un gasto existente. Palabras clave: "fijo", "mensual", "recurrente", "cada mes", "cada semana", "mueve", "cambia", "modifica".
+Trigger: cualquier mención de gasto fijo, recurrente, mensual, semanal. Palabras clave: "fijo", "mensual", "recurrente", "cada mes", "cada semana".
 NUNCA usar registrar_gasto ni agendar_cita para gastos fijos.
+
+**REGLA CLAVE para elegir action:**
+- Si el usuario menciona monto + descripción + frecuencia (o dice "gasto fijo de...") → **create** (SIEMPRE, aunque ya exista uno similar)
+- Si dice "cancela", "elimina", "quita", "borra" un gasto fijo → **cancel**
+- Si dice "cambia", "modifica", "mueve" uno existente → **update**
+- Si dice "mis gastos fijos", "ver", "listar" → **list**
+- REGLA POR DEFECTO: si hay monto y NO hay verbo de cancelar/modificar → **create**
 
 data según action:
 
 **create** — crear nuevo gasto recurrente:
 { "action": "create", "amount": 500, "category": "servicios", "description": "Railway", "frequency": "monthly", "dayOfMonth": 1 }
-Si quieren convertir un gasto que ya existe en "Gastos recientes", usa los datos de ahí (amount, category, description). No pidas el monto si ya lo tienes.
 
 **update** — modificar gasto existente (día, monto, o frecuencia):
 { "action": "update", "description": "Railway", "dayOfMonth": 15 }
-{ "action": "update", "description": "Railway", "amount": 10, "frequency": "weekly" }
-"Mueve para mañana" = dayOfMonth: ${tomorrowDay}. "Ponlo el día 15" = dayOfMonth: 15. Siempre convierte fechas relativas a número de día.
+"Mueve para mañana" = dayOfMonth: ${tomorrowDay}. "Ponlo el día 15" = dayOfMonth: 15.
 
 **cancel** — cancelar gasto recurrente:
 { "action": "cancel", "description": "Railway" }
 { "action": "cancel", "description": "Railway", "dayOfMonth": 15 }
-IMPORTANTE: Para cancel/update, usa la descripción EXACTA de "Gastos recurrentes activos". No parafrasees.
-Si hay varios con el mismo nombre, incluye "dayOfMonth" para desambiguar. Ejemplo: "elimina el del día 15" → incluye dayOfMonth: 15.
+Para cancel/update, usa la descripción EXACTA de "Gastos recurrentes activos".
+Si hay varios con el mismo nombre, incluye "dayOfMonth" para desambiguar.
 
 **list** — ver gastos recurrentes activos:
 { "action": "list" }
