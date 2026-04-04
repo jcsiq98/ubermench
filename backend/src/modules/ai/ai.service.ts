@@ -241,12 +241,6 @@ export class AiService {
       const parsed = this.parseToolCallResponse(choice);
 
       await this.contextService.addMessage(providerPhone, 'user', userMessage, parsed.intent);
-      await this.contextService.addMessage(
-        providerPhone,
-        'assistant',
-        parsed.message,
-        parsed.intent,
-      );
 
       const firstTool = choice.tool_calls?.[0];
       const toolLabel = firstTool && firstTool.type === 'function'

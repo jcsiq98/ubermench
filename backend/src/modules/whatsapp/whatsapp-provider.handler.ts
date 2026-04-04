@@ -561,14 +561,14 @@ export class WhatsAppProviderHandler {
         case AiIntent.CONFIRMAR_CLIENTE:
           // Phase 0.5
           this.logger.log('Intent: confirmar_cliente');
-          await this.whatsapp.sendTextMessage(phone, aiResponse.message);
+          await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
           return;
 
         case AiIntent.CONFIGURAR_PERFIL:
           return this.handleConfigurarPerfil(phone, aiResponse, providerProfileId);
 
         default:
-          await this.whatsapp.sendTextMessage(phone, aiResponse.message);
+          await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
           return;
       }
     } catch (error: any) {
@@ -580,6 +580,19 @@ export class WhatsAppProviderHandler {
     }
   }
 
+  /**
+   * Send a WhatsApp message AND record it in the AI conversation history,
+   * so the LLM knows what response the user actually received.
+   */
+  private async sendAndRecord(
+    phone: string,
+    message: string,
+    intent?: string,
+  ): Promise<void> {
+    await this.whatsapp.sendTextMessage(phone, message);
+    await this.aiContextService.addMessage(phone, 'assistant', message, intent);
+  }
+
   // ─── Workspace: configurar perfil ───────────────────────
 
   private async handleConfigurarPerfil(
@@ -588,7 +601,7 @@ export class WhatsAppProviderHandler {
     providerProfileId?: string,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '❌ No se encontró tu perfil de proveedor.',
       );
@@ -597,7 +610,7 @@ export class WhatsAppProviderHandler {
 
     const configData = aiResponse.data as WorkspaceConfigData | undefined;
     if (!configData?.action) {
-      await this.whatsapp.sendTextMessage(phone, aiResponse.message);
+      await this.sendAndRecord(phone, aiResponse.message);
       return;
     }
 
@@ -605,7 +618,7 @@ export class WhatsAppProviderHandler {
       providerProfileId,
       configData,
     );
-    await this.whatsapp.sendTextMessage(phone, result.confirmationMessage);
+    await this.sendAndRecord(phone, result.confirmationMessage);
   }
 
   // ─── Income: registrar ingreso ──────────────────────────
@@ -616,7 +629,7 @@ export class WhatsAppProviderHandler {
     providerProfileId?: string,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '❌ No se encontró tu perfil de proveedor.',
       );
@@ -625,7 +638,7 @@ export class WhatsAppProviderHandler {
 
     const amount = data?.amount;
     if (!amount || typeof amount !== 'number' || amount <= 0) {
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '🤔 No pude detectar el monto. ¿Podrías decirme cuánto cobraste?\n\nEjemplo: *"Cobré 1,200 pesos en efectivo"*',
       );
@@ -653,10 +666,10 @@ export class WhatsAppProviderHandler {
         paymentMethod,
       );
 
-      await this.whatsapp.sendTextMessage(phone, confirmation);
+      await this.sendAndRecord(phone, confirmation);
     } catch (error: any) {
       this.logger.error(`Error creating income: ${error.message}`);
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '❌ No se pudo registrar el ingreso. Intenta de nuevo.',
       );
@@ -671,7 +684,7 @@ export class WhatsAppProviderHandler {
     providerProfileId?: string,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '❌ No se encontró tu perfil de proveedor.',
       );
@@ -680,7 +693,7 @@ export class WhatsAppProviderHandler {
 
     const amount = data?.amount;
     if (!amount || typeof amount !== 'number' || amount <= 0) {
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '🤔 No pude detectar el monto. ¿Podrías decirme cuánto gastaste?\n\nEjemplo: *"Gasté 200 en material"*',
       );
@@ -701,10 +714,10 @@ export class WhatsAppProviderHandler {
         data?.description,
       );
 
-      await this.whatsapp.sendTextMessage(phone, confirmation);
+      await this.sendAndRecord(phone, confirmation);
     } catch (error: any) {
       this.logger.error(`Error creating expense: ${error.message}`);
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '❌ No se pudo registrar el gasto. Intenta de nuevo.',
       );
@@ -719,7 +732,7 @@ export class WhatsAppProviderHandler {
     providerProfileId?: string,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '❌ No se encontró tu perfil de proveedor.',
       );
@@ -733,19 +746,19 @@ export class WhatsAppProviderHandler {
         const deleted = await this.expenseService.deleteLast(providerProfileId);
         if (deleted) {
           const desc = deleted.description || deleted.category || 'Sin descripción';
-          await this.whatsapp.sendTextMessage(
+          await this.sendAndRecord(
             phone,
             `🗑️ *Gasto eliminado:*\n\n💸 $${Number(deleted.amount).toLocaleString('es-MX')} — ${desc}`,
           );
         } else {
-          await this.whatsapp.sendTextMessage(
+          await this.sendAndRecord(
             phone,
             '🤔 No tienes gastos registrados para borrar.',
           );
         }
       } catch (error: any) {
         this.logger.error(`Error deleting last expense: ${error.message}`);
-        await this.whatsapp.sendTextMessage(phone, '❌ No se pudo borrar el gasto. Intenta de nuevo.');
+        await this.sendAndRecord(phone, '❌ No se pudo borrar el gasto. Intenta de nuevo.');
       }
       return;
     }
@@ -753,7 +766,7 @@ export class WhatsAppProviderHandler {
     if (action === 'delete_by_description') {
       const description = data?.description;
       if (!description) {
-        await this.whatsapp.sendTextMessage(
+        await this.sendAndRecord(
           phone,
           '🤔 ¿Cuál gasto quieres borrar? Dime la descripción.\n\nEjemplo: *"Borra el gasto de material"*',
         );
@@ -779,19 +792,19 @@ export class WhatsAppProviderHandler {
 
         if (deleted) {
           const desc = deleted.description || deleted.category || 'Sin descripción';
-          await this.whatsapp.sendTextMessage(
+          await this.sendAndRecord(
             phone,
             `🗑️ *Gasto eliminado:*\n\n💸 $${Number(deleted.amount).toLocaleString('es-MX')} — ${desc}`,
           );
         } else {
-          await this.whatsapp.sendTextMessage(
+          await this.sendAndRecord(
             phone,
             `🤔 No encontré un gasto con "${description}". Escribe *"¿cómo voy?"* para ver tus gastos recientes.`,
           );
         }
       } catch (error: any) {
         this.logger.error(`Error deleting expense by description: ${error.message}`);
-        await this.whatsapp.sendTextMessage(phone, '❌ No se pudo borrar el gasto. Intenta de nuevo.');
+        await this.sendAndRecord(phone, '❌ No se pudo borrar el gasto. Intenta de nuevo.');
       }
       return;
     }
@@ -799,7 +812,7 @@ export class WhatsAppProviderHandler {
     if (action === 'edit_last') {
       const amount = data?.amount;
       if (!amount || typeof amount !== 'number' || amount <= 0) {
-        await this.whatsapp.sendTextMessage(
+        await this.sendAndRecord(
           phone,
           '🤔 ¿A cuánto quieres corregir el último gasto?\n\nEjemplo: *"El último gasto era 300, no 200"*',
         );
@@ -810,26 +823,26 @@ export class WhatsAppProviderHandler {
         const result = await this.expenseService.editLast(providerProfileId, { amount });
         if (result) {
           const desc = result.previous.description || result.previous.category || 'Sin descripción';
-          await this.whatsapp.sendTextMessage(
+          await this.sendAndRecord(
             phone,
             `✏️ *Gasto corregido:*\n\n` +
             `💸 $${Number(result.previous.amount).toLocaleString('es-MX')} → *$${amount.toLocaleString('es-MX')}*\n` +
             `📝 ${desc}`,
           );
         } else {
-          await this.whatsapp.sendTextMessage(
+          await this.sendAndRecord(
             phone,
             '🤔 No tienes gastos registrados para editar.',
           );
         }
       } catch (error: any) {
         this.logger.error(`Error editing last expense: ${error.message}`);
-        await this.whatsapp.sendTextMessage(phone, '❌ No se pudo editar el gasto. Intenta de nuevo.');
+        await this.sendAndRecord(phone, '❌ No se pudo editar el gasto. Intenta de nuevo.');
       }
       return;
     }
 
-    await this.whatsapp.sendTextMessage(
+    await this.sendAndRecord(
       phone,
       '🤔 No entendí qué quieres hacer con el gasto. Puedes:\n\n' +
       '• *"Borra el último gasto"*\n' +
@@ -846,7 +859,7 @@ export class WhatsAppProviderHandler {
     providerProfileId?: string,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '❌ No se encontró tu perfil de proveedor.',
       );
@@ -858,7 +871,7 @@ export class WhatsAppProviderHandler {
     if (action === 'list') {
       const expenses = await this.recurringExpenseService.listActive(providerProfileId);
       const msg = this.recurringExpenseService.formatRecurringList(expenses);
-      await this.whatsapp.sendTextMessage(phone, msg);
+      await this.sendAndRecord(phone, msg);
       return;
     }
 
@@ -867,7 +880,7 @@ export class WhatsAppProviderHandler {
       const cancelDay = data?.dayOfMonth as number | undefined;
 
       if (!description) {
-        await this.whatsapp.sendTextMessage(
+        await this.sendAndRecord(
           phone,
           '🤔 ¿Cuál gasto recurrente quieres cancelar? Dime el nombre.',
         );
@@ -893,7 +906,7 @@ export class WhatsAppProviderHandler {
             const day = e.dayOfMonth ? `día ${e.dayOfMonth}` : '';
             return `  💸 *$${Number(e.amount).toLocaleString('es-MX')}* — ${e.description} (${freq}, ${day})`;
           });
-          await this.whatsapp.sendTextMessage(
+          await this.sendAndRecord(
             phone,
             `🤔 Tienes *${ambiguousMatches.length}* gastos con "${description}". ¿Cuál quieres cancelar?\n\n${lines.join('\n')}\n\nDime el día, por ejemplo: *"Cancela ${description} del día ${ambiguousMatches[0].dayOfMonth}"*`,
           );
@@ -913,12 +926,12 @@ export class WhatsAppProviderHandler {
 
       if (cancelled) {
         const dayInfo = cancelled.dayOfMonth ? ` (día ${cancelled.dayOfMonth})` : '';
-        await this.whatsapp.sendTextMessage(
+        await this.sendAndRecord(
           phone,
           `✅ Cancelé el gasto recurrente de *${cancelled.description}*${dayInfo}.`,
         );
       } else {
-        await this.whatsapp.sendTextMessage(
+        await this.sendAndRecord(
           phone,
           `🤔 No encontré un gasto recurrente activo con "${description}". Escribe *"mis gastos fijos"* para ver los que tienes.`,
         );
@@ -929,7 +942,7 @@ export class WhatsAppProviderHandler {
     if (action === 'update' || action === 'modify' || action === 'change' || action === 'edit') {
       const description = data?.description;
       if (!description) {
-        await this.whatsapp.sendTextMessage(
+        await this.sendAndRecord(
           phone,
           '🤔 ¿Cuál gasto recurrente quieres modificar? Dime el nombre.',
         );
@@ -942,7 +955,7 @@ export class WhatsAppProviderHandler {
       if (data?.dayOfMonth && typeof data.dayOfMonth === 'number') updates.dayOfMonth = data.dayOfMonth;
 
       if (Object.keys(updates).length === 0) {
-        await this.whatsapp.sendTextMessage(
+        await this.sendAndRecord(
           phone,
           '🤔 ¿Qué quieres cambiar? Puedes modificar el monto, la frecuencia o el día.\n\nEjemplo: *"Cambia el gasto de Railway al día 15"*',
         );
@@ -968,7 +981,7 @@ export class WhatsAppProviderHandler {
             const day = e.dayOfMonth ? `día ${e.dayOfMonth}` : '';
             return `  💸 *$${Number(e.amount).toLocaleString('es-MX')}* — ${e.description} (${freq}, ${day})`;
           });
-          await this.whatsapp.sendTextMessage(
+          await this.sendAndRecord(
             phone,
             `🤔 Tienes *${ambiguousMatches.length}* gastos con "${description}". ¿Cuál quieres modificar?\n\n${lines.join('\n')}\n\nDime el día, por ejemplo: *"Modifica ${description} del día ${ambiguousMatches[0].dayOfMonth}"*`,
           );
@@ -992,12 +1005,12 @@ export class WhatsAppProviderHandler {
         if (updates.frequency) changes.push(`frecuencia: *${updates.frequency === 'monthly' ? 'mensual' : 'semanal'}*`);
         if (updates.dayOfMonth) changes.push(`día: *${updates.dayOfMonth}*`);
 
-        await this.whatsapp.sendTextMessage(
+        await this.sendAndRecord(
           phone,
           `✅ Actualicé el gasto de *${description}*:\n${changes.join('\n')}`,
         );
       } else {
-        await this.whatsapp.sendTextMessage(
+        await this.sendAndRecord(
           phone,
           `🤔 No encontré un gasto recurrente activo con "${description}". Escribe *"mis gastos fijos"* para ver los que tienes.`,
         );
@@ -1008,7 +1021,7 @@ export class WhatsAppProviderHandler {
     if (action === 'create') {
       const amount = data?.amount;
       if (!amount || typeof amount !== 'number' || amount <= 0) {
-        await this.whatsapp.sendTextMessage(
+        await this.sendAndRecord(
           phone,
           '🤔 No pude detectar el monto. ¿Cuánto es el gasto recurrente?\n\nEjemplo: *"Gasto fijo de 500 de Railway cada mes"*',
         );
@@ -1032,13 +1045,13 @@ export class WhatsAppProviderHandler {
           ? ` (día ${recurring.dayOfMonth})`
           : '';
 
-        await this.whatsapp.sendTextMessage(
+        await this.sendAndRecord(
           phone,
           `✅ *¡Gasto recurrente creado!*\n\n💸 *$${amount.toLocaleString('es-MX')}* — ${description}\n🔄 ${freq}${day}\n\nSe registrará automáticamente cada ${freq === 'mensual' ? 'mes' : 'semana'}. Para cancelarlo, dime *"cancela el gasto de ${description}"*.`,
         );
       } catch (error: any) {
         this.logger.error(`Error creating recurring expense: ${error.message}`);
-        await this.whatsapp.sendTextMessage(
+        await this.sendAndRecord(
           phone,
           '❌ No se pudo crear el gasto recurrente. Intenta de nuevo.',
         );
@@ -1046,7 +1059,7 @@ export class WhatsAppProviderHandler {
       return;
     }
 
-    await this.whatsapp.sendTextMessage(
+    await this.sendAndRecord(
       phone,
       '🤔 No entendí qué quieres hacer con gastos recurrentes. Puedes:\n\n• *Crear*: "Gasto fijo de 500 de renta"\n• *Ver*: "Mis gastos fijos"\n• *Modificar*: "Cambia el gasto de Railway al día 15"\n• *Cancelar*: "Cancela el gasto de Netflix"',
     );
@@ -1060,7 +1073,7 @@ export class WhatsAppProviderHandler {
     providerProfileId?: string,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '❌ No se encontró tu perfil de proveedor.',
       );
@@ -1096,10 +1109,10 @@ export class WhatsAppProviderHandler {
         msg += `\n💰 *Balance mes: $${monthNet.toLocaleString('es-MX')}*`;
       }
 
-      await this.whatsapp.sendTextMessage(phone, msg);
+      await this.sendAndRecord(phone, msg);
     } catch (error: any) {
       this.logger.error(`Error getting summary: ${error.message}`);
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '❌ No se pudo obtener el resumen. Intenta de nuevo.',
       );
@@ -1114,7 +1127,7 @@ export class WhatsAppProviderHandler {
     providerProfileId?: string,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '❌ No se encontró tu perfil de proveedor.',
       );
@@ -1127,7 +1140,7 @@ export class WhatsAppProviderHandler {
     );
 
     if (!scheduledAt) {
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '🤔 No pude detectar la fecha u hora de la cita. ¿Podrías ser más específico?\n\nEjemplo: *"Mañana a las 10 con la señora García en Condesa"*',
       );
@@ -1151,10 +1164,10 @@ export class WhatsAppProviderHandler {
         data?.address,
       );
 
-      await this.whatsapp.sendTextMessage(phone, confirmation);
+      await this.sendAndRecord(phone, confirmation);
     } catch (error: any) {
       this.logger.error(`Error creating appointment: ${error.message}`);
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '❌ No se pudo agendar la cita. Intenta de nuevo.',
       );
@@ -1168,7 +1181,7 @@ export class WhatsAppProviderHandler {
     providerProfileId?: string,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '❌ No se encontró tu perfil de proveedor.',
       );
@@ -1182,13 +1195,13 @@ export class WhatsAppProviderHandler {
       const todayMsg = this.appointmentsService.formatAgendaMessage(todayAppts, 'de hoy');
       const tomorrowMsg = this.appointmentsService.formatAgendaMessage(tomorrowAppts, 'de mañana');
 
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         `${todayMsg}\n\n${tomorrowMsg}`,
       );
     } catch (error: any) {
       this.logger.error(`Error getting agenda: ${error.message}`);
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndRecord(
         phone,
         '❌ No se pudo obtener la agenda. Intenta de nuevo.',
       );
