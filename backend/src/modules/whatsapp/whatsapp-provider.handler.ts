@@ -912,9 +912,10 @@ export class WhatsAppProviderHandler {
       }
 
       if (cancelled) {
+        const dayInfo = cancelled.dayOfMonth ? ` (día ${cancelled.dayOfMonth})` : '';
         await this.whatsapp.sendTextMessage(
           phone,
-          `✅ Cancelé el gasto recurrente de *${description}*.`,
+          `✅ Cancelé el gasto recurrente de *${cancelled.description}*${dayInfo}.`,
         );
       } else {
         await this.whatsapp.sendTextMessage(

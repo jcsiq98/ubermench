@@ -46,17 +46,17 @@ export class RecurringExpenseService {
     return recurring;
   }
 
-  async cancel(providerId: string, description: string, dayOfMonth?: number): Promise<boolean> {
+  async cancel(providerId: string, description: string, dayOfMonth?: number) {
     const recurring = await this.findByFuzzyDescription(providerId, description, dayOfMonth);
-    if (!recurring) return false;
+    if (!recurring) return null;
 
     await this.prisma.recurringExpense.update({
       where: { id: recurring.id },
       data: { isActive: false },
     });
 
-    this.logger.log(`Recurring expense cancelled: ${recurring.description}`);
-    return true;
+    this.logger.log(`Recurring expense cancelled: ${recurring.description} (day ${recurring.dayOfMonth})`);
+    return recurring;
   }
 
   async update(
