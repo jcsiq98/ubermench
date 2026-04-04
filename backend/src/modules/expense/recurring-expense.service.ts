@@ -98,22 +98,14 @@ export class RecurringExpenseService {
   /**
    * Bidirectional fuzzy match with optional dayOfMonth disambiguation.
    * When multiple expenses share the same description (e.g. two "Railway"),
-   * dayOfMonth picks the right one.
+   * dayOfMonth picks the right one. Returns null if ambiguous.
    */
   private async findByFuzzyDescription(
     providerId: string,
     description: string,
     dayOfMonth?: number,
   ) {
-    const all = await this.prisma.recurringExpense.findMany({
-      where: { providerId, isActive: true },
-    });
-
-    const needle = description.toLowerCase();
-    const matches = all.filter((e) => {
-      const desc = e.description.toLowerCase();
-      return desc.includes(needle) || needle.includes(desc);
-    });
+    const matches = await this.findMatchesByDescription(providerId, description);
 
     if (matches.length === 0) return null;
     if (matches.length === 1) return matches[0];
@@ -123,7 +115,23 @@ export class RecurringExpenseService {
       if (byDay) return byDay;
     }
 
-    return matches[0];
+    return null;
+  }
+
+  /**
+   * Returns all active recurring expenses matching a description (fuzzy).
+   * Used by the handler to build disambiguation messages.
+   */
+  async findMatchesByDescription(providerId: string, description: string) {
+    const all = await this.prisma.recurringExpense.findMany({
+      where: { providerId, isActive: true },
+    });
+
+    const needle = description.toLowerCase();
+    return all.filter((e) => {
+      const desc = e.description.toLowerCase();
+      return desc.includes(needle) || needle.includes(desc);
+    });
   }
 
   formatRecurringList(

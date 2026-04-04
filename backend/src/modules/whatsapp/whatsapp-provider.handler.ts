@@ -247,12 +247,15 @@ export class WhatsAppProviderHandler {
     const text = await this.extractContent(message, senderPhone);
     const buttonReply = this.extractButtonReply(message);
 
+    // Normalize once for all keyword checks (strips accents + punctuation)
+    const normalized = this.normalizeForKeywords(text);
+
     // ── Workspace profile keywords ──
     if (
-      text === 'mis servicios' ||
-      text === 'mi negocio' ||
-      text === 'mi workspace' ||
-      text === 'configuracion'
+      normalized === 'mis servicios' ||
+      normalized === 'mi negocio' ||
+      normalized === 'mi workspace' ||
+      normalized === 'configuracion'
     ) {
       if (provider.providerProfile) {
         const summary = await this.workspaceService.getWorkspaceSummary(
@@ -263,20 +266,11 @@ export class WhatsAppProviderHandler {
       }
     }
 
-    // ── Recurring expenses keyword (bypass LLM) ──
-    // Only bypass for pure listing queries — no amount/description mixed in
-    if (
-      text === 'mis gastos fijos' ||
-      text === 'mis gastos fijos por favor' ||
-      text === 'gastos fijos' ||
-      text === 'gastos recurrentes' ||
-      text === 'ver gastos fijos' ||
-      text === 'ver mis gastos fijos' ||
-      text === 'cuáles son mis gastos fijos' ||
-      text === 'cuales son mis gastos fijos' ||
-      text === 'qué gastos fijos tengo' ||
-      text === 'que gastos fijos tengo'
-    ) {
+    // ── Keyword-set bypasses (read-only queries, no LLM needed) ──
+    // Each detector checks for signal words and excludes action verbs/numbers.
+    // Order matters: recurring check runs first to win over summary
+    // (e.g. "resumen de gastos fijos" → recurring, not summary).
+    if (this.isRecurringListQuery(normalized)) {
       if (provider.providerProfile) {
         const expenses = await this.recurringExpenseService.listActive(
           provider.providerProfile.id,
@@ -287,14 +281,26 @@ export class WhatsAppProviderHandler {
       }
     }
 
+    if (this.isSummaryQuery(normalized)) {
+      if (provider.providerProfile) {
+        return this.handleVerResumen(senderPhone, {}, provider.providerProfile.id);
+      }
+    }
+
+    if (this.isAgendaQuery(normalized)) {
+      if (provider.providerProfile) {
+        return this.handleVerAgenda(senderPhone, provider.providerProfile.id);
+      }
+    }
+
     // ── Global keywords ──
-    if (text === 'help' || text === 'ayuda') {
+    if (normalized === 'help' || normalized === 'ayuda') {
       return this.sendHelpMenu(senderPhone);
     }
-    if (text === 'menu' || text === 'inicio') {
+    if (normalized === 'menu' || normalized === 'inicio') {
       return this.sendProviderDashboard(senderPhone, provider.name || senderName);
     }
-    if (text === 'reset' || text === 'limpiar historial' || text === 'limpiar') {
+    if (normalized === 'reset' || normalized === 'limpiar historial' || normalized === 'limpiar') {
       await this.aiContextService.clearHistory(senderPhone);
       await this.whatsapp.sendTextMessage(
         senderPhone,
@@ -875,6 +881,26 @@ export class WhatsAppProviderHandler {
       );
 
       if (!cancelled) {
+        // Check if failure is due to ambiguity (multiple expenses with same name)
+        const ambiguousMatches = await this.recurringExpenseService.findMatchesByDescription(
+          providerProfileId,
+          description,
+        );
+
+        if (ambiguousMatches.length > 1) {
+          const lines = ambiguousMatches.map((e) => {
+            const freq = e.frequency === 'monthly' ? 'mensual' : 'semanal';
+            const day = e.dayOfMonth ? `día ${e.dayOfMonth}` : '';
+            return `  💸 *$${Number(e.amount).toLocaleString('es-MX')}* — ${e.description} (${freq}, ${day})`;
+          });
+          await this.whatsapp.sendTextMessage(
+            phone,
+            `🤔 Tienes *${ambiguousMatches.length}* gastos con "${description}". ¿Cuál quieres cancelar?\n\n${lines.join('\n')}\n\nDime el día, por ejemplo: *"Cancela ${description} del día ${ambiguousMatches[0].dayOfMonth}"*`,
+          );
+          return;
+        }
+
+        // Not ambiguous — try LLM fuzzy match against all active expenses
         const active = await this.recurringExpenseService.listActive(providerProfileId);
         const options = active.map((e) => e.description);
         if (options.length > 0) {
@@ -929,6 +955,26 @@ export class WhatsAppProviderHandler {
       );
 
       if (!updated) {
+        // Check if failure is due to ambiguity (multiple expenses with same name)
+        const ambiguousMatches = await this.recurringExpenseService.findMatchesByDescription(
+          providerProfileId,
+          description,
+        );
+
+        if (ambiguousMatches.length > 1) {
+          const lines = ambiguousMatches.map((e) => {
+            const freq = e.frequency === 'monthly' ? 'mensual' : 'semanal';
+            const day = e.dayOfMonth ? `día ${e.dayOfMonth}` : '';
+            return `  💸 *$${Number(e.amount).toLocaleString('es-MX')}* — ${e.description} (${freq}, ${day})`;
+          });
+          await this.whatsapp.sendTextMessage(
+            phone,
+            `🤔 Tienes *${ambiguousMatches.length}* gastos con "${description}". ¿Cuál quieres modificar?\n\n${lines.join('\n')}\n\nDime el día, por ejemplo: *"Modifica ${description} del día ${ambiguousMatches[0].dayOfMonth}"*`,
+          );
+          return;
+        }
+
+        // Not ambiguous — try LLM fuzzy match against all active expenses
         const active = await this.recurringExpenseService.listActive(providerProfileId);
         const options = active.map((e) => e.description);
         if (options.length > 0) {
@@ -1989,6 +2035,114 @@ export class WhatsAppProviderHandler {
         newFacts,
       );
     }
+  }
+
+  // ─── Keyword Intent Detection ──────────────────────────
+
+  /**
+   * Strips accents and punctuation for resilient keyword matching.
+   * "¿Cuáles son mis gastos fijos?" → "cuales son mis gastos fijos"
+   */
+  private normalizeForKeywords(text: string): string {
+    return text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[¿?¡!.,;:()]/g, '')
+      .trim();
+  }
+
+  // Shared exclusion list for all keyword detectors: action verbs that
+  // signal the user wants to DO something, not just VIEW something.
+  private static readonly ACTION_WORDS = [
+    'cancela', 'cancelar', 'elimina', 'eliminar',
+    'borra', 'borrar', 'quita', 'quitar',
+    'crea', 'crear', 'agrega', 'agregar', 'registra', 'registrar',
+    'nuevo', 'nueva', 'cambia', 'cambiar',
+    'modifica', 'modificar', 'actualiza', 'actualizar',
+    'agenda', 'agendar', 'programa', 'programar',
+    'configura', 'configurar',
+  ];
+
+  private hasActionWord(words: string[]): boolean {
+    return words.some((w) => WhatsAppProviderHandler.ACTION_WORDS.includes(w));
+  }
+
+  /**
+   * "cuáles son mis gastos fijos?", "dime los recurrentes", "mis periódicos"
+   * Signal: recurring-type word. Exclude: action verbs, numbers (amounts).
+   */
+  private isRecurringListQuery(normalizedText: string): boolean {
+    const words = normalizedText.split(/\s+/);
+
+    const RECURRING_SIGNALS = [
+      'fijo', 'fijos', 'fija', 'fijas',
+      'recurrente', 'recurrentes',
+      'periodico', 'periodicos', 'periodica', 'periodicas',
+    ];
+
+    if (!words.some((w) => RECURRING_SIGNALS.includes(w))) return false;
+    if (this.hasActionWord(words)) return false;
+    if (/\d+/.test(normalizedText)) return false;
+
+    return true;
+  }
+
+  /**
+   * "cómo voy?", "mi resumen", "cuánto llevo", "balance de la semana"
+   * Signal: finance summary words. Exclude: action verbs, recurring-type words
+   * (to avoid collision with isRecurringListQuery).
+   */
+  private isSummaryQuery(normalizedText: string): boolean {
+    const words = normalizedText.split(/\s+/);
+
+    const SUMMARY_SIGNALS = [
+      'resumen', 'balance', 'estado',
+    ];
+    const SUMMARY_PHRASES = [
+      'como voy', 'cuanto llevo', 'cuanto he ganado', 'cuanto he gastado',
+      'cuanto gane', 'cuanto gaste',
+    ];
+    const RECURRING_SIGNALS = [
+      'fijo', 'fijos', 'fija', 'fijas',
+      'recurrente', 'recurrentes',
+      'periodico', 'periodicos',
+    ];
+
+    const hasSummaryWord = words.some((w) => SUMMARY_SIGNALS.includes(w));
+    const hasSummaryPhrase = SUMMARY_PHRASES.some((p) => normalizedText.includes(p));
+    if (!hasSummaryWord && !hasSummaryPhrase) return false;
+
+    // "resumen de gastos fijos" → should go to recurring list, not summary
+    if (words.some((w) => RECURRING_SIGNALS.includes(w))) return false;
+    if (this.hasActionWord(words)) return false;
+
+    return true;
+  }
+
+  /**
+   * "mi agenda", "qué tengo hoy", "mis citas", "tengo citas mañana?"
+   * Signal: schedule/agenda words. Exclude: action verbs like "agenda una cita".
+   */
+  private isAgendaQuery(normalizedText: string): boolean {
+    const words = normalizedText.split(/\s+/);
+
+    const AGENDA_SIGNALS = ['agenda', 'citas'];
+    const AGENDA_PHRASES = [
+      'que tengo hoy', 'que tengo manana',
+      'tengo citas', 'tengo algo',
+      'mi agenda', 'mis citas',
+    ];
+
+    const hasAgendaWord = words.some((w) => AGENDA_SIGNALS.includes(w));
+    const hasAgendaPhrase = AGENDA_PHRASES.some((p) => normalizedText.includes(p));
+    if (!hasAgendaWord && !hasAgendaPhrase) return false;
+
+    // "agenda una cita" or "agendar para mañana" → action, not query
+    if (this.hasActionWord(words)) return false;
+    // "cita a las 3" → scheduling with time, not viewing
+    if (/\d+/.test(normalizedText)) return false;
+
+    return true;
   }
 
   // ─── Helpers ─────────────────────────────────────────────

@@ -224,7 +224,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'cancelar_gasto_recurrente',
       description:
-        'Cancelar/eliminar/quitar/borrar un gasto recurrente existente. Solo cuando el usuario pide explícitamente cancelar o borrar uno.',
+        'Cancelar/eliminar/quitar/borrar un gasto recurrente existente. Solo cuando el usuario pide explícitamente cancelar o borrar uno. Si el usuario menciona un día específico ("del día 15", "el del 1"), incluirlo en dayOfMonth para desambiguar.',
       parameters: {
         type: 'object',
         properties: {
@@ -234,7 +234,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           dayOfMonth: {
             type: 'number',
-            description: 'Día del mes para desambiguar si hay varios con el mismo nombre.',
+            description: 'Día del mes del gasto a cancelar. IMPORTANTE: incluir si el usuario menciona un día para desambiguar entre gastos con el mismo nombre (ej: "cancela Railway del día 15" → dayOfMonth=15).',
           },
         },
         required: ['description'],
@@ -277,7 +277,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'listar_gastos_recurrentes',
       description:
-        'Ver/listar todos los gastos fijos/recurrentes activos del proveedor.',
+        'Ver/listar/consultar los gastos fijos/recurrentes/periódicos activos. Usar cuando preguntan "cuáles son mis gastos fijos", "mis gastos recurrentes", "qué gastos fijos tengo", "cuáles de mis gastos son fijos". NO confundir con resumen financiero.',
       parameters: {
         type: 'object',
         properties: {},
@@ -291,7 +291,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'ver_resumen',
       description:
-        'Ver resumen financiero: cuánto lleva ganado/gastado esta semana o mes, balance, desglose.',
+        'Ver resumen financiero general: cuánto lleva ganado/gastado esta semana o mes, balance, desglose por categoría. NO usar cuando preguntan por gastos fijos/recurrentes — para eso usar listar_gastos_recurrentes.',
       parameters: {
         type: 'object',
         properties: {},
