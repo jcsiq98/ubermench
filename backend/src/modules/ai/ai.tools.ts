@@ -188,7 +188,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'crear_gasto_recurrente',
       description:
-        'Crear un gasto fijo/recurrente/periódico/mensual/semanal. Usar cuando el usuario menciona un monto con contexto de periodicidad, aunque no diga explícitamente "agrega" o "crea".',
+        'Crear un gasto fijo/recurrente/periódico/mensual/semanal. Usar cuando el usuario menciona un monto con contexto de periodicidad, aunque no diga explícitamente "agrega" o "crea". Se permiten múltiples gastos con el mismo nombre (ej: dos "Railway" en días distintos). Si el usuario pide crear uno que ya existe pero con diferente día, CREARLO sin preguntar — NO sugerir cancelar el anterior.',
       parameters: {
         type: 'object',
         properties: {
