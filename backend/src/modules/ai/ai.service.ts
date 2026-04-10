@@ -54,60 +54,136 @@ Personalidad: español mexicano natural, conciso, profesional, emojis con modera
 function buildWorkspaceSection(ctx?: WorkspaceContextDto): string {
   if (!ctx) return '';
 
-  const lines: string[] = ['\n\n## Perfil de trabajo del proveedor actual'];
+  const sections: string[] = [];
 
+  // --- Profile ---
+  const profileLines: string[] = [];
   if (ctx.services.length > 0) {
     const list = ctx.services
       .map((s) => `${s.name}: $${s.price} por ${s.unit}`)
       .join(', ');
-    lines.push(`- Servicios: ${list}`);
+    profileLines.push(`- Servicios: ${list}`);
   }
-
   if (ctx.schedule.days?.length) {
-    lines.push(
+    profileLines.push(
       `- Disponibilidad: ${ctx.schedule.days.join(', ')}, ${ctx.schedule.timeStart} - ${ctx.schedule.timeEnd}`,
     );
   }
-
   if (ctx.notes) {
-    lines.push(`- Notas: ${ctx.notes}`);
+    profileLines.push(`- Notas: ${ctx.notes}`);
+  }
+  if (profileLines.length > 0) {
+    sections.push(
+      '## Perfil de trabajo del proveedor actual\n' +
+        profileLines.join('\n'),
+    );
   }
 
-  if (ctx.learnedFacts && ctx.learnedFacts.length > 0) {
-    lines.push('\n## Lo que sabes de este proveedor');
-    lines.push(
-      'Estos son datos que has aprendido de conversaciones anteriores. Úsalos para personalizar tus respuestas:',
-    );
-    for (const fact of ctx.learnedFacts) {
-      lines.push(`- ${fact}`);
+  // --- Computed patterns (from real data) ---
+  const model = ctx.providerModel;
+  if (model) {
+    const patternLines = buildPatternLines(model);
+    if (patternLines.length > 0) {
+      sections.push(
+        '## Patrones de negocio (calculados de sus datos)\n' +
+          patternLines.join('\n'),
+      );
     }
   }
 
+  // --- Learned facts ---
+  if (ctx.learnedFacts && ctx.learnedFacts.length > 0) {
+    const factsBlock =
+      '## Lo que sabes de este proveedor\n' +
+      'Datos aprendidos de conversaciones anteriores. Úsalos para personalizar tus respuestas:\n' +
+      ctx.learnedFacts.map((f) => `- ${f}`).join('\n');
+    sections.push(factsBlock);
+  }
+
+  // --- Recent expenses ---
   if (ctx.recentExpenses && ctx.recentExpenses.length > 0) {
-    lines.push('\n## Gastos recientes del proveedor');
-    for (const e of ctx.recentExpenses) {
+    const expLines = ctx.recentExpenses.map((e) => {
       const cat = e.category ? ` (${e.category})` : '';
       const desc = e.description || 'Sin descripción';
-      lines.push(`- $${e.amount}${cat} — ${desc} — ${e.date}`);
-    }
+      return `- $${e.amount}${cat} — ${desc} — ${e.date}`;
+    });
+    sections.push('## Gastos recientes del proveedor\n' + expLines.join('\n'));
   }
 
+  // --- Active recurring expenses ---
   if (ctx.activeRecurringExpenses && ctx.activeRecurringExpenses.length > 0) {
-    lines.push('\n## Gastos recurrentes activos');
-    for (const e of ctx.activeRecurringExpenses) {
+    const recLines = ctx.activeRecurringExpenses.map((e) => {
       const freq = e.frequency === 'monthly' ? 'mensual' : 'semanal';
       const day = e.dayOfMonth ? ` (día ${e.dayOfMonth})` : '';
-      lines.push(`- $${e.amount} — ${e.description} — ${freq}${day}`);
+      return `- $${e.amount} — ${e.description} — ${freq}${day}`;
+    });
+    sections.push('## Gastos recurrentes activos\n' + recLines.join('\n'));
+  }
+
+  if (sections.length === 0) return '';
+
+  return (
+    '\n\n' +
+    sections.join('\n\n') +
+    '\n\nUsa este contexto para personalizar tus respuestas. Si preguntan por precios, usa los del proveedor. Si quieren convertir un gasto reciente a recurrente, usa los datos de "Gastos recientes".'
+  );
+}
+
+function buildPatternLines(
+  model: import('../provider-model/provider-model.types').ProviderModel,
+): string[] {
+  const lines: string[] = [];
+  const f = model.financial;
+  const c = model.clients;
+  const s = model.schedule;
+
+  if (f.avgWeeklyIncome !== null) {
+    lines.push(`- Ingreso semanal promedio: $${f.avgWeeklyIncome.toLocaleString('es-MX')}`);
+  }
+  if (f.avgTicket !== null) {
+    lines.push(`- Ticket promedio por trabajo: $${f.avgTicket.toLocaleString('es-MX')}`);
+  }
+  if (f.bestDayOfWeek) {
+    lines.push(`- Mejor día (más ingresos): ${f.bestDayOfWeek}`);
+  }
+
+  if (f.thisWeekIncome > 0 || f.lastWeekIncome > 0) {
+    const weekLine = `- Esta semana: $${f.thisWeekIncome.toLocaleString('es-MX')}`;
+    if (f.lastWeekIncome > 0) {
+      lines.push(`${weekLine} (semana pasada: $${f.lastWeekIncome.toLocaleString('es-MX')})`);
+    } else {
+      lines.push(weekLine);
     }
   }
 
-  if (lines.length === 1) return '';
+  if (f.thisMonthIncome > 0 || f.totalExpensesThisMonth > 0) {
+    lines.push(
+      `- Balance del mes: $${f.thisMonthIncome.toLocaleString('es-MX')} ingresos - $${f.totalExpensesThisMonth.toLocaleString('es-MX')} gastos = $${f.netThisMonth.toLocaleString('es-MX')} neto`,
+    );
+  }
 
-  lines.push(
-    '\nUsa este contexto para personalizar tus respuestas. Si preguntan por precios, usa los del proveedor. Si quieren convertir un gasto reciente a recurrente, usa los datos de "Gastos recientes".',
-  );
+  if (c.topClients.length > 0) {
+    const clientList = c.topClients
+      .map((cl) => `${cl.name} (${cl.totalJobs} trabajos, $${cl.totalAmount.toLocaleString('es-MX')})`)
+      .join(', ');
+    lines.push(`- Clientes frecuentes (30 días): ${clientList}`);
+  }
 
-  return lines.join('\n');
+  if (c.repeatClientRate !== null && c.uniqueClientsLast30Days > 2) {
+    lines.push(`- Tasa de clientes que repiten: ${c.repeatClientRate}%`);
+  }
+
+  if (s.appointmentsThisWeek > 0) {
+    lines.push(`- Citas esta semana: ${s.appointmentsThisWeek}`);
+  }
+  if (s.appointmentsNextWeek > 0) {
+    lines.push(`- Citas próxima semana: ${s.appointmentsNextWeek}`);
+  }
+  if (s.busiestDay) {
+    lines.push(`- Día con más citas: ${s.busiestDay}`);
+  }
+
+  return lines;
 }
 
 const FALLBACK_RESPONSE: AiResponse = {

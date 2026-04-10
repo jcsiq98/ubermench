@@ -117,4 +117,5 @@ export interface WorkspaceContextDto {
   learnedFacts?: string[];
   recentExpenses?: RecentExpenseContext[];
   activeRecurringExpenses?: ActiveRecurringContext[];
+  providerModel?: import('../provider-model/provider-model.types').ProviderModel | null;
 }

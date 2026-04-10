@@ -35,6 +35,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { QueueModule } from './common/queues/queue.module';
 import { CryptoModule } from './common/crypto/crypto.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
+import { ProviderModelModule } from './modules/provider-model/provider-model.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -98,6 +99,9 @@ const isProd = process.env.NODE_ENV === 'production';
 
     // Workspace (global)
     WorkspaceModule,
+
+    // Provider Model — computed patterns for LLM context (global)
+    ProviderModelModule,
 
     // WhatsApp (global)
     WhatsAppModule,

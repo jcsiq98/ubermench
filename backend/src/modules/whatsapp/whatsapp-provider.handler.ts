@@ -15,6 +15,7 @@ import { ExpenseService } from '../expense/expense.service';
 import { RecurringExpenseService } from '../expense/recurring-expense.service';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { WorkspaceService } from '../workspace/workspace.service';
+import { ProviderModelService } from '../provider-model/provider-model.service';
 import { BookingStatus, PaymentMethod } from '@prisma/client';
 
 // ─── Provider session states ────────────────────────────────
@@ -65,6 +66,7 @@ export class WhatsAppProviderHandler {
     private recurringExpenseService: RecurringExpenseService,
     private appointmentsService: AppointmentsService,
     private workspaceService: WorkspaceService,
+    private providerModelService: ProviderModelService,
   ) {}
 
   // ─── Session management ──────────────────────────────────
@@ -494,11 +496,13 @@ export class WhatsAppProviderHandler {
     let workspaceContext;
     if (providerProfileId) {
       try {
-        const [wsCtx, recentExpenses, activeRecurring] = await Promise.all([
-          this.workspaceService.getWorkspaceContext(providerProfileId),
-          this.expenseService.getRecent(providerProfileId, 5),
-          this.recurringExpenseService.listActive(providerProfileId),
-        ]);
+        const [wsCtx, recentExpenses, activeRecurring, providerModel] =
+          await Promise.all([
+            this.workspaceService.getWorkspaceContext(providerProfileId),
+            this.expenseService.getRecent(providerProfileId, 5),
+            this.recurringExpenseService.listActive(providerProfileId),
+            this.providerModelService.getProviderModel(providerProfileId),
+          ]);
 
         workspaceContext = {
           ...wsCtx,
@@ -514,6 +518,7 @@ export class WhatsAppProviderHandler {
             frequency: e.frequency,
             dayOfMonth: e.dayOfMonth,
           })),
+          providerModel,
         };
       } catch (err: any) {
         this.logger.warn(`Failed to load workspace context: ${err.message}`);
@@ -528,48 +533,68 @@ export class WhatsAppProviderHandler {
         workspaceContext,
       );
 
-      // Fire-and-forget: check if it's time to extract learned facts
+      switch (aiResponse.intent) {
+        case AiIntent.REGISTRAR_INGRESO:
+          await this.handleRegistrarIngreso(phone, aiResponse.data, providerProfileId);
+          break;
+
+        case AiIntent.REGISTRAR_GASTO:
+          await this.handleRegistrarGasto(phone, aiResponse.data, providerProfileId);
+          break;
+
+        case AiIntent.GESTIONAR_GASTO:
+          await this.handleGestionarGasto(phone, aiResponse.data, providerProfileId);
+          break;
+
+        case AiIntent.GESTIONAR_GASTO_RECURRENTE:
+          await this.handleGastoRecurrente(phone, aiResponse.data, providerProfileId);
+          break;
+
+        case AiIntent.VER_RESUMEN:
+          await this.handleVerResumen(phone, aiResponse.data, providerProfileId);
+          break;
+
+        case AiIntent.AGENDAR_CITA:
+          await this.handleAgendarCita(phone, aiResponse.data, providerProfileId);
+          break;
+
+        case AiIntent.VER_AGENDA:
+          await this.handleVerAgenda(phone, providerProfileId);
+          break;
+
+        case AiIntent.CONFIRMAR_CLIENTE:
+          this.logger.log('Intent: confirmar_cliente');
+          await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
+          break;
+
+        case AiIntent.CONFIGURAR_PERFIL:
+          await this.handleConfigurarPerfil(phone, aiResponse, providerProfileId);
+          break;
+
+        default:
+          await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
+          break;
+      }
+
       if (providerProfileId) {
+        // Invalidate computed patterns cache on data-mutating intents
+        const dataMutatingIntents = [
+          AiIntent.REGISTRAR_INGRESO,
+          AiIntent.REGISTRAR_GASTO,
+          AiIntent.GESTIONAR_GASTO,
+          AiIntent.GESTIONAR_GASTO_RECURRENTE,
+          AiIntent.AGENDAR_CITA,
+        ];
+        if (dataMutatingIntents.includes(aiResponse.intent)) {
+          this.providerModelService.invalidate(providerProfileId).catch(() => {});
+        }
+
+        // Extract learned facts AFTER the handler has responded (so the full
+        // conversation turn — user + assistant — is in Redis history)
         this.maybeExtractLearnedFacts(phone, providerProfileId, workspaceContext)
           .catch((err) =>
             this.logger.warn(`Learned facts extraction failed: ${err.message}`),
           );
-      }
-
-      switch (aiResponse.intent) {
-        case AiIntent.REGISTRAR_INGRESO:
-          return this.handleRegistrarIngreso(phone, aiResponse.data, providerProfileId);
-
-        case AiIntent.REGISTRAR_GASTO:
-          return this.handleRegistrarGasto(phone, aiResponse.data, providerProfileId);
-
-        case AiIntent.GESTIONAR_GASTO:
-          return this.handleGestionarGasto(phone, aiResponse.data, providerProfileId);
-
-        case AiIntent.GESTIONAR_GASTO_RECURRENTE:
-          return this.handleGastoRecurrente(phone, aiResponse.data, providerProfileId);
-
-        case AiIntent.VER_RESUMEN:
-          return this.handleVerResumen(phone, aiResponse.data, providerProfileId);
-
-        case AiIntent.AGENDAR_CITA:
-          return this.handleAgendarCita(phone, aiResponse.data, providerProfileId);
-
-        case AiIntent.VER_AGENDA:
-          return this.handleVerAgenda(phone, providerProfileId);
-
-        case AiIntent.CONFIRMAR_CLIENTE:
-          // Phase 0.5
-          this.logger.log('Intent: confirmar_cliente');
-          await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
-          return;
-
-        case AiIntent.CONFIGURAR_PERFIL:
-          return this.handleConfigurarPerfil(phone, aiResponse, providerProfileId);
-
-        default:
-          await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
-          return;
       }
     } catch (error: any) {
       this.logger.error(`AI conversation error: ${error.message}`);
@@ -2040,10 +2065,7 @@ export class WhatsAppProviderHandler {
       currentFacts,
     );
 
-    if (
-      JSON.stringify(newFacts) !== JSON.stringify(currentFacts) &&
-      newFacts.length > 0
-    ) {
+    if (JSON.stringify(newFacts) !== JSON.stringify(currentFacts)) {
       await this.workspaceService.updateLearnedFacts(
         providerProfileId,
         newFacts,
