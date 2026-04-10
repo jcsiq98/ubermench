@@ -116,16 +116,24 @@ export class ProviderModelService {
       0,
     );
 
-    // Average weekly income: total last 30 days / ~4.3 weeks
     const total30d = incomes30d.reduce(
       (sum, i) => sum + Number(i.amount),
       0,
     );
-    const weeksInPeriod = 30 / 7;
-    const avgWeeklyIncome =
-      incomes30d.length > 0
-        ? Math.round(total30d / weeksInPeriod)
-        : null;
+
+    // Use actual span from earliest income to now, minimum 1 week
+    let avgWeeklyIncome: number | null = null;
+    if (incomes30d.length > 0) {
+      const earliestDate = incomes30d.reduce((min, i) => {
+        const d = new Date(i.date);
+        return d < min ? d : min;
+      }, now);
+      const daySpan = Math.max(
+        7,
+        (now.getTime() - earliestDate.getTime()) / 86_400_000,
+      );
+      avgWeeklyIncome = Math.round(total30d / (daySpan / 7));
+    }
 
     const avgTicket =
       incomes30d.length > 0

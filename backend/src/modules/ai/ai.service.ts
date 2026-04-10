@@ -137,23 +137,24 @@ function buildPatternLines(
   const c = model.clients;
   const s = model.schedule;
 
+  // Weekly comparison first — specific data before averages
+  if (f.thisWeekIncome > 0 || f.lastWeekIncome > 0) {
+    lines.push(`- Esta semana: $${f.thisWeekIncome.toLocaleString('es-MX')}`);
+    if (f.lastWeekIncome > 0) {
+      lines.push(`- Semana pasada: $${f.lastWeekIncome.toLocaleString('es-MX')}`);
+    } else {
+      lines.push('- Semana pasada: sin datos registrados. Si preguntan por la semana pasada, decir que no hay datos — NO usar el promedio como sustituto.');
+    }
+  }
+
   if (f.avgWeeklyIncome !== null) {
-    lines.push(`- Ingreso semanal promedio: $${f.avgWeeklyIncome.toLocaleString('es-MX')}`);
+    lines.push(`- Promedio semanal (últimos 30 días): $${f.avgWeeklyIncome.toLocaleString('es-MX')}`);
   }
   if (f.avgTicket !== null) {
     lines.push(`- Ticket promedio por trabajo: $${f.avgTicket.toLocaleString('es-MX')}`);
   }
   if (f.bestDayOfWeek) {
     lines.push(`- Mejor día (más ingresos): ${f.bestDayOfWeek}`);
-  }
-
-  if (f.thisWeekIncome > 0 || f.lastWeekIncome > 0) {
-    const weekLine = `- Esta semana: $${f.thisWeekIncome.toLocaleString('es-MX')}`;
-    if (f.lastWeekIncome > 0) {
-      lines.push(`${weekLine} (semana pasada: $${f.lastWeekIncome.toLocaleString('es-MX')})`);
-    } else {
-      lines.push(`${weekLine} (no hay datos de la semana pasada)`);
-    }
   }
 
   if (f.thisMonthIncome > 0 || f.totalExpensesThisMonth > 0) {
