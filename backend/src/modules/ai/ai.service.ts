@@ -152,7 +152,7 @@ function buildPatternLines(
     if (f.lastWeekIncome > 0) {
       lines.push(`${weekLine} (semana pasada: $${f.lastWeekIncome.toLocaleString('es-MX')})`);
     } else {
-      lines.push(weekLine);
+      lines.push(`${weekLine} (no hay datos de la semana pasada)`);
     }
   }
 
