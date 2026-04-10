@@ -1,0 +1,67 @@
+---
+description: Core project context - what Ubermench is, current state, and architecture
+alwaysApply: true
+---
+
+# Ubermench — Project Context
+
+AI Business Assistant for independent trades workers (plomeros, electricistas, albañiles) in Mexico. WhatsApp-based business assistant powered by LLM: income tracking, scheduling, invoicing, CRM.
+
+## Philosophy
+
+This project exists to empower, not to extract. The trades workers we serve — plomeros, electricistas, albañiles — are people who build the world with their hands. They don't need another platform taking a cut. They need tools that make them stronger.
+
+Core principles that guide every decision:
+
+- **Flexibility over rigidity.** We pivoted once, we'll pivot again if the data says so. Plans serve us, we don't serve plans. History matters — read `ubermench-docs/proyecto/HISTORIA_DECISIONES.md` before proposing big changes.
+- **Fairness in giving and receiving.** We pay people justly. We charge users fairly. The 50/50 partnership behind this project exists because both sides bring real value, and both sides are respected equally. That standard extends to every relationship — with developers, with users, with partners.
+- **Build only what's proven.** No feature ships because we imagined someone needs it. It ships because a real plomero asked for it, or the data showed it. Launch small, measure, iterate.
+- **Honesty over impressiveness.** A simple solution that works beats an elaborate one that looks good. We'd rather say "we don't know yet" than pretend we do.
+- **Know your history.** Every decision, pivot, and lesson is documented. Not for bureaucracy — so we never repeat the mistakes we already paid for.
+
+## Project Knowledge Base
+
+**History is our most valuable asset** — always consult these sources before proposing changes, making strategic claims, or planning features.
+
+### 1. Main Codebase — `/home/jcsiq98/ubermench/` (this workspace)
+Source of truth for what exists today.
+- `backend/` — NestJS + TypeScript + Prisma + PostgreSQL + Redis + BullMQ
+- `web/` — Next.js (App Router) — provider dashboard, being reconverted from marketplace UI
+- `scripts/` — Utilities (start-db.js for embedded PostgreSQL)
+- `_archive/` — Old marketplace code and research preserved for reference (do NOT modify)
+
+### 2. Documentation — `/home/jcsiq98/ubermench-docs/`
+All project documentation, organized by function:
+- `proyecto/` — Foundational docs: `HISTORIA_DECISIONES.md`, `PIVOT_ESTRATEGICO.md`, `PIVOT_MILESTONES.md`
+- `operacion/` — Execution: `PLAN_PRUEBAS_FOUNDER.md`, `META_WHATSAPP_CHECKLIST.md`, `GUION_PRIMEROS_5_USUARIOS.md`, `PRESUPUESTO.md`
+- `research/` — Customer discovery: `GUION_ENTREVISTAS.md`, `WORKANA_POST_RESEARCHER.md`, `tools/`
+- `sesiones/` — Deep thinking sessions (e.g. `2026-04-10-sesion-densa.md`)
+- `arquitectura/` — ADRs (Architecture Decision Records)
+- `_archive/` — Historical docs no longer actionable
+
+### How to use these sources
+- **Before proposing big changes:** Read `proyecto/HISTORIA_DECISIONES.md` and `proyecto/PIVOT_ESTRATEGICO.md`.
+- **Before planning features:** Check `proyecto/PIVOT_MILESTONES.md` for current roadmap state.
+- **Before making market claims:** Consult `_archive/handy-docs/` for grounded LATAM market data.
+- **When in doubt about a past decision:** The answer is probably documented. Search docs first.
+
+## Active Backend Modules (`backend/src/modules/`)
+
+- `ai/` — LLM integration (OpenAI) via **function calling** (15 typed tools in `ai.tools.ts`), conversation context (Redis). Intent classification uses tool selection, NOT prompt-based rules. System prompt is minimal (personality + context only)
+- `workspace/` — Provider business profile via chat (services, prices, schedule, auto-reply, notes). Cache-first (Redis → DB). Injected into LLM system prompt for personalized responses
+- `income/` — Income tracking, weekly/monthly summaries
+- `appointments/` — Scheduling, Spanish date parsing, reminders
+- `whatsapp/` — Core: webhook handler, message sending, provider handler (hybrid commands + LLM routing)
+- `onboarding/` — Provider registration via WhatsApp
+- `providers/`, `users/`, `auth/`, `admin/`, `notifications/`, `verification/`, `zones/`, `addresses/`, `provider-dashboard/`
+
+## Legacy Modules (`backend/src/modules/_marketplace/`)
+
+Marketplace model modules preserved but NOT active in the pivot roadmap: bookings, chat, messages, ratings, reports, safety, services, trust-score. Still registered in app.module.ts. Do NOT build new features on these.
+
+## Key Design Decisions
+
+- Providers interact primarily via WhatsApp (93% penetration in Mexico). The LLM handles natural language + voice notes.
+- The product does NOT intermediate transactions — it empowers providers to run their own business.
+- Cash payments are tracked, not replaced. Digital payments are optional via payment links.
+- **Intent classification uses OpenAI function calling (tools), not prompt-based rules.** Each action is a typed tool definition in `ai.tools.ts`. The system prompt contains only personality and workspace context — no classification rules. Adding a new action = adding a tool, not editing the prompt. See `proyecto/HISTORIA_DECISIONES.md` Chapter 16 for the full rationale.

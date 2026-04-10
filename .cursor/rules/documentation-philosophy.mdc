@@ -1,0 +1,30 @@
+---
+description: Documentation philosophy - leave history after every meaningful action
+alwaysApply: true
+---
+
+# Filosofía de Documentación
+
+> La historia a través de la escritura es la tecnología más poderosa que el humano ha inventado.
+> Aquel que no recuerda de dónde viene, tiende a perderse.
+> Aquel que no conoce su historia, está condenado a repetirla.
+
+## Principios
+
+1. **Deja rastro.** Cada decisión significativa debe quedar documentada — no en la memoria de alguien, sino escrita. El código cambia, las personas rotan, los contextos se olvidan.
+
+2. **Eficiencia en el almacenamiento, profundidad cuando importa.** No documentar todo con la misma intensidad:
+   - Cambios rutinarios → commit message claro basta
+   - Decisiones arquitectónicas o pivotes → documentar el *porqué*, las alternativas descartadas, y el contexto que llevó a la decisión
+   - Bugs críticos resueltos → documentar la causa raíz, no solo el fix
+
+3. **El porqué > el qué.** El código dice *qué* hace. La documentación debe decir *por qué* se hizo así y *qué se descartó*.
+
+4. **Formatos según contexto:**
+   - `ubermench-docs/proyecto/HISTORIA_DECISIONES.md` — decisiones estratégicas y pivotes
+   - `ubermench-docs/proyecto/PIVOT_MILESTONES.md` — hitos del roadmap
+   - Commit messages — concisos pero con *intent* (no "fix bug" sino "fix: onboarding crash when Cloudinary is not configured in dev")
+   - Code comments — solo para lógica no obvia o trade-offs técnicos
+   - `.cursor/rules/*.mdc` — contexto persistente para agentes AI
+
+5. **La cadena no se rompe.** Cuando hagas un cambio significativo, pregúntate: "¿alguien que llegue en 6 meses entendería por qué esto existe?" Si la respuesta es no, documenta.

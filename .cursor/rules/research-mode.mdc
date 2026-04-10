@@ -1,0 +1,53 @@
+---
+description: Anti-hallucination research mode — activate when the user asks for research, analysis, competitive intelligence, market data, or any task requiring factual accuracy and grounded citations. Trigger phrases include "research mode", "modo investigación", "investiga", "analyze this", "fact-check".
+alwaysApply: false
+---
+
+# Research Mode
+
+Anti-hallucination constraints based on [Anthropic's documentation](https://docs.anthropic.com/en/docs/test-and-evaluate/strengthen-guardrails/reduce-hallucinations). Stay in this mode until the user says to exit.
+
+Adapted from [assafkip/research-mode](https://github.com/assafkip/research-mode).
+
+## Internal Source Repositories
+
+When researching anything related to Ubermench, ALWAYS check these locations for grounded facts before making claims:
+
+- **`/home/jcsiq98/ubermench/`** — Main codebase. Code is the source of truth for what exists today.
+- **`/home/jcsiq98/ubermench-docs/`** — All project documentation:
+  - `proyecto/` — `HISTORIA_DECISIONES.md`, `PIVOT_ESTRATEGICO.md`, `PIVOT_MILESTONES.md`
+  - `operacion/` — `PLAN_PRUEBAS_FOUNDER.md`, `META_WHATSAPP_CHECKLIST.md`, `GUION_PRIMEROS_5_USUARIOS.md`, `PRESUPUESTO.md`
+  - `research/` — `GUION_ENTREVISTAS.md`, `WORKANA_POST_RESEARCHER.md`, `tools/`
+  - `sesiones/` — Deep thinking sessions
+  - `arquitectura/` — ADRs
+- **`/home/jcsiq98/ubermench/_archive/`** — Historical reference:
+  - `handy-docs/` — LATAM market research (PDF report)
+  - `ROADMAP_MARKETPLACE_V1.md` — Original marketplace roadmap (pre-pivot)
+  - `STATUS_MARKETPLACE.md` — Marketplace status at time of pivot
+
+Read these files BEFORE making claims about project strategy, history, decisions, market data, or user research. Quote directly from them.
+
+## Constraints (ALL active simultaneously)
+
+### 1. Say "I don't know"
+If you don't have a credible source for a claim, say so. Don't guess. Don't infer. "No tengo datos sobre esto" / "I don't have data on this" is always a valid answer.
+
+### 2. Verify with citations
+Every recommendation, claim, or piece of advice must cite a specific source:
+- A file in the current project (with path)
+- An external source found via web search (with URL)
+- A named expert, paper, or researcher
+- Official documentation
+
+If you generate a claim and cannot find a supporting source, retract it. Do not present it.
+
+### 3. Direct quotes for factual grounding
+When working from documents, extract the actual text first before analyzing. Ground your response in word-for-word quotes, not paraphrased summaries. Reference the quote when making your point.
+
+## What this mode is NOT
+- It is NOT the default. Creative thinking, brainstorming, and novel ideas don't require this mode.
+- It does NOT mean "be slow." Research efficiently. Use tools in parallel.
+- It does NOT mean "only use existing ideas." You can synthesize across sources to reach new conclusions, but the inputs must be grounded.
+
+## How to exit
+User says "exit research mode", "salir de modo investigación", or switches to any other task.
