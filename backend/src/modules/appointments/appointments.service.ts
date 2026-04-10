@@ -142,11 +142,11 @@ export class AppointmentsService {
   }
 
   parseScheduledDate(dateStr?: string, timeStr?: string): Date | null {
-    const now = new Date();
-
     if (!dateStr && !timeStr) return null;
 
-    // Parse time components
+    // All date math in CDMX timezone
+    const nowCdmx = this.toCdmx(new Date());
+
     let hours = 9;
     let minutes = 0;
     if (timeStr) {
@@ -159,47 +159,72 @@ export class AppointmentsService {
 
     // If only time is provided, assume today (or tomorrow if past)
     if (!dateStr && timeStr) {
-      const date = new Date(now);
+      const date = new Date(nowCdmx);
       date.setHours(hours, minutes, 0, 0);
-      if (date <= now) {
+      if (date <= nowCdmx) {
         date.setDate(date.getDate() + 1);
       }
-      return date;
+      return this.cdmxToUtc(date, hours, minutes);
     }
 
     try {
-      let date: Date;
+      let dateCdmx: Date;
       const lower = (dateStr || '').toLowerCase().trim();
 
-      // Handle relative dates in Spanish
       if (lower === 'hoy' || lower === 'today') {
-        date = new Date(now);
+        dateCdmx = new Date(nowCdmx);
       } else if (lower === 'mañana' || lower === 'manana' || lower === 'tomorrow') {
-        date = new Date(now);
-        date.setDate(date.getDate() + 1);
+        dateCdmx = new Date(nowCdmx);
+        dateCdmx.setDate(dateCdmx.getDate() + 1);
       } else if (lower.includes('pasado mañana') || lower.includes('pasado manana')) {
-        date = new Date(now);
-        date.setDate(date.getDate() + 2);
+        dateCdmx = new Date(nowCdmx);
+        dateCdmx.setDate(dateCdmx.getDate() + 2);
       } else if (/^(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)/.test(lower)) {
-        date = this.getNextDayOfWeek(lower, now);
+        dateCdmx = this.getNextDayOfWeek(lower, nowCdmx);
       } else {
-        // ISO format from AI: "2026-03-18"
-        // Parse manually to avoid timezone issues with new Date(string)
         const isoMatch = lower.match(/^(\d{4})-(\d{2})-(\d{2})$/);
         if (isoMatch) {
           const [, y, m, d] = isoMatch.map(Number);
-          date = new Date(y, m - 1, d);
+          dateCdmx = new Date(y, m - 1, d);
         } else {
-          date = new Date(dateStr!);
-          if (isNaN(date.getTime())) return null;
+          dateCdmx = new Date(dateStr!);
+          if (isNaN(dateCdmx.getTime())) return null;
         }
       }
 
-      date.setHours(hours, minutes, 0, 0);
-      return date;
+      return this.cdmxToUtc(dateCdmx, hours, minutes);
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Convert a "wall clock" CDMX date+time to a proper UTC Date.
+   * E.g. 10:00 CDMX (UTC-6) → 16:00 UTC.
+   */
+  private cdmxToUtc(dateCdmx: Date, hours: number, minutes: number): Date {
+    const year = dateCdmx.getFullYear();
+    const month = dateCdmx.getMonth();
+    const day = dateCdmx.getDate();
+    // Build an ISO string that represents the CDMX wall-clock time
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const isoStr = `${year}-${pad(month + 1)}-${pad(day)}T${pad(hours)}:${pad(minutes)}:00-06:00`;
+    return new Date(isoStr);
+  }
+
+  private toCdmx(utcDate: Date): Date {
+    // Get CDMX representation by formatting and re-parsing
+    const cdmxStr = utcDate.toLocaleString('en-CA', {
+      timeZone: 'America/Mexico_City',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    return new Date(cdmxStr);
   }
 
   private getNextDayOfWeek(dayName: string, from: Date): Date {

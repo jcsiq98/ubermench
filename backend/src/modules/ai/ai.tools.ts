@@ -311,11 +311,12 @@ export const AI_TOOLS: ChatCompletionTool[] = [
         properties: {
           date: {
             type: 'string',
-            description: 'Fecha en formato YYYY-MM-DD. Calcular la fecha correcta a partir de "mañana", "el lunes", etc.',
+            description:
+              'Fecha: usar palabra relativa ("hoy", "mañana", "pasado mañana") o nombre del día ("lunes", "martes", "viernes"). NO calcular fechas ISO — el sistema lo hace automáticamente. Solo usar YYYY-MM-DD si el usuario da una fecha numérica exacta.',
           },
           time: {
             type: 'string',
-            description: 'Hora en formato HH:MM (24h).',
+            description: 'Hora en formato HH:MM (24h). "a las 2" = "14:00", "a las 10" = "10:00".',
           },
           clientName: {
             type: 'string',
