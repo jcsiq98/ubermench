@@ -82,6 +82,7 @@ model ProviderProfile {
   expenses           Expense[]
   recurringExpenses  RecurringExpense[]
   appointments     Appointment[]
+  reminders        Reminder[]
   serviceZones     ProviderServiceZone[]
   trustScore       TrustScore?
   location         ProviderLocation?
@@ -236,6 +237,32 @@ enum AppointmentStatus {
   COMPLETED
   CANCELLED
   NO_SHOW
+}
+
+// ──────────────────────────────────────────────
+// Personal Reminders (separate from work appointments)
+// ──────────────────────────────────────────────
+model Reminder {
+  id          String         @id @default(uuid())
+  providerId  String         @map("provider_id")
+  description String
+  remindAt    DateTime       @map("remind_at")
+  status      ReminderStatus @default(PENDING)
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@index([providerId, remindAt])
+  @@index([status])
+  @@map("reminders")
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  CANCELLED
 }
 
 // ──────────────────────────────────────────────

@@ -21,6 +21,8 @@ import { QueueService } from '../../common/queues/queue.service';
 import { QUEUE_NAMES } from '../../common/queues/queue.constants';
 import { AppointmentFollowupJobData } from '../../common/queues/processors/appointment-followup.processor';
 import { AppointmentReminderJobData } from '../../common/queues/processors/appointment-reminder.processor';
+import { PersonalReminderJobData } from '../../common/queues/processors/personal-reminder.processor';
+import { RemindersService } from '../reminders/reminders.service';
 
 // ─── Provider session states ────────────────────────────────
 
@@ -72,6 +74,7 @@ export class WhatsAppProviderHandler {
     private workspaceService: WorkspaceService,
     private providerModelService: ProviderModelService,
     private queueService: QueueService,
+    private remindersService: RemindersService,
   ) {}
 
   // ─── Session management ──────────────────────────────────
@@ -597,6 +600,22 @@ export class WhatsAppProviderHandler {
             await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
             break;
 
+          case AiIntent.CREAR_RECORDATORIO:
+            await this.handleCrearRecordatorio(phone, aiResponse.data, providerProfileId);
+            break;
+
+          case AiIntent.VER_RECORDATORIOS:
+            await this.handleVerRecordatorios(phone, providerProfileId);
+            break;
+
+          case AiIntent.MODIFICAR_RECORDATORIO:
+            await this.handleModificarRecordatorio(phone, aiResponse.data, providerProfileId);
+            break;
+
+          case AiIntent.CANCELAR_RECORDATORIO:
+            await this.handleCancelarRecordatorio(phone, aiResponse.data, providerProfileId);
+            break;
+
           case AiIntent.CONFIGURAR_PERFIL:
             await this.handleConfigurarPerfil(phone, aiResponse, providerProfileId);
             break;
@@ -617,6 +636,9 @@ export class WhatsAppProviderHandler {
           AiIntent.MODIFICAR_CITA,
           AiIntent.CANCELAR_CITA,
           AiIntent.CONFIRMAR_RESULTADO_CITA,
+          AiIntent.CREAR_RECORDATORIO,
+          AiIntent.MODIFICAR_RECORDATORIO,
+          AiIntent.CANCELAR_RECORDATORIO,
         ];
         const hasMutation = aiResponses.some((r) =>
           dataMutatingIntents.includes(r.intent),
@@ -2101,6 +2123,206 @@ export class WhatsAppProviderHandler {
         `❌ No se pudo enviar el mensaje. Intenta de nuevo.`,
       );
     }
+  }
+
+  // ─── Personal Reminders: CRUD ──────────────────────────
+
+  private async handleCrearRecordatorio(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      return;
+    }
+
+    const remindAt = this.remindersService.parseScheduledDate(data?.date, data?.time);
+
+    if (!remindAt) {
+      await this.sendAndRecord(
+        phone,
+        '🤔 No pude detectar la fecha u hora del recordatorio. ¿Podrías ser más específico?\n\nEjemplo: *"Recuérdame ir al gym mañana a las 10"*',
+      );
+      return;
+    }
+
+    const description = data?.description || 'Recordatorio';
+
+    try {
+      const reminder = await this.remindersService.create({
+        providerId: providerProfileId,
+        description,
+        remindAt,
+      });
+
+      const confirmation = this.remindersService.formatReminderConfirmation(description, remindAt);
+      await this.sendAndRecord(phone, confirmation, AiIntent.CREAR_RECORDATORIO);
+
+      this.schedulePersonalReminder(reminder.id, phone, description, remindAt);
+    } catch (error: any) {
+      this.logger.error(`Error creating reminder: ${error.message}`);
+      await this.sendAndRecord(phone, '❌ No se pudo crear el recordatorio. Intenta de nuevo.');
+    }
+  }
+
+  private async handleVerRecordatorios(
+    phone: string,
+    providerProfileId?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      return;
+    }
+
+    try {
+      const reminders = await this.remindersService.findActive(providerProfileId);
+      const msg = this.remindersService.formatRemindersList(reminders);
+      await this.sendAndRecord(phone, msg, AiIntent.VER_RECORDATORIOS);
+    } catch (error: any) {
+      this.logger.error(`Error listing reminders: ${error.message}`);
+      await this.sendAndRecord(phone, '❌ No se pudieron cargar los recordatorios. Intenta de nuevo.');
+    }
+  }
+
+  private async handleModificarRecordatorio(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      return;
+    }
+
+    const description = data?.description;
+    if (!description) {
+      await this.sendAndRecord(phone, '🤔 ¿Cuál recordatorio quieres modificar?');
+      return;
+    }
+
+    try {
+      const matches = await this.remindersService.findByDescription(providerProfileId, description);
+
+      if (matches.length === 0) {
+        await this.sendAndRecord(
+          phone,
+          `🤔 No encontré un recordatorio que coincida con "${description}". Usa *ver recordatorios* para ver los pendientes.`,
+        );
+        return;
+      }
+
+      const reminder = matches[0];
+      const updateData: any = {};
+
+      if (data?.newDescription) {
+        updateData.description = data.newDescription;
+      }
+
+      const newRemindAt = this.remindersService.parseScheduledDate(data?.newDate, data?.newTime);
+      if (newRemindAt) {
+        updateData.remindAt = newRemindAt;
+      }
+
+      if (Object.keys(updateData).length === 0) {
+        await this.sendAndRecord(phone, '🤔 ¿Qué quieres cambiar del recordatorio? (hora, fecha, descripción)');
+        return;
+      }
+
+      const updated = await this.remindersService.update(reminder.id, updateData);
+
+      this.cancelPersonalReminder(reminder.id);
+      this.schedulePersonalReminder(
+        updated.id,
+        phone,
+        updated.description,
+        updated.remindAt,
+      );
+
+      const msg = this.remindersService.formatReminderModified(updated.description, updated.remindAt);
+      await this.sendAndRecord(phone, msg, AiIntent.MODIFICAR_RECORDATORIO);
+    } catch (error: any) {
+      this.logger.error(`Error modifying reminder: ${error.message}`);
+      await this.sendAndRecord(phone, '❌ No se pudo modificar el recordatorio. Intenta de nuevo.');
+    }
+  }
+
+  private async handleCancelarRecordatorio(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      return;
+    }
+
+    const description = data?.description;
+    if (!description) {
+      await this.sendAndRecord(phone, '🤔 ¿Cuál recordatorio quieres cancelar?');
+      return;
+    }
+
+    try {
+      const matches = await this.remindersService.findByDescription(providerProfileId, description);
+
+      if (matches.length === 0) {
+        await this.sendAndRecord(
+          phone,
+          `🤔 No encontré un recordatorio que coincida con "${description}". Usa *ver recordatorios* para ver los pendientes.`,
+        );
+        return;
+      }
+
+      const reminder = matches[0];
+      await this.remindersService.cancel(reminder.id);
+      this.cancelPersonalReminder(reminder.id);
+
+      const msg = this.remindersService.formatReminderCancelled(reminder.description);
+      await this.sendAndRecord(phone, msg, AiIntent.CANCELAR_RECORDATORIO);
+    } catch (error: any) {
+      this.logger.error(`Error cancelling reminder: ${error.message}`);
+      await this.sendAndRecord(phone, '❌ No se pudo cancelar el recordatorio. Intenta de nuevo.');
+    }
+  }
+
+  // ─── Personal Reminder BullMQ scheduling ──────────────
+
+  private schedulePersonalReminder(
+    reminderId: string,
+    providerPhone: string,
+    description: string,
+    remindAt: Date,
+  ): boolean {
+    const delay = remindAt.getTime() - Date.now();
+
+    if (delay <= 0) return false;
+
+    const jobData: PersonalReminderJobData = {
+      reminderId,
+      providerPhone,
+      description,
+      remindAt: remindAt.toISOString(),
+    };
+
+    this.queueService
+      .addJob(
+        QUEUE_NAMES.PERSONAL_REMINDER,
+        'personal-reminder',
+        jobData,
+        { delay, jobId: `personal-reminder-${reminderId}` },
+      )
+      .catch((err) =>
+        this.logger.warn(`Failed to schedule personal reminder: ${err.message}`),
+      );
+
+    return true;
+  }
+
+  private cancelPersonalReminder(reminderId: string): void {
+    const queue = (this.queueService as any).queues?.[QUEUE_NAMES.PERSONAL_REMINDER];
+    if (!queue) return;
+    queue.remove(`personal-reminder-${reminderId}`).catch(() => {});
   }
 
   // ─── Appointment followup scheduling ────────────────────

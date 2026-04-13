@@ -23,6 +23,8 @@ export class QueueService {
     appointmentFollowupQueue?: Queue,
     @Optional() @InjectQueue(QUEUE_NAMES.APPOINTMENT_REMINDER)
     appointmentReminderQueue?: Queue,
+    @Optional() @InjectQueue(QUEUE_NAMES.PERSONAL_REMINDER)
+    personalReminderQueue?: Queue,
   ) {
     if (notificationsQueue) this.queues[QUEUE_NAMES.NOTIFICATIONS] = notificationsQueue;
     if (trustScoreQueue) this.queues[QUEUE_NAMES.TRUST_SCORE] = trustScoreQueue;
@@ -31,6 +33,7 @@ export class QueueService {
     if (paymentsQueue) this.queues[QUEUE_NAMES.PAYMENTS] = paymentsQueue;
     if (appointmentFollowupQueue) this.queues[QUEUE_NAMES.APPOINTMENT_FOLLOWUP] = appointmentFollowupQueue;
     if (appointmentReminderQueue) this.queues[QUEUE_NAMES.APPOINTMENT_REMINDER] = appointmentReminderQueue;
+    if (personalReminderQueue) this.queues[QUEUE_NAMES.PERSONAL_REMINDER] = personalReminderQueue;
   }
 
   async addJob<T>(

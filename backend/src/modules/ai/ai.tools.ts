@@ -74,6 +74,18 @@ export const TOOL_TO_INTENT: Record<
     intent: AiIntent.CONFIGURAR_PERFIL,
     defaultData: { action: 'add_note' },
   },
+  crear_recordatorio: {
+    intent: AiIntent.CREAR_RECORDATORIO,
+  },
+  ver_recordatorios: {
+    intent: AiIntent.VER_RECORDATORIOS,
+  },
+  modificar_recordatorio: {
+    intent: AiIntent.MODIFICAR_RECORDATORIO,
+  },
+  cancelar_recordatorio: {
+    intent: AiIntent.CANCELAR_RECORDATORIO,
+  },
 };
 
 // ─── Tool definitions ────────────────────────────────────────
@@ -314,7 +326,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'agendar_cita',
       description:
-        'Agendar una cita/trabajo NUEVO con fecha y hora. NO usar para gastos fijos. NO usar si el usuario quiere cambiar/mover/reagendar una cita que ya existe — para eso usar modificar_cita.',
+        'Agendar una cita/trabajo NUEVO con fecha y hora. Solo para citas de TRABAJO con clientes. NO usar para recordatorios personales ("recuérdame ir al gym", "recuérdame comprar", "recuérdame llamar") — para eso usar crear_recordatorio. NO usar para gastos fijos. NO usar si el usuario quiere cambiar/mover/reagendar una cita que ya existe — para eso usar modificar_cita.',
       parameters: {
         type: 'object',
         properties: {
@@ -533,6 +545,94 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
         },
         required: ['note'],
+      },
+    },
+  },
+
+  // --- Personal reminders (NOT work appointments) ---
+  {
+    type: 'function',
+    function: {
+      name: 'crear_recordatorio',
+      description:
+        'Crear un recordatorio personal. Usar cuando el usuario dice "recuérdame", "ponme un recordatorio", "avísame a las X", o quiere recordar algo PERSONAL (ir al gym, comprar algo, llamar a alguien, recoger los niños). NO es una cita de trabajo — no tiene cliente, no va a la agenda.',
+      parameters: {
+        type: 'object',
+        properties: {
+          description: {
+            type: 'string',
+            description: 'Qué recordar (ej: "ir al gym", "comprar material", "llamar al contador").',
+          },
+          date: {
+            type: 'string',
+            description: 'Fecha del recordatorio. Usar "hoy", "mañana", nombre del día, o YYYY-MM-DD.',
+          },
+          time: {
+            type: 'string',
+            description: 'Hora en formato HH:MM (24h). "a las 2" = "14:00".',
+          },
+        },
+        required: ['description'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ver_recordatorios',
+      description:
+        'Ver/listar los recordatorios personales pendientes. Usar cuando el usuario pregunta "qué recordatorios tengo", "mis recordatorios", "de qué me tengo que acordar".',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'modificar_recordatorio',
+      description:
+        'Cambiar/mover un recordatorio personal existente. Usar cuando el usuario dice "cambia el recordatorio de X", "mueve mi recordatorio a las Y".',
+      parameters: {
+        type: 'object',
+        properties: {
+          description: {
+            type: 'string',
+            description: 'Descripción del recordatorio a modificar (para identificar cuál).',
+          },
+          newDate: {
+            type: 'string',
+            description: 'Nueva fecha. Usar "hoy", "mañana", nombre del día, o YYYY-MM-DD.',
+          },
+          newTime: {
+            type: 'string',
+            description: 'Nueva hora en formato HH:MM (24h).',
+          },
+          newDescription: {
+            type: 'string',
+            description: 'Nueva descripción si se menciona.',
+          },
+        },
+        required: ['description'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cancelar_recordatorio',
+      description:
+        'Cancelar/eliminar/quitar un recordatorio personal. Usar cuando el usuario dice "cancela el recordatorio de X", "ya no me recuerdes X", "quita ese recordatorio".',
+      parameters: {
+        type: 'object',
+        properties: {
+          description: {
+            type: 'string',
+            description: 'Descripción del recordatorio a cancelar (para identificar cuál).',
+          },
+        },
+        required: ['description'],
       },
     },
   },

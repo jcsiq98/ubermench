@@ -11,6 +11,10 @@ export enum AiIntent {
   CANCELAR_CITA = 'cancelar_cita',
   CONFIRMAR_RESULTADO_CITA = 'confirmar_resultado_cita',
   AYUDA = 'ayuda',
+  CREAR_RECORDATORIO = 'crear_recordatorio',
+  VER_RECORDATORIOS = 'ver_recordatorios',
+  MODIFICAR_RECORDATORIO = 'modificar_recordatorio',
+  CANCELAR_RECORDATORIO = 'cancelar_recordatorio',
   CONFIGURAR_PERFIL = 'configurar_perfil',
   CONVERSACION_GENERAL = 'conversacion_general',
 }
@@ -62,6 +66,15 @@ export interface AppointmentData {
   clientPhone?: string;
   address?: string;
   description?: string;
+}
+
+export interface ReminderData {
+  description?: string;
+  date?: string;
+  time?: string;
+  newDate?: string;
+  newTime?: string;
+  newDescription?: string;
 }
 
 export type WorkspaceConfigAction =

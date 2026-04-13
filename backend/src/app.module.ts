@@ -36,6 +36,7 @@ import { QueueModule } from './common/queues/queue.module';
 import { CryptoModule } from './common/crypto/crypto.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { ProviderModelModule } from './modules/provider-model/provider-model.module';
+import { RemindersModule } from './modules/reminders/reminders.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -96,6 +97,9 @@ const isProd = process.env.NODE_ENV === 'production';
 
     // Appointments (global)
     AppointmentsModule,
+
+    // Personal Reminders (global)
+    RemindersModule,
 
     // Workspace (global)
     WorkspaceModule,

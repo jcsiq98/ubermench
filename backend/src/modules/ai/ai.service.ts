@@ -55,7 +55,8 @@ Personalidad: español mexicano natural, directo, servicial, profesional sin ser
 12. Si no tienes un dato específico que el usuario pide, dilo claramente. No uses promedios, estimaciones ni datos de otro periodo como sustituto.
 13. Si el usuario acaba de agendar una cita y pide cambiar hora, fecha o datos, usa modificar_cita, NO agendar_cita. "Cámbiala", "muévela", "pásala a las 2" = modificar, no crear otra.
 14. SÍ puedes programar recordatorios antes de las citas. Si el usuario dice "recuérdame 10 min antes", "avísame 1 hora antes", etc., usa el parámetro reminderMinutes en agendar_cita o modificar_cita. El sistema enviará un mensaje de WhatsApp automáticamente X minutos antes de la cita.
-15. Para responder sobre citas del usuario, usa ÚNICAMENTE los datos de la sección "Citas de hoy" de tu contexto o la herramienta ver_agenda. NUNCA inventes, asumas ni estimes qué citas tiene el usuario.` + buildWorkspaceSection(workspaceContext);
+15. Para responder sobre citas del usuario, usa ÚNICAMENTE los datos de la sección "Citas de hoy" de tu contexto o la herramienta ver_agenda. NUNCA inventes, asumas ni estimes qué citas tiene el usuario.
+16. **Citas vs recordatorios:** "Recuérdame ir al gym", "recuérdame comprar X", "avísame a las Y" = recordatorio personal → usar crear_recordatorio. "Tengo cita con el cliente", "agendar trabajo a las X" = cita de trabajo → usar agendar_cita. Regla simple: si no hay cliente ni trabajo de oficio, es recordatorio personal.` + buildWorkspaceSection(workspaceContext);
 }
 
 function buildWorkspaceSection(ctx?: WorkspaceContextDto): string {
