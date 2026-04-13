@@ -50,10 +50,13 @@ export class AiContextService {
     );
 
     // PostgreSQL: permanent log (non-blocking)
+    const normalizedPhone = providerPhone.startsWith('+')
+      ? providerPhone
+      : `+${providerPhone}`;
     this.prisma.conversationLog
       .create({
         data: {
-          phone: providerPhone,
+          phone: normalizedPhone,
           role,
           content,
           intent: intent ?? null,

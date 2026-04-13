@@ -4,6 +4,7 @@ import {
   Patch,
   Body,
   Param,
+  Query,
   ForbiddenException,
   Headers,
 } from '@nestjs/common';
@@ -144,7 +145,128 @@ export class AppController {
     return { success: true, user: updated };
   }
 
+  // ─── Conversation lookup (verify-token protected) ────────
+
+  @Get('api/internal/users/:phone/conversation')
+  @Public()
+  async getUserConversation(
+    @Param('phone') phone: string,
+    @Headers('x-verify-token') token: string,
+    @Query('limit') limitParam?: string,
+  ) {
+    const verifyToken = this.config.get<string>('WHATSAPP_VERIFY_TOKEN');
+    if (!token || token !== verifyToken) {
+      throw new ForbiddenException('Invalid verify token');
+    }
+
+    const limit = Math.min(parseInt(limitParam || '50', 10) || 50, 200);
+    const variants = this.phoneVariants(phone);
+
+    const user = await this.prisma.user.findFirst({
+      where: { OR: variants.map((p) => ({ phone: p })) },
+      include: {
+        providerProfile: { select: { id: true, bio: true } },
+      },
+    });
+
+    const logs = await this.prisma.conversationLog.findMany({
+      where: { OR: variants.map((p) => ({ phone: p })) },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    const providerProfile = (user as any)?.providerProfile;
+    const appointments = providerProfile
+      ? await this.prisma.appointment.findMany({
+          where: { providerId: providerProfile.id },
+          orderBy: { scheduledAt: 'desc' },
+          take: 10,
+        })
+      : [];
+
+    return {
+      user: user
+        ? {
+            id: user.id,
+            phone: user.phone,
+            name: user.name,
+            role: user.role,
+            trade: (user as any).providerProfile?.bio,
+            createdAt: user.createdAt,
+          }
+        : null,
+      conversation: logs.reverse().map((l) => ({
+        role: l.role,
+        content: l.content,
+        intent: l.intent,
+        at: l.createdAt,
+      })),
+      appointments: appointments.map((a) => ({
+        id: a.id,
+        client: a.clientName,
+        scheduled: a.scheduledAt,
+        status: a.status,
+        description: a.description,
+      })),
+      meta: { totalMessages: logs.length, limit },
+    };
+  }
+
+  @Get('api/internal/users')
+  @Public()
+  async listUsers(
+    @Headers('x-verify-token') token: string,
+  ) {
+    const verifyToken = this.config.get<string>('WHATSAPP_VERIFY_TOKEN');
+    if (!token || token !== verifyToken) {
+      throw new ForbiddenException('Invalid verify token');
+    }
+
+    const users = await this.prisma.user.findMany({
+      include: {
+        providerProfile: { select: { id: true, bio: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const phoneCounts = await this.prisma.conversationLog.groupBy({
+      by: ['phone'],
+      _count: true,
+    });
+    const countMap = new Map(phoneCounts.map((p) => [p.phone, p._count]));
+
+    return users.map((u) => {
+      const variants = this.phoneVariants(u.phone);
+      const msgCount = variants.reduce((sum, v) => sum + (countMap.get(v) || 0), 0);
+      return {
+        phone: u.phone,
+        name: u.name,
+        role: u.role,
+        trade: (u as any).providerProfile?.bio,
+        messages: msgCount,
+        createdAt: u.createdAt,
+      };
+    });
+  }
+
   // ─── Private helpers ──────────────────────────────────────
+
+  private phoneVariants(raw: string): string[] {
+    const digits = raw.replace(/\D/g, '');
+    const variants = new Set<string>();
+    variants.add(digits);
+    variants.add(`+${digits}`);
+    if (digits.startsWith('521')) {
+      const without1 = `52${digits.slice(3)}`;
+      variants.add(without1);
+      variants.add(`+${without1}`);
+    } else if (digits.startsWith('52') && !digits.startsWith('521')) {
+      const with1 = `521${digits.slice(2)}`;
+      variants.add(with1);
+      variants.add(`+${with1}`);
+    }
+    return [...variants];
+  }
 
   private async checkDb(): Promise<boolean> {
     try {

@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../config/redis.service';
 import { WhatsAppService } from './whatsapp.service';
 import { AiService } from '../ai/ai.service';
+import { AiContextService } from '../ai/ai-context.service';
 
 export enum OnboardingStep {
   NAME = 'NAME',
@@ -28,7 +29,17 @@ export class WhatsAppOnboardingHandler {
     private prisma: PrismaService,
     private redis: RedisService,
     private aiService: AiService,
+    private aiContextService: AiContextService,
   ) {}
+
+  private async sendAndLog(
+    phone: string,
+    message: string,
+    intent = 'onboarding',
+  ): Promise<void> {
+    await this.whatsapp.sendTextMessage(phone, message);
+    await this.aiContextService.addMessage(phone, 'assistant', message, intent);
+  }
 
   private async getSession(phone: string): Promise<OnboardingSession | null> {
     const raw = await this.redis.get(`${SESSION_PREFIX}${phone}`);
@@ -69,7 +80,7 @@ export class WhatsAppOnboardingHandler {
     });
 
     if (existing?.providerProfile) {
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndLog(
         senderPhone,
         `👋 ¡Hola ${existing.name || ''}! Ya tienes tu cuenta activa.\n\n` +
           `Puedes escribirme lo que necesites. Por ejemplo:\n` +
@@ -79,6 +90,8 @@ export class WhatsAppOnboardingHandler {
       );
       return;
     }
+
+    await this.aiContextService.addMessage(senderPhone, 'user', text, 'onboarding');
 
     if (!session) {
       return this.startOnboarding(senderPhone, senderName);
@@ -90,10 +103,7 @@ export class WhatsAppOnboardingHandler {
       case OnboardingStep.TRADE:
         return this.handleTradeResponse(senderPhone, text, session);
       case OnboardingStep.DONE:
-        await this.whatsapp.sendTextMessage(
-          senderPhone,
-          `Ya estás registrado. Escríbeme lo que necesites.`,
-        );
+        await this.sendAndLog(senderPhone, `Ya estás registrado. Escríbeme lo que necesites.`);
         return;
       default:
         return this.startOnboarding(senderPhone, senderName);
@@ -115,7 +125,7 @@ export class WhatsAppOnboardingHandler {
         name: capitalizedName,
       });
 
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndLog(
         phone,
         `👋 ¡Hola, *${capitalizedName}*! Soy tu Chalán.\n\n` +
           `Te ayudo a llevar el control de tus ingresos, tu agenda y tu negocio — todo por aquí, por WhatsApp.\n\n` +
@@ -124,7 +134,7 @@ export class WhatsAppOnboardingHandler {
     } else {
       await this.setSession(phone, { step: OnboardingStep.NAME });
 
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndLog(
         phone,
         `👋 ¡Hola! Soy tu Chalán.\n\n` +
           `Te ayudo a llevar el control de tus ingresos, tu agenda y tu negocio — todo por aquí, por WhatsApp.\n\n` +
@@ -140,10 +150,7 @@ export class WhatsAppOnboardingHandler {
   ): Promise<void> {
     const trimmed = text.trim();
     if (trimmed.length < 2) {
-      await this.whatsapp.sendTextMessage(
-        phone,
-        `Dime tu nombre para que sepa cómo llamarte.`,
-      );
+      await this.sendAndLog(phone, `Dime tu nombre para que sepa cómo llamarte.`);
       return;
     }
 
@@ -157,7 +164,7 @@ Responde con JSON: {"name": "Nombre Extraído"} o {"name": null}`,
     );
 
     if (!extracted?.name) {
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndLog(
         phone,
         `Antes de ayudarte con eso, dime *¿cómo te llamas?* para registrar tu cuenta.`,
       );
@@ -173,7 +180,7 @@ Responde con JSON: {"name": "Nombre Extraído"} o {"name": null}`,
     session.step = OnboardingStep.TRADE;
     await this.setSession(phone, session);
 
-    await this.whatsapp.sendTextMessage(
+    await this.sendAndLog(
       phone,
       `Mucho gusto, *${session.name}* 👋\n\n` +
         `*¿A qué te dedicas?*\n_(plomero, electricista, albañil, pintor, lo que sea)_`,
@@ -187,10 +194,7 @@ Responde con JSON: {"name": "Nombre Extraído"} o {"name": null}`,
   ): Promise<void> {
     const trimmed = text.trim();
     if (trimmed.length < 2) {
-      await this.whatsapp.sendTextMessage(
-        phone,
-        `Dime a qué te dedicas. Puede ser cualquier oficio.`,
-      );
+      await this.sendAndLog(phone, `Dime a qué te dedicas. Puede ser cualquier oficio.`);
       return;
     }
 
@@ -247,7 +251,7 @@ Si no puedes identificar un oficio, usa el texto tal cual: {"trade": "${trimmed}
 
       await this.clearSession(phone);
 
-      await this.whatsapp.sendTextMessage(
+      await this.sendAndLog(
         phone,
         `¡Listo, *${session.name}*! Ya tienes tu Chalán. 🎉\n\n` +
           `Esto es lo que puedo hacer por ti:\n\n` +
@@ -268,10 +272,7 @@ Si no puedes identificar un oficio, usa el texto tal cual: {"trade": "${trimmed}
         `Error creating provider: ${error.message}`,
         error.stack,
       );
-      await this.whatsapp.sendTextMessage(
-        phone,
-        `Hubo un error. Intenta de nuevo enviando cualquier mensaje.`,
-      );
+      await this.sendAndLog(phone, `Hubo un error. Intenta de nuevo enviando cualquier mensaje.`);
       await this.clearSession(phone);
     }
   }

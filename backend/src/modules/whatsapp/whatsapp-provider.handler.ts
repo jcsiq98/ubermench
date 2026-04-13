@@ -1227,10 +1227,14 @@ export class WhatsAppProviderHandler {
       );
 
       if (reminderMinutes) {
-        confirmation += `\n\n🔔 Te recordaré *${reminderMinutes} minutos* antes.`;
-        this.scheduleAppointmentReminder(
+        const scheduled = this.scheduleAppointmentReminder(
           appointment.id, phone, scheduledAt, reminderMinutes, data?.clientName,
         );
+        if (scheduled) {
+          confirmation += `\n\n🔔 Te recordaré *${reminderMinutes} minutos* antes.`;
+        } else {
+          confirmation += `\n\n⚠️ No pude programar el recordatorio de ${reminderMinutes} min — ya pasó ese momento.`;
+        }
       }
 
       await this.sendAndRecord(phone, confirmation);
@@ -1369,10 +1373,12 @@ export class WhatsAppProviderHandler {
       const activeReminder = updated.reminderMinutes ?? (target as any).reminderMinutes;
       if (activeReminder && (updates.scheduledAt || updates.reminderMinutes !== undefined)) {
         this.cancelAppointmentReminder(updated.id);
-        this.scheduleAppointmentReminder(
+        const scheduled = this.scheduleAppointmentReminder(
           updated.id, phone, updated.scheduledAt, activeReminder, updated.clientName ?? undefined,
         );
-        confirmation += `\n\n🔔 Recordatorio reprogramado: *${activeReminder} minutos* antes.`;
+        if (scheduled) {
+          confirmation += `\n\n🔔 Recordatorio reprogramado: *${activeReminder} minutos* antes.`;
+        }
       }
 
       await this.sendAndRecord(phone, confirmation);
@@ -2135,10 +2141,10 @@ export class WhatsAppProviderHandler {
     scheduledAt: Date,
     reminderMinutes: number,
     clientName?: string,
-  ): void {
+  ): boolean {
     const delay = scheduledAt.getTime() - Date.now() - reminderMinutes * 60 * 1000;
 
-    if (delay <= 0) return; // reminder time already passed
+    if (delay <= 0) return false;
 
     const jobData: AppointmentReminderJobData = {
       appointmentId,
@@ -2158,6 +2164,8 @@ export class WhatsAppProviderHandler {
       .catch((err) =>
         this.logger.warn(`Failed to schedule appointment reminder: ${err.message}`),
       );
+
+    return true;
   }
 
   private cancelAppointmentReminder(appointmentId: string): void {
