@@ -47,13 +47,20 @@ All project documentation, organized by function:
 
 ## Active Backend Modules (`backend/src/modules/`)
 
-- `ai/` — LLM integration (OpenAI) via **function calling** (18 typed tools in `ai.tools.ts`), conversation context (Redis). Intent classification uses tool selection, NOT prompt-based rules. System prompt is minimal (personality + context only)
-- `workspace/` — Provider business profile via chat (services, prices, schedule, auto-reply, notes). Cache-first (Redis → DB). Injected into LLM system prompt for personalized responses
+- `ai/` — LLM integration (OpenAI) via **function calling** (22 typed tools in `ai.tools.ts`), conversation context (Redis). Intent classification uses tool selection, NOT prompt-based rules. System prompt is minimal (personality + context only)
+- `workspace/` — Provider business profile via chat (services, prices, schedule, auto-reply, notes, **structured learned facts**). Cache-first (Redis → DB). Injected into LLM system prompt for personalized responses. Learned facts are `StructuredFact[]` with `{fact, category, firstSeen, lastSeen}` — categories: personal/negocio/clientes/preferencias/patrones. Max 100 facts. Auto-decay at 60 days. Extracted every ~10 messages via LLM (Cap. 29)
 - `income/` — Income tracking, weekly/monthly summaries
-- `appointments/` — Scheduling, Spanish date parsing, reminders, **modify/cancel/followup (full CRUD)**. BullMQ jobs: "¿Se hizo?" 30min post-appointment + configurable pre-appointment reminder (`reminderMinutes`). **KNOWN ISSUE (Cap. 25):** BullMQ delayed jobs are NOT executing in production — likely Redis not configured on Railway. Followups and reminders will not work until this is resolved. See `HISTORIA_DECISIONES.md` Cap. 25 "BLOQUEANTE PRE-DEPLOY" section.
+- `appointments/` — Scheduling, Spanish date parsing, reminders, **modify/cancel/followup (full CRUD)**. BullMQ jobs: "¿Se hizo?" 30min post-appointment + configurable pre-appointment reminder (`reminderMinutes`). Cron safety net marks stale PENDING appointments as NO_SHOW every 30 min. **BullMQ active in production since Cap. 26** (root cause was ioredis ignoring `url` property in options object — see `HISTORIA_DECISIONES.md` Cap. 26).
 - `whatsapp/` — Core: webhook handler, message sending, provider handler (hybrid commands + LLM routing)
-- `onboarding/` — Provider registration via WhatsApp
+- `onboarding/` — Provider registration via WhatsApp. Messages now logged to conversation_logs (Cap. 27)
+- `reminders/` — Standalone personal reminders separate from work appointments (Cap. 28). CRUD completo via 4 LLM tools (`crear_recordatorio`, `ver_recordatorios`, `modificar_recordatorio`, `cancelar_recordatorio`). Prisma model `Reminder` (id, providerId, description, remindAt, status). BullMQ queue `PERSONAL_REMINDER` sends WhatsApp notification at remind time. Cron safety net marks stale PENDING as SENT every 30 min. System prompt rule 16 disambiguates: no client = recordatorio, not cita.
 - `providers/`, `users/`, `auth/`, `admin/`, `notifications/`, `verification/`, `zones/`, `addresses/`, `provider-dashboard/`
+
+## Internal Observability Endpoints (verify-token protected)
+
+- `GET /api/internal/users` — List all users with message counts
+- `GET /api/internal/users/:phone/conversation?limit=50` — Full conversation, profile, appointments for any phone. Handles all Mexican phone format variants
+- `PATCH /api/internal/users/by-phone/:phone` — Fix user data (name, etc.)
 
 ## Legacy Modules (`backend/src/modules/_marketplace/`)
 

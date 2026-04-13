@@ -122,5 +122,31 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
     return (await this.client.exists(key)) === 1;
   }
+
+  /**
+   * Atomic set-if-not-exists. Returns true if the key was set (caller wins),
+   * false if it already existed (someone else won).
+   */
+  async setNX(key: string, value: string, ttlSeconds?: number): Promise<boolean> {
+    if (this.isMemoryMode) {
+      const existing = this.memoryStore.get(key);
+      if (existing && (!existing.expiresAt || Date.now() <= existing.expiresAt)) {
+        return false;
+      }
+      this.memoryStore.set(key, {
+        value,
+        expiresAt: ttlSeconds ? Date.now() + ttlSeconds * 1000 : undefined,
+      });
+      return true;
+    }
+
+    const args: (string | number)[] = [key, value];
+    if (ttlSeconds) {
+      args.push('EX', ttlSeconds);
+    }
+    args.push('NX');
+    const result = await (this.client as any).set(...args);
+    return result === 'OK';
+  }
 }
 

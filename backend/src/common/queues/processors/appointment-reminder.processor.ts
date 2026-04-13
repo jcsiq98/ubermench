@@ -63,6 +63,7 @@ export class AppointmentReminderProcessor extends WorkerHost {
     const msg = `⏰ Recordatorio: en *${reminderMinutes} minutos* tienes cita de las *${timeStr}* con *${clientLabel}*.`;
 
     await this.whatsappService.sendTextMessage(providerPhone, msg);
-    await this.aiContextService.addMessage(providerPhone, 'assistant', msg, 'recordatorio_cita');
+    await this.aiContextService.addMessage(providerPhone, 'assistant', msg, 'recordatorio_cita')
+      .catch((err) => this.logger.warn(`Failed to log reminder context: ${err.message}`));
   }
 }

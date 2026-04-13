@@ -63,6 +63,7 @@ export class AppointmentFollowupProcessor extends WorkerHost {
     const msg = `📋 Oye, ya pasó tu cita de las *${timeStr}* con *${clientLabel}*. ¿Se hizo?`;
 
     await this.whatsappService.sendTextMessage(providerPhone, msg);
-    await this.aiContextService.addMessage(providerPhone, 'assistant', msg, 'followup_cita');
+    await this.aiContextService.addMessage(providerPhone, 'assistant', msg, 'followup_cita')
+      .catch((err) => this.logger.warn(`Failed to log followup context: ${err.message}`));
   }
 }

@@ -38,7 +38,8 @@ export class PersonalReminderProcessor extends WorkerHost {
       const msg = `🔔 *Recordatorio:* ${description}`;
 
       await this.whatsappService.sendTextMessage(providerPhone, msg);
-      await this.aiContextService.addMessage(providerPhone, 'assistant', msg, 'recordatorio_personal');
+      await this.aiContextService.addMessage(providerPhone, 'assistant', msg, 'recordatorio_personal')
+        .catch((err) => this.logger.warn(`Failed to log personal reminder context: ${err.message}`));
       await this.remindersService.markSent(reminderId).catch((err) =>
         this.logger.warn(`Failed to mark reminder ${reminderId} as sent: ${err.message}`),
       );

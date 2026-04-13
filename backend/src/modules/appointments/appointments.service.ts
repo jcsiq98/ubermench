@@ -166,18 +166,28 @@ export class AppointmentsService {
     return appointment;
   }
 
+  private static readonly INVALID_CLIENT_NAMES = new Set([
+    'ninguna', 'ninguno', 'nada', 'nadie', 'no', 'none',
+    'no sé', 'no se', 'no recuerdo', 'cualquiera', 'n/a',
+  ]);
+
   /**
    * Find the most recent past appointment for follow-up confirmation.
    */
   async findRecentPastAppointment(providerId: string, clientName?: string) {
+    const normalized = clientName?.trim().toLowerCase();
+    const isValidName = normalized
+      && normalized.length > 1
+      && !AppointmentsService.INVALID_CLIENT_NAMES.has(normalized);
+
     const where: any = {
       providerId,
       status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED] },
       scheduledAt: { lt: new Date() },
     };
 
-    if (clientName) {
-      where.clientName = { contains: clientName, mode: 'insensitive' };
+    if (isValidName) {
+      where.clientName = { contains: clientName!.trim(), mode: 'insensitive' };
     }
 
     return this.prisma.appointment.findFirst({

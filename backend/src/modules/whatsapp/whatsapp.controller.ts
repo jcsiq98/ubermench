@@ -77,15 +77,13 @@ export class WhatsAppController {
           value.contacts?.[0]?.profile?.name || 'Unknown';
         const messageId = message.id;
 
-        // Idempotency: skip if we've already processed this message
+        // Atomic idempotency: only the first caller wins
         const dedupKey = `wa_dedup:${messageId}`;
-        const alreadyProcessed = await this.redis.exists(dedupKey);
-        if (alreadyProcessed) {
+        const isFirstProcessing = await this.redis.setNX(dedupKey, '1', WEBHOOK_DEDUP_TTL);
+        if (!isFirstProcessing) {
           this.logger.debug(`Duplicate webhook skipped: ${messageId}`);
           continue;
         }
-
-        await this.redis.set(dedupKey, '1', WEBHOOK_DEDUP_TTL);
 
         this.logger.log(
           `Message from ${senderPhone} (${senderName}): type=${message.type}`,
