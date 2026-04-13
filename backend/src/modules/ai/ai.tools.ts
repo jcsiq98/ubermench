@@ -51,6 +51,15 @@ export const TOOL_TO_INTENT: Record<
   agendar_cita: {
     intent: AiIntent.AGENDAR_CITA,
   },
+  modificar_cita: {
+    intent: AiIntent.MODIFICAR_CITA,
+  },
+  cancelar_cita: {
+    intent: AiIntent.CANCELAR_CITA,
+  },
+  confirmar_resultado_cita: {
+    intent: AiIntent.CONFIRMAR_RESULTADO_CITA,
+  },
   ver_agenda: {
     intent: AiIntent.VER_AGENDA,
   },
@@ -336,6 +345,95 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
         },
         required: ['date'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'modificar_cita',
+      description:
+        'Cambiar/mover/reagendar una cita existente. Usar cuando el usuario quiere cambiar la hora, fecha, dirección o descripción de una cita ya agendada. Requiere identificar cuál cita modificar (por nombre del cliente y/o fecha original).',
+      parameters: {
+        type: 'object',
+        properties: {
+          clientName: {
+            type: 'string',
+            description: 'Nombre del cliente de la cita a modificar (para identificar cuál cita).',
+          },
+          date: {
+            type: 'string',
+            description: 'Fecha original de la cita (para identificar cuál). Usar "hoy", "mañana", día de la semana, o YYYY-MM-DD.',
+          },
+          time: {
+            type: 'string',
+            description: 'Hora original de la cita (para identificar cuál). Formato HH:MM (24h).',
+          },
+          newDate: {
+            type: 'string',
+            description: 'Nueva fecha. Usar "hoy", "mañana", día de la semana, o YYYY-MM-DD.',
+          },
+          newTime: {
+            type: 'string',
+            description: 'Nueva hora en formato HH:MM (24h). "a las 2" = "14:00".',
+          },
+          newAddress: {
+            type: 'string',
+            description: 'Nueva dirección si se menciona.',
+          },
+          newDescription: {
+            type: 'string',
+            description: 'Nueva descripción si se menciona.',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cancelar_cita',
+      description:
+        'Cancelar/eliminar/quitar una cita existente de la agenda. Usar cuando el usuario quiere cancelar una cita.',
+      parameters: {
+        type: 'object',
+        properties: {
+          clientName: {
+            type: 'string',
+            description: 'Nombre del cliente de la cita a cancelar.',
+          },
+          date: {
+            type: 'string',
+            description: 'Fecha de la cita a cancelar. Usar "hoy", "mañana", día de la semana, o YYYY-MM-DD.',
+          },
+          time: {
+            type: 'string',
+            description: 'Hora de la cita a cancelar. Formato HH:MM (24h).',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'confirmar_resultado_cita',
+      description:
+        'Registrar el resultado de una cita pasada: si se completó, si el cliente no llegó, o si se canceló. Usar cuando el usuario responde a "¿Se hizo tu cita?" o menciona que una cita se completó o no.',
+      parameters: {
+        type: 'object',
+        properties: {
+          status: {
+            type: 'string',
+            enum: ['completed', 'no_show', 'cancelled'],
+            description: 'Resultado: completed (sí se hizo), no_show (no llegó/no se presentó), cancelled (se canceló).',
+          },
+          clientName: {
+            type: 'string',
+            description: 'Nombre del cliente de la cita.',
+          },
+        },
+        required: ['status'],
       },
     },
   },

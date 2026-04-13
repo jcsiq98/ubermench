@@ -234,6 +234,7 @@ enum AppointmentStatus {
   CONFIRMED
   COMPLETED
   CANCELLED
+  NO_SHOW
 }
 
 // ──────────────────────────────────────────────

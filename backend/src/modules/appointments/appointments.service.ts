@@ -11,6 +11,14 @@ export interface CreateAppointmentDto {
   scheduledAt: Date;
 }
 
+export interface UpdateAppointmentDto {
+  scheduledAt?: Date;
+  clientName?: string;
+  clientPhone?: string;
+  description?: string;
+  address?: string;
+}
+
 @Injectable()
 export class AppointmentsService {
   private readonly logger = new Logger(AppointmentsService.name);
@@ -34,6 +42,162 @@ export class AppointmentsService {
     );
 
     return appointment;
+  }
+
+  /**
+   * Find appointments matching a context (client name, date range).
+   * Returns the best matches ordered by proximity to now.
+   */
+  async findByContext(
+    providerId: string,
+    clientName?: string,
+    dateHint?: Date,
+  ) {
+    const where: any = {
+      providerId,
+      status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED] },
+    };
+
+    if (dateHint) {
+      const dayStart = new Date(dateHint);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(dateHint);
+      dayEnd.setHours(23, 59, 59, 999);
+      where.scheduledAt = { gte: dayStart, lte: dayEnd };
+    }
+
+    const appointments = await this.prisma.appointment.findMany({
+      where,
+      orderBy: { scheduledAt: 'asc' },
+    });
+
+    if (!clientName || appointments.length <= 1) return appointments;
+
+    const needle = clientName.toLowerCase().trim();
+    const scored = appointments.map((a) => {
+      const name = (a.clientName || '').toLowerCase();
+      let score = 0;
+      if (name === needle) score = 100;
+      else if (name.includes(needle) || needle.includes(name)) score = 80;
+      else {
+        const needleWords = needle.split(/\s+/);
+        const nameWords = name.split(/\s+/);
+        const overlap = needleWords.filter((w) =>
+          nameWords.some((nw) => nw.includes(w) || w.includes(nw)),
+        ).length;
+        score = overlap > 0 ? 50 + overlap * 10 : 0;
+      }
+      return { appointment: a, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    if (scored[0]?.score > 0) {
+      return scored.filter((s) => s.score > 0).map((s) => s.appointment);
+    }
+
+    return appointments;
+  }
+
+  async update(id: string, data: UpdateAppointmentDto) {
+    const appointment = await this.prisma.appointment.update({
+      where: { id },
+      data,
+    });
+
+    this.logger.log(`Appointment ${id} updated`);
+    return appointment;
+  }
+
+  async cancel(id: string) {
+    const appointment = await this.prisma.appointment.update({
+      where: { id },
+      data: { status: AppointmentStatus.CANCELLED },
+    });
+
+    this.logger.log(`Appointment ${id} cancelled`);
+    return appointment;
+  }
+
+  async markResult(id: string, status: 'completed' | 'no_show' | 'cancelled') {
+    const statusMap: Record<string, AppointmentStatus> = {
+      completed: AppointmentStatus.COMPLETED,
+      no_show: AppointmentStatus.NO_SHOW,
+      cancelled: AppointmentStatus.CANCELLED,
+    };
+
+    const appointment = await this.prisma.appointment.update({
+      where: { id },
+      data: { status: statusMap[status] },
+    });
+
+    this.logger.log(`Appointment ${id} marked as ${status}`);
+    return appointment;
+  }
+
+  /**
+   * Find the most recent past appointment for follow-up confirmation.
+   */
+  async findRecentPastAppointment(providerId: string, clientName?: string) {
+    const where: any = {
+      providerId,
+      status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED] },
+      scheduledAt: { lt: new Date() },
+    };
+
+    if (clientName) {
+      where.clientName = { contains: clientName, mode: 'insensitive' };
+    }
+
+    return this.prisma.appointment.findFirst({
+      where,
+      orderBy: { scheduledAt: 'desc' },
+    });
+  }
+
+  formatAppointmentModified(
+    scheduledAt: Date,
+    clientName?: string,
+    description?: string,
+    address?: string,
+  ): string {
+    const dateStr = scheduledAt.toLocaleDateString('es-MX', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      timeZone: 'America/Mexico_City',
+    });
+    const timeStr = scheduledAt.toLocaleTimeString('es-MX', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'America/Mexico_City',
+    });
+
+    let msg = `✏️ *¡Cita modificada!*\n\n🗓 ${dateStr}\n⏰ ${timeStr}`;
+    if (clientName) msg += `\n👤 ${clientName}`;
+    if (description) msg += `\n📝 ${description}`;
+    if (address) msg += `\n📍 ${address}`;
+
+    return msg;
+  }
+
+  formatAppointmentCancelled(
+    clientName?: string,
+    scheduledAt?: Date,
+  ): string {
+    let msg = '🗑️ *Cita cancelada.*';
+    if (clientName) msg += `\n👤 ${clientName}`;
+    if (scheduledAt) {
+      const timeStr = scheduledAt.toLocaleTimeString('es-MX', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'America/Mexico_City',
+      });
+      msg += `\n⏰ ${timeStr}`;
+    }
+    return msg;
   }
 
   async getTodayAgenda(providerId: string) {

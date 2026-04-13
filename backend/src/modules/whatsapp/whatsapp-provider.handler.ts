@@ -17,6 +17,9 @@ import { AppointmentsService } from '../appointments/appointments.service';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { ProviderModelService } from '../provider-model/provider-model.service';
 import { BookingStatus, PaymentMethod } from '@prisma/client';
+import { QueueService } from '../../common/queues/queue.service';
+import { QUEUE_NAMES } from '../../common/queues/queue.constants';
+import { AppointmentFollowupJobData } from '../../common/queues/processors/appointment-followup.processor';
 
 // ─── Provider session states ────────────────────────────────
 
@@ -67,6 +70,7 @@ export class WhatsAppProviderHandler {
     private appointmentsService: AppointmentsService,
     private workspaceService: WorkspaceService,
     private providerModelService: ProviderModelService,
+    private queueService: QueueService,
   ) {}
 
   // ─── Session management ──────────────────────────────────
@@ -559,6 +563,18 @@ export class WhatsAppProviderHandler {
             await this.handleAgendarCita(phone, aiResponse.data, providerProfileId);
             break;
 
+          case AiIntent.MODIFICAR_CITA:
+            await this.handleModificarCita(phone, aiResponse.data, providerProfileId);
+            break;
+
+          case AiIntent.CANCELAR_CITA:
+            await this.handleCancelarCita(phone, aiResponse.data, providerProfileId);
+            break;
+
+          case AiIntent.CONFIRMAR_RESULTADO_CITA:
+            await this.handleConfirmarResultadoCita(phone, aiResponse.data, providerProfileId);
+            break;
+
           case AiIntent.VER_AGENDA:
             await this.handleVerAgenda(phone, providerProfileId);
             break;
@@ -585,6 +601,9 @@ export class WhatsAppProviderHandler {
           AiIntent.GESTIONAR_GASTO,
           AiIntent.GESTIONAR_GASTO_RECURRENTE,
           AiIntent.AGENDAR_CITA,
+          AiIntent.MODIFICAR_CITA,
+          AiIntent.CANCELAR_CITA,
+          AiIntent.CONFIRMAR_RESULTADO_CITA,
         ];
         const hasMutation = aiResponses.some((r) =>
           dataMutatingIntents.includes(r.intent),
@@ -1175,7 +1194,7 @@ export class WhatsAppProviderHandler {
     }
 
     try {
-      await this.appointmentsService.create({
+      const appointment = await this.appointmentsService.create({
         providerId: providerProfileId,
         clientName: data?.clientName,
         clientPhone: data?.clientPhone,
@@ -1192,6 +1211,10 @@ export class WhatsAppProviderHandler {
       );
 
       await this.sendAndRecord(phone, confirmation);
+
+      this.scheduleAppointmentFollowup(
+        appointment.id, phone, scheduledAt, data?.clientName,
+      );
     } catch (error: any) {
       this.logger.error(`Error creating appointment: ${error.message}`);
       await this.sendAndRecord(
@@ -1232,6 +1255,203 @@ export class WhatsAppProviderHandler {
         phone,
         '❌ No se pudo obtener la agenda. Intenta de nuevo.',
       );
+    }
+  }
+
+  // ─── Appointments: modificar cita ──────────────────────
+
+  private async handleModificarCita(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      return;
+    }
+
+    const dateHint = this.appointmentsService.parseScheduledDate(data?.date, data?.time);
+    const matches = await this.appointmentsService.findByContext(
+      providerProfileId,
+      data?.clientName,
+      dateHint ?? undefined,
+    );
+
+    if (matches.length === 0) {
+      await this.sendAndRecord(
+        phone,
+        '🤔 No encontré una cita que coincida. ¿Podrías decirme el nombre del cliente o la fecha?\n\nEscribe *"mi agenda"* para ver tus citas.',
+      );
+      return;
+    }
+
+    if (matches.length > 1 && !data?.time && !data?.clientName) {
+      const lines = matches.map((a) => {
+        const timeStr = a.scheduledAt.toLocaleTimeString('es-MX', {
+          hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Mexico_City',
+        });
+        return `  ⏰ *${timeStr}* — ${a.clientName || 'Sin nombre'}`;
+      });
+      await this.sendAndRecord(
+        phone,
+        `🤔 Tienes *${matches.length} citas* que coinciden. ¿Cuál quieres modificar?\n\n${lines.join('\n')}\n\nDime el nombre del cliente o la hora.`,
+      );
+      return;
+    }
+
+    const target = matches[0];
+    const updates: import('../appointments/appointments.service').UpdateAppointmentDto = {};
+
+    const newScheduledAt = this.appointmentsService.parseScheduledDate(data?.newDate, data?.newTime);
+    if (newScheduledAt) {
+      updates.scheduledAt = newScheduledAt;
+    } else if (data?.newTime) {
+      const updated = new Date(target.scheduledAt);
+      const [h, m] = data.newTime.split(':').map(Number);
+      if (!isNaN(h)) {
+        updated.setUTCHours(h + 6, m || 0, 0, 0);
+        updates.scheduledAt = updated;
+      }
+    }
+
+    if (data?.newAddress) updates.address = data.newAddress;
+    if (data?.newDescription) updates.description = data.newDescription;
+
+    if (Object.keys(updates).length === 0) {
+      await this.sendAndRecord(
+        phone,
+        '🤔 ¿Qué quieres cambiar de la cita? Puedes modificar la hora, fecha, dirección o descripción.\n\nEjemplo: *"Cambia la cita a las 4pm"*',
+      );
+      return;
+    }
+
+    try {
+      const updated = await this.appointmentsService.update(target.id, updates);
+      const confirmation = this.appointmentsService.formatAppointmentModified(
+        updated.scheduledAt,
+        updated.clientName ?? undefined,
+        updated.description ?? undefined,
+        updated.address ?? undefined,
+      );
+      await this.sendAndRecord(phone, confirmation);
+
+      if (updates.scheduledAt) {
+        this.scheduleAppointmentFollowup(
+          updated.id, phone, updated.scheduledAt, updated.clientName ?? undefined,
+        );
+      }
+    } catch (error: any) {
+      this.logger.error(`Error modifying appointment: ${error.message}`);
+      await this.sendAndRecord(phone, '❌ No se pudo modificar la cita. Intenta de nuevo.');
+    }
+  }
+
+  // ─── Appointments: cancelar cita ──────────────────────
+
+  private async handleCancelarCita(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      return;
+    }
+
+    const dateHint = this.appointmentsService.parseScheduledDate(data?.date, data?.time);
+    const matches = await this.appointmentsService.findByContext(
+      providerProfileId,
+      data?.clientName,
+      dateHint ?? undefined,
+    );
+
+    if (matches.length === 0) {
+      await this.sendAndRecord(
+        phone,
+        '🤔 No encontré una cita que coincida para cancelar.\n\nEscribe *"mi agenda"* para ver tus citas.',
+      );
+      return;
+    }
+
+    if (matches.length > 1 && !data?.time && !data?.clientName) {
+      const lines = matches.map((a) => {
+        const timeStr = a.scheduledAt.toLocaleTimeString('es-MX', {
+          hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Mexico_City',
+        });
+        return `  ⏰ *${timeStr}* — ${a.clientName || 'Sin nombre'}`;
+      });
+      await this.sendAndRecord(
+        phone,
+        `🤔 Tienes *${matches.length} citas*. ¿Cuál quieres cancelar?\n\n${lines.join('\n')}\n\nDime el nombre del cliente o la hora.`,
+      );
+      return;
+    }
+
+    const target = matches[0];
+
+    try {
+      await this.appointmentsService.cancel(target.id);
+      const confirmation = this.appointmentsService.formatAppointmentCancelled(
+        target.clientName ?? undefined,
+        target.scheduledAt,
+      );
+      await this.sendAndRecord(phone, confirmation);
+    } catch (error: any) {
+      this.logger.error(`Error cancelling appointment: ${error.message}`);
+      await this.sendAndRecord(phone, '❌ No se pudo cancelar la cita. Intenta de nuevo.');
+    }
+  }
+
+  // ─── Appointments: confirmar resultado ────────────────
+
+  private async handleConfirmarResultadoCita(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      return;
+    }
+
+    const status = data?.status as 'completed' | 'no_show' | 'cancelled' | undefined;
+    if (!status) {
+      await this.sendAndRecord(
+        phone,
+        '🤔 ¿Se hizo la cita o no? Dime:\n• *"Sí se hizo"*\n• *"No llegó"*\n• *"Se canceló"*',
+      );
+      return;
+    }
+
+    const appointment = await this.appointmentsService.findRecentPastAppointment(
+      providerProfileId,
+      data?.clientName,
+    );
+
+    if (!appointment) {
+      await this.sendAndRecord(
+        phone,
+        '🤔 No encontré una cita reciente para confirmar.',
+      );
+      return;
+    }
+
+    try {
+      await this.appointmentsService.markResult(appointment.id, status);
+
+      const statusLabels: Record<string, string> = {
+        completed: '✅ *Cita completada.* ¡Buen trabajo!',
+        no_show: '😕 *No-show registrado.* La cita quedó marcada.',
+        cancelled: '🗑️ *Cita cancelada.* Registrado.',
+      };
+
+      let msg = statusLabels[status];
+      if (appointment.clientName) msg += `\n👤 ${appointment.clientName}`;
+
+      await this.sendAndRecord(phone, msg);
+    } catch (error: any) {
+      this.logger.error(`Error confirming appointment result: ${error.message}`);
+      await this.sendAndRecord(phone, '❌ No se pudo registrar el resultado. Intenta de nuevo.');
     }
   }
 
@@ -1840,6 +2060,38 @@ export class WhatsAppProviderHandler {
     }
   }
 
+  // ─── Appointment followup scheduling ────────────────────
+
+  private scheduleAppointmentFollowup(
+    appointmentId: string,
+    providerPhone: string,
+    scheduledAt: Date,
+    clientName?: string,
+  ): void {
+    const FOLLOWUP_DELAY_MS = 30 * 60 * 1000; // 30 minutes after appointment time
+    const delay = scheduledAt.getTime() - Date.now() + FOLLOWUP_DELAY_MS;
+
+    if (delay <= 0) return; // appointment is in the past
+
+    const jobData: AppointmentFollowupJobData = {
+      appointmentId,
+      providerPhone,
+      clientName,
+      scheduledAt: scheduledAt.toISOString(),
+    };
+
+    this.queueService
+      .addJob(
+        QUEUE_NAMES.APPOINTMENT_FOLLOWUP,
+        'followup',
+        jobData,
+        { delay, jobId: `followup-${appointmentId}` },
+      )
+      .catch((err) =>
+        this.logger.warn(`Failed to schedule appointment followup: ${err.message}`),
+      );
+  }
+
   // ─── Dashboard / Help ───────────────────────────────────
 
   private async sendProviderDashboard(phone: string, name: string) {
@@ -1869,6 +2121,8 @@ export class WhatsAppProviderHandler {
         `  "¿Cómo voy esta semana?" — ver resumen\n\n` +
         `📅 *Agenda:*\n` +
         `  "Mañana a las 10 con la señora García" — agendar\n` +
+        `  "Cambia la cita a las 2pm" — modificar cita\n` +
+        `  "Cancela la cita con García" — cancelar\n` +
         `  "¿Qué tengo hoy?" — ver agenda\n\n` +
         `⚙️ *Perfil:*\n` +
         `  "Cobro 800 por visita" — configurar servicios\n` +

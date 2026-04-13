@@ -5,6 +5,7 @@ import { QueueService } from './queue.service';
 import { NotificationProcessor } from './processors/notification.processor';
 import { TrustScoreProcessor } from './processors/trust-score.processor';
 import { WebhookProcessor } from './processors/webhook.processor';
+import { AppointmentFollowupProcessor } from './processors/appointment-followup.processor';
 
 @Global()
 @Module({})
@@ -44,6 +45,7 @@ export class QueueModule {
           { name: QUEUE_NAMES.WEBHOOKS },
           { name: QUEUE_NAMES.VERIFICATION },
           { name: QUEUE_NAMES.PAYMENTS },
+          { name: QUEUE_NAMES.APPOINTMENT_FOLLOWUP },
         ),
       ],
       providers: [
@@ -51,6 +53,7 @@ export class QueueModule {
         NotificationProcessor,
         TrustScoreProcessor,
         WebhookProcessor,
+        AppointmentFollowupProcessor,
       ],
       exports: [QueueService, BullModule],
     };

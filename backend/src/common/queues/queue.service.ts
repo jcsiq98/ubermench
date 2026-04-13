@@ -19,12 +19,15 @@ export class QueueService {
     verificationQueue?: Queue,
     @Optional() @InjectQueue(QUEUE_NAMES.PAYMENTS)
     paymentsQueue?: Queue,
+    @Optional() @InjectQueue(QUEUE_NAMES.APPOINTMENT_FOLLOWUP)
+    appointmentFollowupQueue?: Queue,
   ) {
     if (notificationsQueue) this.queues[QUEUE_NAMES.NOTIFICATIONS] = notificationsQueue;
     if (trustScoreQueue) this.queues[QUEUE_NAMES.TRUST_SCORE] = trustScoreQueue;
     if (webhooksQueue) this.queues[QUEUE_NAMES.WEBHOOKS] = webhooksQueue;
     if (verificationQueue) this.queues[QUEUE_NAMES.VERIFICATION] = verificationQueue;
     if (paymentsQueue) this.queues[QUEUE_NAMES.PAYMENTS] = paymentsQueue;
+    if (appointmentFollowupQueue) this.queues[QUEUE_NAMES.APPOINTMENT_FOLLOWUP] = appointmentFollowupQueue;
   }
 
   async addJob<T>(
