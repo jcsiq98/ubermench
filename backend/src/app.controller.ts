@@ -12,6 +12,7 @@ import { Public } from './common/decorators/public.decorator';
 import { WhatsAppService } from './modules/whatsapp/whatsapp.service';
 import { PrismaService } from './prisma/prisma.service';
 import { RedisService } from './config/redis.service';
+import { QueueService } from './common/queues/queue.service';
 
 @Controller()
 export class AppController {
@@ -20,6 +21,7 @@ export class AppController {
     private prisma: PrismaService,
     private redis: RedisService,
     private config: ConfigService,
+    private queueService: QueueService,
   ) {}
 
   /**
@@ -34,6 +36,9 @@ export class AppController {
 
     const allOk = dbOk && redisOk && (wa.enabled ? wa.tokenValid !== false : true);
 
+    const bullmqEnabled = this.queueService.isEnabled();
+    const realRedis = this.redis.isRealRedis();
+
     return {
       status: allOk ? 'ok' : 'degraded',
       service: 'handy-api',
@@ -41,7 +46,8 @@ export class AppController {
       uptime: Math.round(process.uptime()),
       components: {
         database: dbOk ? '✅ connected' : '❌ disconnected',
-        redis: redisOk ? '✅ connected' : '❌ disconnected',
+        redis: realRedis ? '✅ connected' : '⚠️ in-memory fallback',
+        bullmq: bullmqEnabled ? '✅ active' : '❌ disabled (no Redis)',
         whatsapp: wa.enabled
           ? wa.tokenValid === true
             ? '✅ active'

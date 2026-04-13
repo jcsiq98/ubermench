@@ -20,6 +20,7 @@ import { BookingStatus, PaymentMethod } from '@prisma/client';
 import { QueueService } from '../../common/queues/queue.service';
 import { QUEUE_NAMES } from '../../common/queues/queue.constants';
 import { AppointmentFollowupJobData } from '../../common/queues/processors/appointment-followup.processor';
+import { AppointmentReminderJobData } from '../../common/queues/processors/appointment-reminder.processor';
 
 // ─── Provider session states ────────────────────────────────
 
@@ -500,12 +501,13 @@ export class WhatsAppProviderHandler {
     let workspaceContext;
     if (providerProfileId) {
       try {
-        const [wsCtx, recentExpenses, activeRecurring, providerModel] =
+        const [wsCtx, recentExpenses, activeRecurring, providerModel, todayAppts] =
           await Promise.all([
             this.workspaceService.getWorkspaceContext(providerProfileId),
             this.expenseService.getRecent(providerProfileId, 5),
             this.recurringExpenseService.listActive(providerProfileId),
             this.providerModelService.getProviderModel(providerProfileId),
+            this.appointmentsService.getTodayAgenda(providerProfileId),
           ]);
 
         workspaceContext = {
@@ -523,6 +525,17 @@ export class WhatsAppProviderHandler {
             dayOfMonth: e.dayOfMonth,
           })),
           providerModel,
+          todayAppointments: todayAppts.map((a: any) => ({
+            time: new Date(a.scheduledAt).toLocaleTimeString('es-MX', {
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true,
+              timeZone: 'America/Mexico_City',
+            }),
+            clientName: a.clientName || undefined,
+            description: a.description || undefined,
+            address: a.address || undefined,
+          })),
         };
       } catch (err: any) {
         this.logger.warn(`Failed to load workspace context: ${err.message}`);
@@ -1193,6 +1206,8 @@ export class WhatsAppProviderHandler {
       return;
     }
 
+    const reminderMinutes = data?.reminderMinutes ? Number(data.reminderMinutes) : undefined;
+
     try {
       const appointment = await this.appointmentsService.create({
         providerId: providerProfileId,
@@ -1201,14 +1216,22 @@ export class WhatsAppProviderHandler {
         description: data?.description,
         address: data?.address,
         scheduledAt,
+        reminderMinutes,
       });
 
-      const confirmation = this.appointmentsService.formatAppointmentConfirmation(
+      let confirmation = this.appointmentsService.formatAppointmentConfirmation(
         scheduledAt,
         data?.clientName,
         data?.description,
         data?.address,
       );
+
+      if (reminderMinutes) {
+        confirmation += `\n\n🔔 Te recordaré *${reminderMinutes} minutos* antes.`;
+        this.scheduleAppointmentReminder(
+          appointment.id, phone, scheduledAt, reminderMinutes, data?.clientName,
+        );
+      }
 
       await this.sendAndRecord(phone, confirmation);
 
@@ -1316,6 +1339,9 @@ export class WhatsAppProviderHandler {
 
     if (data?.newAddress) updates.address = data.newAddress;
     if (data?.newDescription) updates.description = data.newDescription;
+    if (data?.reminderMinutes !== undefined) {
+      updates.reminderMinutes = data.reminderMinutes ? Number(data.reminderMinutes) : null;
+    }
 
     if (Object.keys(updates).length === 0) {
       await this.sendAndRecord(
@@ -1327,19 +1353,29 @@ export class WhatsAppProviderHandler {
 
     try {
       const updated = await this.appointmentsService.update(target.id, updates);
-      const confirmation = this.appointmentsService.formatAppointmentModified(
+      let confirmation = this.appointmentsService.formatAppointmentModified(
         updated.scheduledAt,
         updated.clientName ?? undefined,
         updated.description ?? undefined,
         updated.address ?? undefined,
       );
-      await this.sendAndRecord(phone, confirmation);
 
       if (updates.scheduledAt) {
         this.scheduleAppointmentFollowup(
           updated.id, phone, updated.scheduledAt, updated.clientName ?? undefined,
         );
       }
+
+      const activeReminder = updated.reminderMinutes ?? (target as any).reminderMinutes;
+      if (activeReminder && (updates.scheduledAt || updates.reminderMinutes !== undefined)) {
+        this.cancelAppointmentReminder(updated.id);
+        this.scheduleAppointmentReminder(
+          updated.id, phone, updated.scheduledAt, activeReminder, updated.clientName ?? undefined,
+        );
+        confirmation += `\n\n🔔 Recordatorio reprogramado: *${activeReminder} minutos* antes.`;
+      }
+
+      await this.sendAndRecord(phone, confirmation);
     } catch (error: any) {
       this.logger.error(`Error modifying appointment: ${error.message}`);
       await this.sendAndRecord(phone, '❌ No se pudo modificar la cita. Intenta de nuevo.');
@@ -1391,6 +1427,7 @@ export class WhatsAppProviderHandler {
 
     try {
       await this.appointmentsService.cancel(target.id);
+      this.cancelAppointmentReminder(target.id);
       const confirmation = this.appointmentsService.formatAppointmentCancelled(
         target.clientName ?? undefined,
         target.scheduledAt,
@@ -2090,6 +2127,43 @@ export class WhatsAppProviderHandler {
       .catch((err) =>
         this.logger.warn(`Failed to schedule appointment followup: ${err.message}`),
       );
+  }
+
+  private scheduleAppointmentReminder(
+    appointmentId: string,
+    providerPhone: string,
+    scheduledAt: Date,
+    reminderMinutes: number,
+    clientName?: string,
+  ): void {
+    const delay = scheduledAt.getTime() - Date.now() - reminderMinutes * 60 * 1000;
+
+    if (delay <= 0) return; // reminder time already passed
+
+    const jobData: AppointmentReminderJobData = {
+      appointmentId,
+      providerPhone,
+      clientName,
+      scheduledAt: scheduledAt.toISOString(),
+      reminderMinutes,
+    };
+
+    this.queueService
+      .addJob(
+        QUEUE_NAMES.APPOINTMENT_REMINDER,
+        'reminder',
+        jobData,
+        { delay, jobId: `reminder-${appointmentId}` },
+      )
+      .catch((err) =>
+        this.logger.warn(`Failed to schedule appointment reminder: ${err.message}`),
+      );
+  }
+
+  private cancelAppointmentReminder(appointmentId: string): void {
+    const queue = (this.queueService as any).queues?.[QUEUE_NAMES.APPOINTMENT_REMINDER];
+    if (!queue) return;
+    queue.remove(`reminder-${appointmentId}`).catch(() => {});
   }
 
   // ─── Dashboard / Help ───────────────────────────────────

@@ -5,6 +5,7 @@ export const QUEUE_NAMES = {
   VERIFICATION: 'verification',
   PAYMENTS: 'payments',
   APPOINTMENT_FOLLOWUP: 'appointment-followup',
+  APPOINTMENT_REMINDER: 'appointment-reminder',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

@@ -21,6 +21,8 @@ export class QueueService {
     paymentsQueue?: Queue,
     @Optional() @InjectQueue(QUEUE_NAMES.APPOINTMENT_FOLLOWUP)
     appointmentFollowupQueue?: Queue,
+    @Optional() @InjectQueue(QUEUE_NAMES.APPOINTMENT_REMINDER)
+    appointmentReminderQueue?: Queue,
   ) {
     if (notificationsQueue) this.queues[QUEUE_NAMES.NOTIFICATIONS] = notificationsQueue;
     if (trustScoreQueue) this.queues[QUEUE_NAMES.TRUST_SCORE] = trustScoreQueue;
@@ -28,6 +30,7 @@ export class QueueService {
     if (verificationQueue) this.queues[QUEUE_NAMES.VERIFICATION] = verificationQueue;
     if (paymentsQueue) this.queues[QUEUE_NAMES.PAYMENTS] = paymentsQueue;
     if (appointmentFollowupQueue) this.queues[QUEUE_NAMES.APPOINTMENT_FOLLOWUP] = appointmentFollowupQueue;
+    if (appointmentReminderQueue) this.queues[QUEUE_NAMES.APPOINTMENT_REMINDER] = appointmentReminderQueue;
   }
 
   async addJob<T>(
@@ -39,8 +42,8 @@ export class QueueService {
     const queue = this.queues[queueName];
 
     if (!queue) {
-      this.logger.debug(
-        `Queue "${queueName}" not available — job "${jobName}" skipped`,
+      this.logger.warn(
+        `Queue "${queueName}" not available — job "${jobName}" DROPPED. Is REDIS_URL configured?`,
       );
       return null;
     }

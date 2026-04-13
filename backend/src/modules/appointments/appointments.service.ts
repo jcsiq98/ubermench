@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppointmentStatus } from '@prisma/client';
 
@@ -9,6 +10,7 @@ export interface CreateAppointmentDto {
   description?: string;
   address?: string;
   scheduledAt: Date;
+  reminderMinutes?: number;
 }
 
 export interface UpdateAppointmentDto {
@@ -17,6 +19,7 @@ export interface UpdateAppointmentDto {
   clientPhone?: string;
   description?: string;
   address?: string;
+  reminderMinutes?: number | null;
 }
 
 @Injectable()
@@ -34,6 +37,7 @@ export class AppointmentsService {
         description: dto.description,
         address: dto.address,
         scheduledAt: dto.scheduledAt,
+        reminderMinutes: dto.reminderMinutes ?? null,
       },
     });
 
@@ -435,5 +439,31 @@ export class AppointmentsService {
     if (daysAhead <= 0) daysAhead += 7;
     result.setDate(result.getDate() + daysAhead);
     return result;
+  }
+
+  /**
+   * Safety net: mark appointments still PENDING/CONFIRMED 2+ hours after
+   * their scheduled time as NO_SHOW. Runs every 30 minutes independently
+   * of BullMQ so zombie appointments don't accumulate if Redis is down.
+   */
+  @Cron(CronExpression.EVERY_30_MINUTES)
+  async markStaleAppointments(): Promise<number> {
+    const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+    const result = await this.prisma.appointment.updateMany({
+      where: {
+        status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED] },
+        scheduledAt: { lt: cutoff },
+      },
+      data: { status: AppointmentStatus.NO_SHOW },
+    });
+
+    if (result.count > 0) {
+      this.logger.warn(
+        `Marked ${result.count} stale appointment(s) as NO_SHOW (scheduled before ${cutoff.toISOString()})`,
+      );
+    }
+
+    return result.count;
   }
 }

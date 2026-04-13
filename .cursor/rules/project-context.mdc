@@ -47,10 +47,10 @@ All project documentation, organized by function:
 
 ## Active Backend Modules (`backend/src/modules/`)
 
-- `ai/` — LLM integration (OpenAI) via **function calling** (15 typed tools in `ai.tools.ts`), conversation context (Redis). Intent classification uses tool selection, NOT prompt-based rules. System prompt is minimal (personality + context only)
+- `ai/` — LLM integration (OpenAI) via **function calling** (18 typed tools in `ai.tools.ts`), conversation context (Redis). Intent classification uses tool selection, NOT prompt-based rules. System prompt is minimal (personality + context only)
 - `workspace/` — Provider business profile via chat (services, prices, schedule, auto-reply, notes). Cache-first (Redis → DB). Injected into LLM system prompt for personalized responses
 - `income/` — Income tracking, weekly/monthly summaries
-- `appointments/` — Scheduling, Spanish date parsing, reminders
+- `appointments/` — Scheduling, Spanish date parsing, reminders, **modify/cancel/followup (full CRUD)**. BullMQ jobs: "¿Se hizo?" 30min post-appointment + configurable pre-appointment reminder (`reminderMinutes`). **KNOWN ISSUE (Cap. 25):** BullMQ delayed jobs are NOT executing in production — likely Redis not configured on Railway. Followups and reminders will not work until this is resolved. See `HISTORIA_DECISIONES.md` Cap. 25 "BLOQUEANTE PRE-DEPLOY" section.
 - `whatsapp/` — Core: webhook handler, message sending, provider handler (hybrid commands + LLM routing)
 - `onboarding/` — Provider registration via WhatsApp
 - `providers/`, `users/`, `auth/`, `admin/`, `notifications/`, `verification/`, `zones/`, `addresses/`, `provider-dashboard/`

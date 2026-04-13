@@ -6,6 +6,18 @@ import { NotificationProcessor } from './processors/notification.processor';
 import { TrustScoreProcessor } from './processors/trust-score.processor';
 import { WebhookProcessor } from './processors/webhook.processor';
 import { AppointmentFollowupProcessor } from './processors/appointment-followup.processor';
+import { AppointmentReminderProcessor } from './processors/appointment-reminder.processor';
+
+function parseRedisUrl(url: string) {
+  const parsed = new URL(url);
+  return {
+    host: parsed.hostname,
+    port: parseInt(parsed.port, 10) || 6379,
+    password: parsed.password || undefined,
+    username: parsed.username && parsed.username !== 'default' ? parsed.username : undefined,
+    maxRetriesPerRequest: null as null,
+  };
+}
 
 @Global()
 @Module({})
@@ -27,18 +39,14 @@ export class QueueModule {
       };
     }
 
-    this.logger.log('BullMQ queues enabled with Redis');
+    const connection = parseRedisUrl(redisUrl);
+    this.logger.log(`BullMQ queues enabled — Redis at ${connection.host}:${connection.port}`);
 
     return {
       module: QueueModule,
       global: true,
       imports: [
-        BullModule.forRoot({
-          connection: {
-            url: redisUrl,
-            maxRetriesPerRequest: null,
-          },
-        }),
+        BullModule.forRoot({ connection }),
         BullModule.registerQueue(
           { name: QUEUE_NAMES.NOTIFICATIONS },
           { name: QUEUE_NAMES.TRUST_SCORE },
@@ -46,6 +54,7 @@ export class QueueModule {
           { name: QUEUE_NAMES.VERIFICATION },
           { name: QUEUE_NAMES.PAYMENTS },
           { name: QUEUE_NAMES.APPOINTMENT_FOLLOWUP },
+          { name: QUEUE_NAMES.APPOINTMENT_REMINDER },
         ),
       ],
       providers: [
@@ -54,6 +63,7 @@ export class QueueModule {
         TrustScoreProcessor,
         WebhookProcessor,
         AppointmentFollowupProcessor,
+        AppointmentReminderProcessor,
       ],
       exports: [QueueService, BullModule],
     };

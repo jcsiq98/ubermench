@@ -106,6 +106,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client.incr(key);
   }
 
+  isRealRedis(): boolean {
+    return !this.isMemoryMode;
+  }
+
   async exists(key: string): Promise<boolean> {
     if (this.isMemoryMode) {
       const item = this.memoryStore.get(key);

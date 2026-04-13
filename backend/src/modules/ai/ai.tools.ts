@@ -314,7 +314,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'agendar_cita',
       description:
-        'Agendar una cita/trabajo futuro con fecha y hora. NO usar para gastos fijos.',
+        'Agendar una cita/trabajo NUEVO con fecha y hora. NO usar para gastos fijos. NO usar si el usuario quiere cambiar/mover/reagendar una cita que ya existe — para eso usar modificar_cita.',
       parameters: {
         type: 'object',
         properties: {
@@ -343,6 +343,10 @@ export const AI_TOOLS: ChatCompletionTool[] = [
             type: 'string',
             description: 'Descripción del trabajo a realizar.',
           },
+          reminderMinutes: {
+            type: 'number',
+            description: 'Minutos de anticipación para el recordatorio. "recuérdame 10 min antes" = 10, "avísame 1 hora antes" = 60, "media hora antes" = 30. Solo incluir si el usuario pide recordatorio.',
+          },
         },
         required: ['date'],
       },
@@ -353,7 +357,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'modificar_cita',
       description:
-        'Cambiar/mover/reagendar una cita existente. Usar cuando el usuario quiere cambiar la hora, fecha, dirección o descripción de una cita ya agendada. Requiere identificar cuál cita modificar (por nombre del cliente y/o fecha original).',
+        'Cambiar/mover/reagendar una cita existente. Usar cuando el usuario dice "cámbiala", "muévela", "pásala a otra hora", o cualquier variación de querer modificar una cita ya agendada. Si el usuario acaba de agendar una cita y pide cambiar algo, usar ESTA herramienta, NO agendar_cita.',
       parameters: {
         type: 'object',
         properties: {
@@ -384,6 +388,10 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           newDescription: {
             type: 'string',
             description: 'Nueva descripción si se menciona.',
+          },
+          reminderMinutes: {
+            type: 'number',
+            description: 'Nuevos minutos de anticipación para recordatorio. "recuérdame 10 min antes" = 10. Solo incluir si el usuario pide cambiar el recordatorio.',
           },
         },
       },

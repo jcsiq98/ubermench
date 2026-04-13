@@ -112,6 +112,13 @@ export interface ActiveRecurringContext {
   dayOfMonth?: number | null;
 }
 
+export interface TodayAppointmentContext {
+  time: string;
+  clientName?: string;
+  description?: string;
+  address?: string;
+}
+
 export interface WorkspaceContextDto {
   services: WorkspaceService[];
   schedule: WorkspaceSchedule;
@@ -121,4 +128,5 @@ export interface WorkspaceContextDto {
   recentExpenses?: RecentExpenseContext[];
   activeRecurringExpenses?: ActiveRecurringContext[];
   providerModel?: import('../provider-model/provider-model.types').ProviderModel | null;
+  todayAppointments?: TodayAppointmentContext[];
 }

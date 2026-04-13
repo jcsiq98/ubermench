@@ -19,7 +19,7 @@ const ENV_SCHEMA: EnvVar[] = [
   { key: 'DATABASE_URL', required: true },
   { key: 'JWT_SECRET', required: true, sensitive: true },
   { key: 'JWT_REFRESH_SECRET', required: 'production', sensitive: true },
-  { key: 'REDIS_URL', required: false },
+  { key: 'REDIS_URL', required: 'production' },
   { key: 'PII_ENCRYPTION_KEY', required: false, sensitive: true },
   { key: 'WHATSAPP_TOKEN', required: false, sensitive: true },
   { key: 'WHATSAPP_PHONE_NUMBER_ID', required: false },

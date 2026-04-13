@@ -207,18 +207,19 @@ model RecurringExpense {
 // Appointments (provider agenda)
 // ──────────────────────────────────────────────
 model Appointment {
-  id            String            @id @default(uuid())
-  providerId    String            @map("provider_id")
-  clientName    String?           @map("client_name")
-  clientPhone   String?           @map("client_phone")
-  description   String?
-  address       String?
-  locationLat   Float?            @map("location_lat")
-  locationLng   Float?            @map("location_lng")
-  scheduledAt   DateTime          @map("scheduled_at")
-  status        AppointmentStatus @default(PENDING)
-  createdAt     DateTime          @default(now()) @map("created_at")
-  updatedAt     DateTime          @updatedAt @map("updated_at")
+  id              String            @id @default(uuid())
+  providerId      String            @map("provider_id")
+  clientName      String?           @map("client_name")
+  clientPhone     String?           @map("client_phone")
+  description     String?
+  address         String?
+  locationLat     Float?            @map("location_lat")
+  locationLng     Float?            @map("location_lng")
+  scheduledAt     DateTime          @map("scheduled_at")
+  reminderMinutes Int?              @map("reminder_minutes")
+  status          AppointmentStatus @default(PENDING)
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
 
   provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
 
