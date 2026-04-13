@@ -48,6 +48,12 @@ export class AppointmentsService {
    * Find appointments matching a context (client name, date range).
    * Returns the best matches ordered by proximity to now.
    */
+  /**
+   * Find appointments matching a context (client name, date range).
+   * When dateHint includes a specific time (not midnight), ties are broken
+   * by proximity to that time — so "cancela la de las 2" picks the 2pm
+   * appointment, not the 11am one.
+   */
   async findByContext(
     providerId: string,
     clientName?: string,
@@ -71,7 +77,11 @@ export class AppointmentsService {
       orderBy: { scheduledAt: 'asc' },
     });
 
-    if (!clientName || appointments.length <= 1) return appointments;
+    if (appointments.length <= 1) return appointments;
+
+    if (!clientName) {
+      return this.sortByTimeProximity(appointments, dateHint);
+    }
 
     const needle = clientName.toLowerCase().trim();
     const scored = appointments.map((a) => {
@@ -90,13 +100,30 @@ export class AppointmentsService {
       return { appointment: a, score };
     });
 
-    scored.sort((a, b) => b.score - a.score);
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (!dateHint) return 0;
+      const distA = Math.abs(a.appointment.scheduledAt.getTime() - dateHint.getTime());
+      const distB = Math.abs(b.appointment.scheduledAt.getTime() - dateHint.getTime());
+      return distA - distB;
+    });
 
     if (scored[0]?.score > 0) {
       return scored.filter((s) => s.score > 0).map((s) => s.appointment);
     }
 
-    return appointments;
+    return this.sortByTimeProximity(appointments, dateHint);
+  }
+
+  private sortByTimeProximity(appointments: any[], dateHint?: Date) {
+    if (!dateHint || dateHint.getHours() === 0 && dateHint.getMinutes() === 0) {
+      return appointments;
+    }
+    return [...appointments].sort((a, b) => {
+      const distA = Math.abs(a.scheduledAt.getTime() - dateHint.getTime());
+      const distB = Math.abs(b.scheduledAt.getTime() - dateHint.getTime());
+      return distA - distB;
+    });
   }
 
   async update(id: string, data: UpdateAppointmentDto) {
