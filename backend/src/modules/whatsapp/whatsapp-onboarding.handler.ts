@@ -104,14 +104,33 @@ export class WhatsAppOnboardingHandler {
     phone: string,
     name: string,
   ): Promise<void> {
-    await this.setSession(phone, { step: OnboardingStep.NAME });
+    if (name) {
+      const capitalizedName = name
+        .split(' ')
+        .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ');
 
-    await this.whatsapp.sendTextMessage(
-      phone,
-      `👋 ¡Hola${name ? ` ${name}` : ''}! Soy tu Chalán.\n\n` +
-        `Te ayudo a llevar el control de tus ingresos, tu agenda y tu negocio — todo por aquí, por WhatsApp.\n\n` +
-        `Para empezar, *¿cómo te llamas?*`,
-    );
+      await this.setSession(phone, {
+        step: OnboardingStep.TRADE,
+        name: capitalizedName,
+      });
+
+      await this.whatsapp.sendTextMessage(
+        phone,
+        `👋 ¡Hola, *${capitalizedName}*! Soy tu Chalán.\n\n` +
+          `Te ayudo a llevar el control de tus ingresos, tu agenda y tu negocio — todo por aquí, por WhatsApp.\n\n` +
+          `*¿A qué te dedicas?*\n_(plomero, electricista, albañil, pintor, lo que sea)_`,
+      );
+    } else {
+      await this.setSession(phone, { step: OnboardingStep.NAME });
+
+      await this.whatsapp.sendTextMessage(
+        phone,
+        `👋 ¡Hola! Soy tu Chalán.\n\n` +
+          `Te ayudo a llevar el control de tus ingresos, tu agenda y tu negocio — todo por aquí, por WhatsApp.\n\n` +
+          `Para empezar, *¿cómo te llamas?*`,
+      );
+    }
   }
 
   private async handleNameResponse(
