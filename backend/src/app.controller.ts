@@ -1,4 +1,13 @@
-import { Controller, Get } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Body,
+  Param,
+  ForbiddenException,
+  Headers,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Public } from './common/decorators/public.decorator';
 import { WhatsAppService } from './modules/whatsapp/whatsapp.service';
 import { PrismaService } from './prisma/prisma.service';
@@ -10,6 +19,7 @@ export class AppController {
     private whatsappService: WhatsAppService,
     private prisma: PrismaService,
     private redis: RedisService,
+    private config: ConfigService,
   ) {}
 
   /**
@@ -91,6 +101,41 @@ export class AppController {
             fix: 'Ve a developers.facebook.com → Tu App → WhatsApp → API Setup → Genera un nuevo token → Actualiza WHATSAPP_TOKEN en .env → Reinicia el backend',
           }),
     };
+  }
+
+  // ─── Admin utility (verify-token protected) ─────────────
+
+  @Patch('api/internal/users/by-phone/:phone')
+  @Public()
+  async fixUserByPhone(
+    @Param('phone') phone: string,
+    @Body() body: { name?: string },
+    @Headers('x-verify-token') token: string,
+  ) {
+    const verifyToken = this.config.get<string>('WHATSAPP_VERIFY_TOKEN');
+    if (!token || token !== verifyToken) {
+      throw new ForbiddenException('Invalid verify token');
+    }
+
+    let normalized = phone.replace(/\D/g, '');
+    if (!normalized.startsWith('+')) normalized = `+${normalized}`;
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ phone: normalized }, { phone: `+${phone}` }],
+      },
+      include: { providerProfile: { select: { id: true, bio: true } } },
+    });
+
+    if (!user) return { error: `User not found: ${phone}` };
+
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { name: body.name },
+      select: { id: true, phone: true, name: true },
+    });
+
+    return { success: true, user: updated };
   }
 
   // ─── Private helpers ──────────────────────────────────────

@@ -398,4 +398,35 @@ export class AdminService {
 
     return { success: true, oldTier, newTier: tier };
   }
+
+  async updateUserByPhone(
+    phone: string,
+    data: { name?: string },
+  ): Promise<{ success: boolean; user: { id: string; phone: string; name: string | null } }> {
+    let normalized = phone.replace(/\D/g, '');
+    if (!normalized.startsWith('+')) normalized = `+${normalized}`;
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { phone: normalized },
+          { phone: phone },
+          { phone: `+${phone.replace(/\D/g, '')}` },
+        ],
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException(`User not found with phone: ${phone}`);
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { name: data.name },
+      select: { id: true, phone: true, name: true },
+    });
+
+    this.logger.log(`User ${updated.id} name updated to "${data.name}"`);
+    return { success: true, user: updated };
+  }
 }

@@ -270,22 +270,26 @@ export class AiService {
     userMessage: string,
     providerName?: string,
     workspaceContext?: WorkspaceContextDto,
-  ): Promise<AiResponse> {
+  ): Promise<AiResponse[]> {
     if (!this.client) {
-      return {
-        intent: AiIntent.CONVERSACION_GENERAL,
-        message: `Hola${providerName ? ` ${providerName}` : ''}! El asistente AI no está configurado aún. Escribe *"menu"* para ver tus opciones.`,
-      };
+      return [
+        {
+          intent: AiIntent.CONVERSACION_GENERAL,
+          message: `Hola${providerName ? ` ${providerName}` : ''}! El asistente AI no está configurado aún. Escribe *"menu"* para ver tus opciones.`,
+        },
+      ];
     }
 
     // Rate limiting
     const allowed = await this.checkRateLimit(providerPhone);
     if (!allowed) {
-      return {
-        intent: AiIntent.CONVERSACION_GENERAL,
-        message:
-          '⏳ Has enviado muchos mensajes. Espera unos minutos antes de continuar.\n\nEscribe *"menu"* para ver tus opciones.',
-      };
+      return [
+        {
+          intent: AiIntent.CONVERSACION_GENERAL,
+          message:
+            '⏳ Has enviado muchos mensajes. Espera unos minutos antes de continuar.\n\nEscribe *"menu"* para ver tus opciones.',
+        },
+      ];
     }
 
     try {
@@ -308,7 +312,7 @@ export class AiService {
         messages,
         tools: AI_TOOLS,
         tool_choice: 'auto',
-        parallel_tool_calls: false,
+        parallel_tool_calls: true,
         max_tokens: 500,
         temperature: 0.3,
       });
@@ -316,19 +320,21 @@ export class AiService {
       const choice = completion.choices[0]?.message;
       if (!choice) {
         this.logger.warn('Empty response from OpenAI');
-        return FALLBACK_RESPONSE;
+        return [FALLBACK_RESPONSE];
       }
 
-      const parsed = this.parseToolCallResponse(choice);
+      const parsed = this.parseAllToolCalls(choice);
 
-      await this.contextService.addMessage(providerPhone, 'user', userMessage, parsed.intent);
+      await this.contextService.addMessage(providerPhone, 'user', userMessage, parsed[0].intent);
 
-      const firstTool = choice.tool_calls?.[0];
-      const toolLabel = firstTool && firstTool.type === 'function'
-        ? ` (tool: ${firstTool.function.name})`
+      const toolNames = (choice.tool_calls || [])
+        .filter((t) => t.type === 'function')
+        .map((t) => t.function.name);
+      const toolLabel = toolNames.length
+        ? ` (tools: ${toolNames.join(', ')})`
         : ' (text)';
       this.logger.log(
-        `AI response for ${providerPhone}: intent=${parsed.intent}${toolLabel}`,
+        `AI response for ${providerPhone}: ${parsed.length} action(s)${toolLabel}`,
       );
 
       return parsed;
@@ -336,56 +342,72 @@ export class AiService {
       this.logger.error(`AI processing error: ${error.message}`);
 
       if (error.status === 429) {
-        return {
-          intent: AiIntent.CONVERSACION_GENERAL,
-          message:
-            '⏳ El servicio está ocupado. Intenta de nuevo en unos segundos.',
-        };
+        return [
+          {
+            intent: AiIntent.CONVERSACION_GENERAL,
+            message:
+              '⏳ El servicio está ocupado. Intenta de nuevo en unos segundos.',
+          },
+        ];
       }
 
-      return FALLBACK_RESPONSE;
+      return [FALLBACK_RESPONSE];
     }
   }
 
-  private parseToolCallResponse(
+  private parseAllToolCalls(
     message: OpenAI.Chat.Completions.ChatCompletionMessage,
-  ): AiResponse {
-    const toolCall = message.tool_calls?.[0];
+  ): AiResponse[] {
+    const toolCalls = (message.tool_calls || []).filter(
+      (t) => t.type === 'function',
+    );
 
-    if (!toolCall || toolCall.type !== 'function') {
-      return {
-        intent: AiIntent.CONVERSACION_GENERAL,
-        message: message.content || FALLBACK_RESPONSE.message,
-        data: {},
-      };
+    if (toolCalls.length === 0) {
+      return [
+        {
+          intent: AiIntent.CONVERSACION_GENERAL,
+          message: message.content || FALLBACK_RESPONSE.message,
+          data: {},
+        },
+      ];
     }
 
-    const toolName = toolCall.function.name;
-    const mapping = TOOL_TO_INTENT[toolName];
+    const responses: AiResponse[] = [];
 
-    if (!mapping) {
-      this.logger.warn(`Unknown tool called: ${toolName}`);
-      return {
-        intent: AiIntent.CONVERSACION_GENERAL,
-        message: message.content || FALLBACK_RESPONSE.message,
-        data: {},
-      };
+    for (const toolCall of toolCalls) {
+      const toolName = toolCall.function.name;
+      const mapping = TOOL_TO_INTENT[toolName];
+
+      if (!mapping) {
+        this.logger.warn(`Unknown tool called: ${toolName}`);
+        continue;
+      }
+
+      let args: Record<string, any> = {};
+      try {
+        args = JSON.parse(toolCall.function.arguments);
+      } catch {
+        this.logger.warn(
+          `Failed to parse tool arguments for ${toolName}: ${toolCall.function.arguments}`,
+        );
+      }
+
+      responses.push({
+        intent: mapping.intent,
+        message: message.content || '',
+        data: { ...mapping.defaultData, ...args },
+      });
     }
 
-    let args: Record<string, any> = {};
-    try {
-      args = JSON.parse(toolCall.function.arguments);
-    } catch {
-      this.logger.warn(`Failed to parse tool arguments for ${toolName}: ${toolCall.function.arguments}`);
-    }
-
-    const data = { ...mapping.defaultData, ...args };
-
-    return {
-      intent: mapping.intent,
-      message: message.content || '',
-      data,
-    };
+    return responses.length > 0
+      ? responses
+      : [
+          {
+            intent: AiIntent.CONVERSACION_GENERAL,
+            message: message.content || FALLBACK_RESPONSE.message,
+            data: {},
+          },
+        ];
   }
 
   /**

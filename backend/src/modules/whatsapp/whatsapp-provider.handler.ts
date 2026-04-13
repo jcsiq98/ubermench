@@ -526,58 +526,59 @@ export class WhatsAppProviderHandler {
     }
 
     try {
-      const aiResponse = await this.aiService.processMessage(
+      const aiResponses = await this.aiService.processMessage(
         phone,
         text,
         providerName,
         workspaceContext,
       );
 
-      switch (aiResponse.intent) {
-        case AiIntent.REGISTRAR_INGRESO:
-          await this.handleRegistrarIngreso(phone, aiResponse.data, providerProfileId);
-          break;
+      for (const aiResponse of aiResponses) {
+        switch (aiResponse.intent) {
+          case AiIntent.REGISTRAR_INGRESO:
+            await this.handleRegistrarIngreso(phone, aiResponse.data, providerProfileId);
+            break;
 
-        case AiIntent.REGISTRAR_GASTO:
-          await this.handleRegistrarGasto(phone, aiResponse.data, providerProfileId);
-          break;
+          case AiIntent.REGISTRAR_GASTO:
+            await this.handleRegistrarGasto(phone, aiResponse.data, providerProfileId);
+            break;
 
-        case AiIntent.GESTIONAR_GASTO:
-          await this.handleGestionarGasto(phone, aiResponse.data, providerProfileId);
-          break;
+          case AiIntent.GESTIONAR_GASTO:
+            await this.handleGestionarGasto(phone, aiResponse.data, providerProfileId);
+            break;
 
-        case AiIntent.GESTIONAR_GASTO_RECURRENTE:
-          await this.handleGastoRecurrente(phone, aiResponse.data, providerProfileId);
-          break;
+          case AiIntent.GESTIONAR_GASTO_RECURRENTE:
+            await this.handleGastoRecurrente(phone, aiResponse.data, providerProfileId);
+            break;
 
-        case AiIntent.VER_RESUMEN:
-          await this.handleVerResumen(phone, aiResponse.data, providerProfileId);
-          break;
+          case AiIntent.VER_RESUMEN:
+            await this.handleVerResumen(phone, aiResponse.data, providerProfileId);
+            break;
 
-        case AiIntent.AGENDAR_CITA:
-          await this.handleAgendarCita(phone, aiResponse.data, providerProfileId);
-          break;
+          case AiIntent.AGENDAR_CITA:
+            await this.handleAgendarCita(phone, aiResponse.data, providerProfileId);
+            break;
 
-        case AiIntent.VER_AGENDA:
-          await this.handleVerAgenda(phone, providerProfileId);
-          break;
+          case AiIntent.VER_AGENDA:
+            await this.handleVerAgenda(phone, providerProfileId);
+            break;
 
-        case AiIntent.CONFIRMAR_CLIENTE:
-          this.logger.log('Intent: confirmar_cliente');
-          await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
-          break;
+          case AiIntent.CONFIRMAR_CLIENTE:
+            this.logger.log('Intent: confirmar_cliente');
+            await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
+            break;
 
-        case AiIntent.CONFIGURAR_PERFIL:
-          await this.handleConfigurarPerfil(phone, aiResponse, providerProfileId);
-          break;
+          case AiIntent.CONFIGURAR_PERFIL:
+            await this.handleConfigurarPerfil(phone, aiResponse, providerProfileId);
+            break;
 
-        default:
-          await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
-          break;
+          default:
+            await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
+            break;
+        }
       }
 
       if (providerProfileId) {
-        // Invalidate computed patterns cache on data-mutating intents
         const dataMutatingIntents = [
           AiIntent.REGISTRAR_INGRESO,
           AiIntent.REGISTRAR_GASTO,
@@ -585,12 +586,13 @@ export class WhatsAppProviderHandler {
           AiIntent.GESTIONAR_GASTO_RECURRENTE,
           AiIntent.AGENDAR_CITA,
         ];
-        if (dataMutatingIntents.includes(aiResponse.intent)) {
+        const hasMutation = aiResponses.some((r) =>
+          dataMutatingIntents.includes(r.intent),
+        );
+        if (hasMutation) {
           this.providerModelService.invalidate(providerProfileId).catch(() => {});
         }
 
-        // Extract learned facts AFTER the handler has responded (so the full
-        // conversation turn — user + assistant — is in Redis history)
         this.maybeExtractLearnedFacts(phone, providerProfileId, workspaceContext)
           .catch((err) =>
             this.logger.warn(`Learned facts extraction failed: ${err.message}`),
@@ -2087,20 +2089,21 @@ export class WhatsAppProviderHandler {
       .trim();
   }
 
-  // Shared exclusion list for all keyword detectors: action verbs that
-  // signal the user wants to DO something, not just VIEW something.
-  private static readonly ACTION_WORDS = [
-    'cancela', 'cancelar', 'elimina', 'eliminar',
-    'borra', 'borrar', 'quita', 'quitar',
-    'crea', 'crear', 'agrega', 'agregar', 'registra', 'registrar',
-    'nuevo', 'nueva', 'cambia', 'cambiar',
-    'modifica', 'modificar', 'actualiza', 'actualizar',
-    'agenda', 'agendar', 'programa', 'programar',
-    'configura', 'configurar',
+  // Verb stems for detecting action intent. Stem matching catches all
+  // Spanish conjugations (agendar/agenda/agendes/agendame/agenden/etc.)
+  // False positives are harmless — they just route to the LLM instead of
+  // the keyword bypass, which is always correct.
+  private static readonly ACTION_STEMS = [
+    'cancel', 'elimin', 'borr', 'quit',
+    'crea', 'crear', 'agreg', 'registr',
+    'nuev', 'cambi', 'modific', 'actualiz',
+    'agend', 'program', 'configur',
   ];
 
   private hasActionWord(words: string[]): boolean {
-    return words.some((w) => WhatsAppProviderHandler.ACTION_WORDS.includes(w));
+    return words.some((w) =>
+      WhatsAppProviderHandler.ACTION_STEMS.some((stem) => w.startsWith(stem)),
+    );
   }
 
   /**

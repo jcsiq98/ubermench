@@ -111,6 +111,15 @@ export class AdminController {
 
   // ─── Queue Monitoring ─────────────────────────────────────
 
+  @Patch('users/by-phone/:phone')
+  @ApiOperation({ summary: 'Update user by phone number' })
+  async updateUserByPhone(
+    @Param('phone') phone: string,
+    @Body() body: { name?: string },
+  ) {
+    return this.service.updateUserByPhone(phone, body);
+  }
+
   @Get('queues/stats')
   @ApiOperation({ summary: 'Get BullMQ queue statistics' })
   async getQueueStats() {
