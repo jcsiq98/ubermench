@@ -97,7 +97,7 @@ export class AuthService {
     } else if (this.whatsapp?.isWhatsAppEnabled()) {
       // Production: send via WhatsApp
       const otpMessage =
-        `🔑 *Tu código de verificación Handy*\n\n` +
+        `🔑 *Tu código de verificación — Chalán*\n\n` +
         `${code}\n\n` +
         `Válido por ${this.OTP_TTL_MINUTES} minutos. No compartas este código.`;
       const result = await this.whatsapp.sendTextMessage(phone, otpMessage);

@@ -108,7 +108,7 @@ export class WhatsAppOnboardingHandler {
 
     await this.whatsapp.sendTextMessage(
       phone,
-      `👋 ¡Hola${name ? ` ${name}` : ''}! Soy tu asistente de negocios.\n\n` +
+      `👋 ¡Hola${name ? ` ${name}` : ''}! Soy tu Chalán.\n\n` +
         `Te ayudo a llevar el control de tus ingresos, tu agenda y tu negocio — todo por aquí, por WhatsApp.\n\n` +
         `Para empezar, *¿cómo te llamas?*`,
     );
@@ -222,7 +222,7 @@ Si no puedes identificar un oficio, usa el texto tal cual: {"trade": "${trimmed}
 
       await this.whatsapp.sendTextMessage(
         phone,
-        `¡Listo, *${session.name}*! Ya tienes tu asistente. 🎉\n\n` +
+        `¡Listo, *${session.name}*! Ya tienes tu Chalán. 🎉\n\n` +
           `Esto es lo que puedo hacer por ti:\n\n` +
           `💰 *Registrar ingresos* — "Cobré 1,200 por un tinaco"\n` +
           `💸 *Registrar gastos* — "Gasté 200 en material"\n` +
@@ -230,7 +230,7 @@ Si no puedes identificar un oficio, usa el texto tal cual: {"trade": "${trimmed}
           `📊 *Ver tu resumen* — "¿Cuánto llevo esta semana?"\n` +
           `📋 *Ver tu agenda* — "¿Qué tengo hoy?"\n` +
           `⚙️ *Configurar tu negocio* — "Cobro 800 por visita"\n\n` +
-          `Háblame como le hablarías a un asistente. Por texto o nota de voz. 🎙️`,
+          `Dime qué necesitas. Por texto o nota de voz. 🎙️`,
       );
 
       this.logger.log(

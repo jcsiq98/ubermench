@@ -1843,7 +1843,7 @@ export class WhatsAppProviderHandler {
   private async sendProviderDashboard(phone: string, name: string) {
     await this.whatsapp.sendTextMessage(
       phone,
-      `👋 Hola *${name}*! Soy tu asistente de negocios.\n\n` +
+      `👋 Hola *${name}*! Soy tu Chalán.\n\n` +
         `Puedo ayudarte con:\n` +
         `💰 Registrar ingresos y gastos\n` +
         `📅 Agendar citas y recordatorios\n` +
@@ -1856,7 +1856,7 @@ export class WhatsAppProviderHandler {
   private async sendHelpMenu(phone: string) {
     await this.whatsapp.sendTextMessage(
       phone,
-      `❓ *Ayuda — Tu Asistente de Negocios*\n\n` +
+      `❓ *Ayuda — Tu Chalán*\n\n` +
         `💰 *Finanzas:*\n` +
         `  "Cobré 1,200 en efectivo" — registrar ingreso\n` +
         `  "Gasté 200 en material" — registrar gasto\n` +
