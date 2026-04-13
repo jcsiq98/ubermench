@@ -147,16 +147,24 @@ export class WhatsAppOnboardingHandler {
       return;
     }
 
-    // Use LLM to extract the actual name from natural language
     const extracted = await this.aiService.extractFromText(
       trimmed,
       `El usuario está respondiendo a la pregunta "¿Cómo te llamas?".
 Extrae SOLO el nombre de la persona de lo que dijo. Ignora frases como "me llamo", "mi nombre es", "soy", etc.
-Responde con JSON: {"name": "Nombre Extraído"}
-Si no puedes identificar un nombre, responde: {"name": null}`,
+Si el mensaje NO contiene un nombre de persona (por ejemplo, es una pregunta, petición, o texto largo), responde: {"name": null}
+Solo responde con un nombre si claramente es un nombre propio de persona.
+Responde con JSON: {"name": "Nombre Extraído"} o {"name": null}`,
     );
 
-    const name = extracted?.name || trimmed;
+    if (!extracted?.name) {
+      await this.whatsapp.sendTextMessage(
+        phone,
+        `Antes de ayudarte con eso, dime *¿cómo te llamas?* para registrar tu cuenta.`,
+      );
+      return;
+    }
+
+    const name = extracted.name;
 
     session.name = typeof name === 'string'
       ? name.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
