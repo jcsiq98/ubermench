@@ -132,12 +132,21 @@ export interface TodayAppointmentContext {
   address?: string;
 }
 
+export type FactCategory = 'personal' | 'negocio' | 'clientes' | 'preferencias' | 'patrones';
+
+export interface StructuredFact {
+  fact: string;
+  category: FactCategory;
+  firstSeen: string; // ISO date YYYY-MM-DD
+  lastSeen: string;  // ISO date YYYY-MM-DD
+}
+
 export interface WorkspaceContextDto {
   services: WorkspaceService[];
   schedule: WorkspaceSchedule;
   autoReply: WorkspaceAutoReply;
   notes?: string | null;
-  learnedFacts?: string[];
+  learnedFacts?: StructuredFact[];
   recentExpenses?: RecentExpenseContext[];
   activeRecurringExpenses?: ActiveRecurringContext[];
   providerModel?: import('../provider-model/provider-model.types').ProviderModel | null;

@@ -7,6 +7,7 @@ import {
   AiIntent,
   AiResponse,
   ConversationMessage,
+  StructuredFact,
   WorkspaceContextDto,
 } from './ai.types';
 import { AI_TOOLS, TOOL_TO_INTENT } from './ai.tools';
@@ -99,12 +100,30 @@ function buildWorkspaceSection(ctx?: WorkspaceContextDto): string {
     }
   }
 
-  // --- Learned facts ---
+  // --- Learned facts (grouped by category) ---
   if (ctx.learnedFacts && ctx.learnedFacts.length > 0) {
+    const categoryLabels: Record<string, string> = {
+      personal: 'Personal',
+      negocio: 'Negocio',
+      clientes: 'Clientes',
+      preferencias: 'Preferencias',
+      patrones: 'Patrones',
+    };
+    const grouped: Record<string, string[]> = {};
+    for (const f of ctx.learnedFacts) {
+      const cat = f.category || 'negocio';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(f.fact);
+    }
+    const lines: string[] = [];
+    for (const [cat, facts] of Object.entries(grouped)) {
+      const label = categoryLabels[cat] || cat;
+      lines.push(`**${label}:** ${facts.join('. ')}`);
+    }
     const factsBlock =
       '## Lo que sabes de este proveedor\n' +
       'Datos aprendidos de conversaciones anteriores. Úsalos para personalizar tus respuestas:\n' +
-      ctx.learnedFacts.map((f) => `- ${f}`).join('\n');
+      lines.join('\n');
     sections.push(factsBlock);
   }
 
@@ -519,35 +538,49 @@ Reglas:
 
   /**
    * Analyze recent conversation history and extract/update learned facts about the provider.
-   * Returns an updated array of facts (max 30).
+   * Returns structured facts with categories and timestamps (max 100).
+   * Backward compatible: auto-migrates old string[] format.
    */
   async extractLearnedFacts(
     history: ConversationMessage[],
-    currentFacts: string[],
-  ): Promise<string[]> {
+    currentFacts: StructuredFact[],
+  ): Promise<StructuredFact[]> {
     if (!this.client || history.length === 0) return currentFacts;
+
+    const today = new Date().toISOString().split('T')[0];
 
     const conversationText = history
       .map((m) => `${m.role === 'user' ? 'Proveedor' : 'Chalán'}: ${m.content}`)
       .join('\n');
 
+    const currentFactsJson = currentFacts.length > 0
+      ? JSON.stringify(currentFacts, null, 2)
+      : '[]';
+
     const prompt = `Analiza esta conversación entre un trabajador de oficios y su Chalán (asistente de negocios).
-Extrae o actualiza facts útiles sobre el proveedor: patrones de pago, clientes frecuentes, zonas de trabajo, preferencias, hábitos, gastos recurrentes.
+Extrae o actualiza facts estructurados sobre el proveedor.
+
+Fecha de hoy: ${today}
 
 Facts actuales del proveedor:
-${currentFacts.length > 0 ? currentFacts.map((f, i) => `${i + 1}. ${f}`).join('\n') : '(ninguno todavía)'}
+${currentFactsJson}
 
 Conversación reciente:
 ${conversationText}
 
 Reglas:
-- Máximo 30 facts en total
-- Solo facts que se puedan inferir con confianza de la conversación
-- Mantén facts existentes que sigan siendo válidos
-- Elimina facts que la conversación contradiga
-- Cada fact debe ser una oración corta y clara en español
+- Máximo 100 facts en total
+- Cada fact es un objeto con: { "fact": "texto", "category": "categoría", "firstSeen": "YYYY-MM-DD", "lastSeen": "YYYY-MM-DD" }
+- Categorías válidas: "personal" (familia, hábitos personales), "negocio" (precios, zonas, herramientas), "clientes" (info de clientes específicos), "preferencias" (estilo de comunicación, pagos, horarios preferidos), "patrones" (comportamientos recurrentes, tendencias)
+- Si un fact existente se CONFIRMA en la conversación, actualiza su lastSeen a hoy (${today})
+- Si un fact existente se CONTRADICE, reemplázalo con la info nueva (mantén firstSeen original, actualiza lastSeen)
+- Facts nuevos: firstSeen y lastSeen = hoy (${today})
+- NO dupliques: si dos facts dicen lo mismo, quédate con uno y actualiza lastSeen
+- Elimina facts con lastSeen mayor a 60 días de antigüedad (antes de ${this.getDateDaysAgo(60)})
+- Solo facts que se puedan inferir con confianza
+- Cada fact.fact debe ser una oración corta y clara en español
 - NO incluyas información obvia que ya esté en el perfil de servicios/horarios
-- Responde SOLO con JSON válido: { "facts": ["fact1", "fact2", ...] }`;
+- Responde SOLO con JSON válido: { "facts": [ { "fact": "...", "category": "...", "firstSeen": "...", "lastSeen": "..." }, ... ] }`;
 
     try {
       const completion = await this.client.chat.completions.create({
@@ -556,7 +589,7 @@ Reglas:
           { role: 'system', content: prompt },
         ],
         response_format: { type: 'json_object' },
-        max_tokens: 500,
+        max_tokens: 2000,
         temperature: 0.3,
       });
 
@@ -565,10 +598,22 @@ Reglas:
 
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed.facts)) {
-        const trimmed = parsed.facts
-          .filter((f: unknown) => typeof f === 'string' && f.trim().length > 0)
-          .slice(0, 30);
-        this.logger.log(`Extracted ${trimmed.length} learned facts`);
+        const validCategories = ['personal', 'negocio', 'clientes', 'preferencias', 'patrones'];
+        const trimmed: StructuredFact[] = parsed.facts
+          .filter((f: any) =>
+            f &&
+            typeof f.fact === 'string' &&
+            f.fact.trim().length > 0 &&
+            validCategories.includes(f.category),
+          )
+          .map((f: any) => ({
+            fact: f.fact.trim(),
+            category: f.category,
+            firstSeen: f.firstSeen || today,
+            lastSeen: f.lastSeen || today,
+          }))
+          .slice(0, 100);
+        this.logger.log(`Extracted ${trimmed.length} structured learned facts`);
         return trimmed;
       }
 
@@ -577,6 +622,12 @@ Reglas:
       this.logger.error(`extractLearnedFacts failed: ${err.message}`);
       return currentFacts;
     }
+  }
+
+  private getDateDaysAgo(days: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    return d.toISOString().split('T')[0];
   }
 
   private async checkRateLimit(providerPhone: string): Promise<boolean> {

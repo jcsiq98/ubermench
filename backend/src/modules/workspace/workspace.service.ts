@@ -8,6 +8,7 @@ import {
   WorkspaceService as WorkspaceServiceType,
   WorkspaceSchedule,
   WorkspaceAutoReply,
+  StructuredFact,
 } from '../ai/ai.types';
 
 const CACHE_PREFIX = 'workspace:';
@@ -32,10 +33,39 @@ export class WorkspaceService {
         message: '',
       },
       notes: workspace.notes,
-      learnedFacts: Array.isArray(workspace.learnedFacts)
-        ? (workspace.learnedFacts as string[])
-        : [],
+      learnedFacts: this.parseLearnedFacts(workspace.learnedFacts),
     };
+  }
+
+  /**
+   * Backward compat: auto-migrates old string[] facts to StructuredFact[].
+   * Old format: ["fact1", "fact2"]
+   * New format: [{ fact: "fact1", category: "negocio", firstSeen: "...", lastSeen: "..." }]
+   */
+  private parseLearnedFacts(raw: unknown): StructuredFact[] {
+    if (!Array.isArray(raw) || raw.length === 0) return [];
+
+    const today = new Date().toISOString().split('T')[0];
+
+    return raw.map((item: any) => {
+      if (typeof item === 'string') {
+        return {
+          fact: item,
+          category: 'negocio' as const,
+          firstSeen: today,
+          lastSeen: today,
+        };
+      }
+      if (item && typeof item.fact === 'string') {
+        return {
+          fact: item.fact,
+          category: item.category || 'negocio',
+          firstSeen: item.firstSeen || today,
+          lastSeen: item.lastSeen || today,
+        };
+      }
+      return null;
+    }).filter(Boolean) as StructuredFact[];
   }
 
   async getWorkspace(providerId: string) {
@@ -212,7 +242,7 @@ export class WorkspaceService {
 
   async updateLearnedFacts(
     providerId: string,
-    facts: string[],
+    facts: StructuredFact[],
   ): Promise<void> {
     await this.prisma.workspaceProfile.update({
       where: { providerId },
