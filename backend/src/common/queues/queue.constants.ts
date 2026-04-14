@@ -7,6 +7,7 @@ export const QUEUE_NAMES = {
   APPOINTMENT_FOLLOWUP: 'appointment-followup',
   APPOINTMENT_REMINDER: 'appointment-reminder',
   PERSONAL_REMINDER: 'personal-reminder',
+  WHATSAPP_DEBOUNCE: 'whatsapp-debounce',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

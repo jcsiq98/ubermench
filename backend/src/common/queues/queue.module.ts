@@ -8,6 +8,7 @@ import { WebhookProcessor } from './processors/webhook.processor';
 import { AppointmentFollowupProcessor } from './processors/appointment-followup.processor';
 import { AppointmentReminderProcessor } from './processors/appointment-reminder.processor';
 import { PersonalReminderProcessor } from './processors/personal-reminder.processor';
+import { WhatsAppDebounceProcessor } from './processors/whatsapp-debounce.processor';
 
 function parseRedisUrl(url: string) {
   const parsed = new URL(url);
@@ -57,6 +58,7 @@ export class QueueModule {
           { name: QUEUE_NAMES.APPOINTMENT_FOLLOWUP },
           { name: QUEUE_NAMES.APPOINTMENT_REMINDER },
           { name: QUEUE_NAMES.PERSONAL_REMINDER },
+          { name: QUEUE_NAMES.WHATSAPP_DEBOUNCE },
         ),
       ],
       providers: [
@@ -67,6 +69,7 @@ export class QueueModule {
         AppointmentFollowupProcessor,
         AppointmentReminderProcessor,
         PersonalReminderProcessor,
+        WhatsAppDebounceProcessor,
       ],
       exports: [QueueService, BullModule],
     };

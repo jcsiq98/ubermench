@@ -23,6 +23,7 @@ import { AppointmentFollowupJobData } from '../../common/queues/processors/appoi
 import { AppointmentReminderJobData } from '../../common/queues/processors/appointment-reminder.processor';
 import { PersonalReminderJobData } from '../../common/queues/processors/personal-reminder.processor';
 import { RemindersService } from '../reminders/reminders.service';
+import { PaymentsService } from '../payments/payments.service';
 
 // ─── Provider session states ────────────────────────────────
 
@@ -75,6 +76,7 @@ export class WhatsAppProviderHandler {
     private providerModelService: ProviderModelService,
     private queueService: QueueService,
     private remindersService: RemindersService,
+    private paymentsService: PaymentsService,
   ) {}
 
   // ─── Session management ──────────────────────────────────
@@ -207,6 +209,13 @@ export class WhatsAppProviderHandler {
     );
   }
 
+  // ─── Public: Check session state ─────────────────────────
+
+  async isSessionIdle(phone: string): Promise<boolean> {
+    const session = await this.getSession(phone);
+    return !session || session.state === ProviderState.IDLE;
+  }
+
   // ─── Public: Handle incoming WhatsApp message ────────────
 
   async handleIncomingMessage(
@@ -214,16 +223,48 @@ export class WhatsAppProviderHandler {
     senderName: string,
     message: any,
   ): Promise<void> {
-    // Check if this phone belongs to a provider
     const provider = await this.findProviderByPhone(senderPhone);
     if (!provider) {
-      // Not a registered provider — route to onboarding flow
       this.logger.log(`Message from non-provider ${senderPhone}, routing to onboarding`);
       const text = await this.extractContent(message, senderPhone);
       await this.onboardingHandler.handleMessage(senderPhone, senderName, text);
       return;
     }
 
+    const text = await this.extractContent(message, senderPhone);
+    const buttonReply = this.extractButtonReply(message);
+
+    await this.processProviderMessage(senderPhone, senderName, text, buttonReply, provider);
+  }
+
+  /**
+   * Handle pre-extracted text from the debounce buffer.
+   * Called by WhatsAppDebounceProcessor after accumulating rapid-fire messages.
+   */
+  async handleBufferedMessage(
+    senderPhone: string,
+    senderName: string,
+    text: string,
+  ): Promise<void> {
+    const provider = await this.findProviderByPhone(senderPhone);
+    if (!provider) {
+      this.logger.log(`Buffered message from non-provider ${senderPhone}, routing to onboarding`);
+      await this.onboardingHandler.handleMessage(senderPhone, senderName, text);
+      return;
+    }
+
+    await this.processProviderMessage(senderPhone, senderName, text, null, provider);
+  }
+
+  // ─── Core message processing (shared by direct + buffered paths) ──
+
+  private async processProviderMessage(
+    senderPhone: string,
+    senderName: string,
+    text: string,
+    buttonReply: { id: string; title: string } | null,
+    provider: NonNullable<Awaited<ReturnType<WhatsAppProviderHandler['findProviderByPhone']>>>,
+  ): Promise<void> {
     // Track activity and engagement for unit economics
     const updatePromises: Promise<any>[] = [
       this.prisma.user.update({
@@ -252,10 +293,6 @@ export class WhatsAppProviderHandler {
         providerUserId: provider.id,
       };
     }
-
-    // Extract text (or transcribe audio) and interactive content
-    const text = await this.extractContent(message, senderPhone);
-    const buttonReply = this.extractButtonReply(message);
 
     // Normalize once for all keyword checks (strips accents + punctuation)
     const normalized = this.normalizeForKeywords(text);
@@ -620,6 +657,14 @@ export class WhatsAppProviderHandler {
             await this.handleConfigurarPerfil(phone, aiResponse, providerProfileId);
             break;
 
+          case AiIntent.CREAR_LINK_COBRO:
+            await this.handleCrearLinkCobro(phone, aiResponse.data, providerProfileId);
+            break;
+
+          case AiIntent.ACTIVAR_COBROS:
+            await this.handleActivarCobros(phone, providerProfileId);
+            break;
+
           default:
             await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
             break;
@@ -639,6 +684,8 @@ export class WhatsAppProviderHandler {
           AiIntent.CREAR_RECORDATORIO,
           AiIntent.MODIFICAR_RECORDATORIO,
           AiIntent.CANCELAR_RECORDATORIO,
+          AiIntent.CREAR_LINK_COBRO,
+          AiIntent.ACTIVAR_COBROS,
         ];
         const hasMutation = aiResponses.some((r) =>
           dataMutatingIntents.includes(r.intent),
@@ -754,6 +801,169 @@ export class WhatsAppProviderHandler {
         phone,
         '❌ No se pudo registrar el ingreso. Intenta de nuevo.',
       );
+    }
+  }
+
+  // ─── Stripe Connect: activar cobros ─────────────────────
+
+  private async handleActivarCobros(
+    phone: string,
+    providerProfileId?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
+      return;
+    }
+
+    try {
+      const status = await this.paymentsService.getProviderStripeStatus(providerProfileId);
+
+      if (status?.stripeOnboardingStatus === 'ACTIVE') {
+        await this.sendAndRecord(
+          phone,
+          '✅ Tu cuenta de cobros ya está activa. Puedes generar links diciendo por ejemplo: *"Cóbrale 1,200 al señor Ramírez"*',
+          AiIntent.ACTIVAR_COBROS,
+        );
+        return;
+      }
+
+      const result = await this.paymentsService.createConnectedAccount(providerProfileId);
+
+      await this.sendAndRecord(
+        phone,
+        `🏦 *Activa tus cobros con link*\n\n` +
+        `Registra tu cuenta bancaria en este formulario seguro de Stripe (~5 min):\n\n` +
+        `🔗 ${result.url}\n\n` +
+        `Una vez que lo completes, podrás cobrarle a tus clientes con tarjeta, OXXO o SPEI.`,
+        AiIntent.ACTIVAR_COBROS,
+      );
+    } catch (error: any) {
+      this.logger.error(`Error creating connected account: ${error.message}`);
+
+      if (error.message === 'Stripe is not configured') {
+        await this.sendAndRecord(
+          phone,
+          '⚠️ Los cobros con link aún no están habilitados. Estamos configurando el sistema.',
+        );
+      } else if (error.message === 'Provider already has an active Stripe account') {
+        await this.sendAndRecord(
+          phone,
+          '✅ Tu cuenta de cobros ya está activa. Puedes generar links diciendo por ejemplo: *"Cóbrale 1,200 al señor Ramírez"*',
+          AiIntent.ACTIVAR_COBROS,
+        );
+      } else {
+        await this.sendAndRecord(
+          phone,
+          '❌ No se pudo configurar tu cuenta de cobros. Intenta de nuevo.',
+        );
+      }
+    }
+  }
+
+  // ─── Payment Links: crear link de cobro ─────────────────
+
+  private async handleCrearLinkCobro(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
+      return;
+    }
+
+    const stripeStatus = await this.paymentsService.getProviderStripeStatus(providerProfileId);
+    if (stripeStatus?.stripeOnboardingStatus !== 'ACTIVE') {
+      await this.sendAndRecord(
+        phone,
+        'Para cobrar con link necesitas activar tu cuenta primero.\n\nDime *"activar cobros"* y te mando el link para configurarla (~5 min).',
+        AiIntent.CREAR_LINK_COBRO,
+      );
+      return;
+    }
+
+    const amount = data?.amount;
+    if (!amount || typeof amount !== 'number' || amount <= 0) {
+      await this.sendAndRecord(
+        phone,
+        '🤔 No pude detectar el monto. ¿Cuánto quieres cobrar?\n\nEjemplo: *"Cóbrale 1,200 al señor Ramírez por instalación eléctrica"*',
+      );
+      return;
+    }
+
+    const sanitize = (val: any): string | undefined => {
+      if (!val || typeof val !== 'string') return undefined;
+      const lower = val.toLowerCase().trim();
+      const junk = ['ninguno', 'ninguna', 'no', 'n/a', 'na', 'nada', 'sin nombre', 'desconocido'];
+      return junk.includes(lower) ? undefined : val.trim();
+    };
+
+    const description = sanitize(data?.description);
+    const clientName = sanitize(data?.clientName);
+    const clientPhone = sanitize(data?.clientPhone);
+
+    try {
+      const paymentLink = await this.paymentsService.createPaymentLink({
+        providerId: providerProfileId,
+        amount,
+        description,
+        clientName,
+        clientPhone,
+      });
+
+      const amountFormatted = amount.toLocaleString('es-MX');
+      const url = paymentLink.stripePaymentUrl;
+
+      if (clientPhone) {
+        const clientMsg =
+          `Hola${clientName ? ` ${clientName}` : ''}, te envío el link para pagar *$${amountFormatted}*` +
+          `${description ? ` por ${description}` : ''}.\n\n` +
+          `💳 Paga aquí: ${url}\n\n` +
+          `Puedes pagar con tarjeta, OXXO o transferencia SPEI.`;
+
+        await this.whatsapp
+          .sendTextMessage(clientPhone, clientMsg)
+          .catch((err) =>
+            this.logger.error(
+              `Failed to send payment link to client ${clientPhone}: ${err.message}`,
+            ),
+          );
+      }
+
+      let confirmation =
+        `✅ *Link de cobro generado*\n\n` +
+        `💰 *$${amountFormatted}*`;
+      if (description) confirmation += `\n📝 ${description}`;
+      if (clientName) confirmation += `\n👤 ${clientName}`;
+      confirmation += `\n\n🔗 ${url}`;
+
+      if (clientPhone) {
+        confirmation += `\n\n📲 Ya se lo envié a ${clientName || clientPhone} por WhatsApp.`;
+      } else {
+        confirmation += `\n\nEnvíale este link a tu cliente para que pueda pagar con tarjeta, OXXO o SPEI.`;
+      }
+
+      await this.sendAndRecord(phone, confirmation, AiIntent.CREAR_LINK_COBRO);
+    } catch (error: any) {
+      this.logger.error(`Error creating payment link: ${error.message}`);
+
+      if (error.message === 'Stripe is not configured') {
+        await this.sendAndRecord(
+          phone,
+          '⚠️ Los links de cobro aún no están habilitados. Estamos configurando el sistema de pagos.',
+        );
+      } else {
+        await this.sendAndRecord(
+          phone,
+          '❌ No se pudo generar el link de cobro. Intenta de nuevo.',
+        );
+      }
     }
   }
 

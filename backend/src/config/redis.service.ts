@@ -123,6 +123,82 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return (await this.client.exists(key)) === 1;
   }
 
+  // ─── List operations (for message buffering) ─────────────
+
+  async rpush(key: string, ...values: string[]): Promise<number> {
+    if (this.isMemoryMode) {
+      const item = this.memoryStore.get(key);
+      let list: string[] = [];
+      if (item) {
+        if (item.expiresAt && Date.now() > item.expiresAt) {
+          this.memoryStore.delete(key);
+        } else {
+          try { list = JSON.parse(item.value); } catch { list = []; }
+        }
+      }
+      list.push(...values);
+      this.memoryStore.set(key, {
+        value: JSON.stringify(list),
+        expiresAt: item?.expiresAt,
+      });
+      return list.length;
+    }
+    return this.client.rpush(key, ...values);
+  }
+
+  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+    if (this.isMemoryMode) {
+      const item = this.memoryStore.get(key);
+      if (!item) return [];
+      if (item.expiresAt && Date.now() > item.expiresAt) {
+        this.memoryStore.delete(key);
+        return [];
+      }
+      try {
+        const list: string[] = JSON.parse(item.value);
+        const s = start < 0 ? Math.max(list.length + start, 0) : start;
+        const e = stop < 0 ? list.length + stop + 1 : stop + 1;
+        return list.slice(s, e);
+      } catch {
+        return [];
+      }
+    }
+    return this.client.lrange(key, start, stop);
+  }
+
+  async ltrim(key: string, start: number, stop: number): Promise<void> {
+    if (this.isMemoryMode) {
+      const item = this.memoryStore.get(key);
+      if (!item) return;
+      try {
+        const list: string[] = JSON.parse(item.value);
+        const s = start < 0 ? Math.max(list.length + start, 0) : start;
+        const e = stop < 0 ? list.length + stop + 1 : stop + 1;
+        const trimmed = list.slice(s, e);
+        if (trimmed.length === 0) {
+          this.memoryStore.delete(key);
+        } else {
+          this.memoryStore.set(key, { value: JSON.stringify(trimmed), expiresAt: item.expiresAt });
+        }
+      } catch {
+        this.memoryStore.delete(key);
+      }
+      return;
+    }
+    await this.client.ltrim(key, start, stop);
+  }
+
+  async expire(key: string, ttlSeconds: number): Promise<void> {
+    if (this.isMemoryMode) {
+      const item = this.memoryStore.get(key);
+      if (item) {
+        item.expiresAt = Date.now() + ttlSeconds * 1000;
+      }
+      return;
+    }
+    await this.client.expire(key, ttlSeconds);
+  }
+
   /**
    * Atomic set-if-not-exists. Returns true if the key was set (caller wins),
    * false if it already existed (someone else won).

@@ -56,6 +56,13 @@ enum Role {
   ADMIN
 }
 
+enum StripeOnboardingStatus {
+  NONE
+  PENDING
+  ACTIVE
+  RESTRICTED
+}
+
 // ──────────────────────────────────────────────
 // Provider Profiles (extends User for providers)
 // ──────────────────────────────────────────────
@@ -72,6 +79,8 @@ model ProviderProfile {
   locationLat   Float?   @map("location_lat")
   locationLng   Float?   @map("location_lng")
   coverageRadius Float?  @map("coverage_radius")
+  stripeAccountId        String?                @unique @map("stripe_account_id")
+  stripeOnboardingStatus StripeOnboardingStatus @default(NONE) @map("stripe_onboarding_status")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -83,6 +92,7 @@ model ProviderProfile {
   recurringExpenses  RecurringExpense[]
   appointments     Appointment[]
   reminders        Reminder[]
+  paymentLinks     PaymentLink[]
   serviceZones     ProviderServiceZone[]
   trustScore       TrustScore?
   location         ProviderLocation?
@@ -146,7 +156,8 @@ model Income {
   date          DateTime      @default(now())
   createdAt     DateTime      @default(now()) @map("created_at")
 
-  provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  provider    ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  paymentLink PaymentLink?
 
   @@index([providerId])
   @@index([providerId, date])
@@ -158,7 +169,42 @@ enum PaymentMethod {
   CASH
   TRANSFER
   CARD
+  PAYMENT_LINK
   OTHER
+}
+
+// ──────────────────────────────────────────────
+// Payment Links (Stripe Checkout Sessions)
+// ──────────────────────────────────────────────
+model PaymentLink {
+  id               String            @id @default(uuid())
+  providerId       String            @map("provider_id")
+  amount           Decimal           @db.Decimal(12, 2)
+  description      String?
+  clientName       String?           @map("client_name")
+  clientPhone      String?           @map("client_phone")
+  status           PaymentLinkStatus @default(PENDING)
+  stripeSessionId  String?           @unique @map("stripe_session_id")
+  stripePaymentUrl String?           @map("stripe_payment_url")
+  incomeId         String?           @unique @map("income_id")
+  expiresAt        DateTime?         @map("expires_at")
+  paidAt           DateTime?         @map("paid_at")
+  createdAt        DateTime          @default(now()) @map("created_at")
+
+  provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  income   Income?         @relation(fields: [incomeId], references: [id])
+
+  @@index([providerId])
+  @@index([stripeSessionId])
+  @@index([status])
+  @@map("payment_links")
+}
+
+enum PaymentLinkStatus {
+  PENDING
+  PAID
+  EXPIRED
+  CANCELLED
 }
 
 // ──────────────────────────────────────────────

@@ -15,8 +15,14 @@ import { Public } from '../../common/decorators/public.decorator';
 import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppProviderHandler } from './whatsapp-provider.handler';
 import { RedisService } from '../../config/redis.service';
+import { AiService } from '../ai/ai.service';
+import { QueueService } from '../../common/queues/queue.service';
+import { QUEUE_NAMES } from '../../common/queues/queue.constants';
 
 const WEBHOOK_DEDUP_TTL = 24 * 60 * 60; // 24 hours
+const DEBOUNCE_DELAY_MS = 3_000;
+const BUFFER_PREFIX = 'wa_buf:';
+const BUFFER_TTL = 30; // seconds — safety net if debounce job is lost
 
 @ApiTags('WhatsApp Webhook')
 @Controller('api/webhook')
@@ -27,6 +33,8 @@ export class WhatsAppController {
     private whatsappService: WhatsAppService,
     private providerHandler: WhatsAppProviderHandler,
     private redis: RedisService,
+    private aiService: AiService,
+    private queueService: QueueService,
   ) {}
 
   @Get()
@@ -91,11 +99,51 @@ export class WhatsAppController {
 
         await this.whatsappService.markAsRead(messageId);
 
-        await this.providerHandler.handleIncomingMessage(
-          senderPhone,
-          senderName,
-          message,
-        );
+        // Interactive messages (buttons, list replies) — always immediate, never debounce
+        if (message.type === 'interactive') {
+          await this.providerHandler.handleIncomingMessage(
+            senderPhone,
+            senderName,
+            message,
+          );
+          continue;
+        }
+
+        // Non-IDLE session states need immediate response (booking flow, rating, etc.)
+        const idle = await this.providerHandler.isSessionIdle(senderPhone);
+        if (!idle) {
+          await this.providerHandler.handleIncomingMessage(
+            senderPhone,
+            senderName,
+            message,
+          );
+          continue;
+        }
+
+        // Extract text content before buffering (audio → Whisper transcription)
+        const text = await this.extractTextContent(message, senderPhone);
+        if (!text) continue;
+
+        // Push to Redis buffer (RPUSH is atomic — safe against concurrent webhooks)
+        const bufKey = `${BUFFER_PREFIX}${senderPhone}`;
+        await this.redis.rpush(bufKey, text);
+        await this.redis.expire(bufKey, BUFFER_TTL);
+
+        // Schedule/reschedule debounce — resets timer with each new message
+        const scheduled = await this.scheduleDebounce(senderPhone, senderName);
+
+        if (!scheduled) {
+          // BullMQ unavailable — fall back to immediate processing
+          const items = await this.redis.lrange(bufKey, 0, -1);
+          await this.redis.del(bufKey);
+          if (items.length > 0) {
+            await this.providerHandler.handleBufferedMessage(
+              senderPhone,
+              senderName,
+              items.join('\n'),
+            );
+          }
+        }
       }
     } catch (error: any) {
       this.logger.error(
@@ -103,5 +151,77 @@ export class WhatsAppController {
         error.stack,
       );
     }
+  }
+
+  // ─── Debounce helpers ──────────────────────────────────────
+
+  /**
+   * Extract text from a WhatsApp message (text or audio).
+   * Audio is transcribed via Whisper before buffering so the media URL
+   * doesn't expire while sitting in the debounce queue.
+   */
+  private async extractTextContent(
+    message: any,
+    senderPhone: string,
+  ): Promise<string> {
+    if (message.type === 'text') {
+      return message.text?.body?.trim().toLowerCase() || '';
+    }
+
+    if (message.type === 'audio' && message.audio?.id) {
+      const mediaUrl = await this.whatsappService.getMediaUrl(message.audio.id);
+      if (!mediaUrl) {
+        this.logger.warn(`Could not resolve media URL for audio ${message.audio.id}`);
+        return '';
+      }
+
+      const audioBuffer = await this.whatsappService.downloadMedia(mediaUrl);
+      if (!audioBuffer) {
+        this.logger.warn(`Could not download audio ${message.audio.id}`);
+        return '';
+      }
+
+      const mimeType = message.audio.mime_type || 'audio/ogg';
+      const transcript = await this.aiService.transcribeAudio(audioBuffer, mimeType);
+
+      if (!transcript) {
+        await this.whatsappService.sendTextMessage(
+          senderPhone,
+          '🤔 No pude entender tu nota de voz. ¿Podrías intentar de nuevo o escribir tu mensaje?',
+        );
+        return '';
+      }
+
+      return transcript.trim().toLowerCase();
+    }
+
+    return '';
+  }
+
+  /**
+   * Cancel any pending debounce job for this phone and schedule a new one.
+   * Returns false if BullMQ is unavailable (caller should fall back to immediate processing).
+   */
+  private async scheduleDebounce(
+    phone: string,
+    senderName: string,
+  ): Promise<boolean> {
+    const jobId = `debounce-${phone}`;
+
+    await this.queueService.removeJob(QUEUE_NAMES.WHATSAPP_DEBOUNCE, jobId);
+
+    const id = await this.queueService.addJob(
+      QUEUE_NAMES.WHATSAPP_DEBOUNCE,
+      'debounce',
+      { phone, senderName },
+      {
+        delay: DEBOUNCE_DELAY_MS,
+        jobId,
+        attempts: 1,
+        removeOnComplete: true,
+      },
+    );
+
+    return id !== null;
   }
 }

@@ -86,6 +86,12 @@ export const TOOL_TO_INTENT: Record<
   cancelar_recordatorio: {
     intent: AiIntent.CANCELAR_RECORDATORIO,
   },
+  crear_link_cobro: {
+    intent: AiIntent.CREAR_LINK_COBRO,
+  },
+  activar_cobros: {
+    intent: AiIntent.ACTIVAR_COBROS,
+  },
 };
 
 // ─── Tool definitions ────────────────────────────────────────
@@ -633,6 +639,52 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
         },
         required: ['description'],
+      },
+    },
+  },
+
+  // --- Payment links ---
+  {
+    type: 'function',
+    function: {
+      name: 'crear_link_cobro',
+      description:
+        'Generar un link de cobro/pago para enviar a un cliente. El cliente puede pagar con tarjeta, OXXO o transferencia SPEI. Usar cuando el usuario dice "cóbrale", "mándale el cobro", "genera link de pago", "envíale el cobro". NO usar registrar_ingreso — eso es para cobros ya recibidos en mano.',
+      parameters: {
+        type: 'object',
+        properties: {
+          amount: {
+            type: 'number',
+            description: 'Monto a cobrar en pesos.',
+          },
+          description: {
+            type: 'string',
+            description: 'Descripción del trabajo (ej: "instalación eléctrica", "reparación de fuga").',
+          },
+          clientName: {
+            type: 'string',
+            description: 'Nombre del cliente.',
+          },
+          clientPhone: {
+            type: 'string',
+            description: 'Teléfono del cliente para enviarle el link directamente por WhatsApp. Solo incluir si el usuario lo proporciona explícitamente.',
+          },
+        },
+        required: ['amount'],
+      },
+    },
+  },
+
+  // --- Stripe Connect onboarding ---
+  {
+    type: 'function',
+    function: {
+      name: 'activar_cobros',
+      description:
+        'Activar la función de cobro con link de pago. Genera un link para que el proveedor registre su cuenta bancaria y pueda recibir pagos de sus clientes directamente. Usar cuando el usuario dice "quiero activar cobros", "configurar pagos", "habilitar links de cobro", "quiero cobrar con link".',
+      parameters: {
+        type: 'object',
+        properties: {},
       },
     },
   },

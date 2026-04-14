@@ -37,6 +37,7 @@ import { CryptoModule } from './common/crypto/crypto.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { ProviderModelModule } from './modules/provider-model/provider-model.module';
 import { RemindersModule } from './modules/reminders/reminders.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -106,6 +107,9 @@ const isProd = process.env.NODE_ENV === 'production';
 
     // Provider Model — computed patterns for LLM context (global)
     ProviderModelModule,
+
+    // Payments — Stripe payment links (global)
+    PaymentsModule,
 
     // WhatsApp (global)
     WhatsAppModule,

@@ -25,6 +25,8 @@ export class QueueService {
     appointmentReminderQueue?: Queue,
     @Optional() @InjectQueue(QUEUE_NAMES.PERSONAL_REMINDER)
     personalReminderQueue?: Queue,
+    @Optional() @InjectQueue(QUEUE_NAMES.WHATSAPP_DEBOUNCE)
+    whatsappDebounceQueue?: Queue,
   ) {
     if (notificationsQueue) this.queues[QUEUE_NAMES.NOTIFICATIONS] = notificationsQueue;
     if (trustScoreQueue) this.queues[QUEUE_NAMES.TRUST_SCORE] = trustScoreQueue;
@@ -34,6 +36,7 @@ export class QueueService {
     if (appointmentFollowupQueue) this.queues[QUEUE_NAMES.APPOINTMENT_FOLLOWUP] = appointmentFollowupQueue;
     if (appointmentReminderQueue) this.queues[QUEUE_NAMES.APPOINTMENT_REMINDER] = appointmentReminderQueue;
     if (personalReminderQueue) this.queues[QUEUE_NAMES.PERSONAL_REMINDER] = personalReminderQueue;
+    if (whatsappDebounceQueue) this.queues[QUEUE_NAMES.WHATSAPP_DEBOUNCE] = whatsappDebounceQueue;
   }
 
   async addJob<T>(
@@ -63,6 +66,17 @@ export class QueueService {
         `Failed to add job "${jobName}" to "${queueName}": ${error.message}`,
       );
       return null;
+    }
+  }
+
+  async removeJob(queueName: QueueName, jobId: string): Promise<void> {
+    const queue = this.queues[queueName];
+    if (!queue) return;
+    try {
+      const job = await queue.getJob(jobId);
+      if (job) await job.remove();
+    } catch {
+      // Job may have already been processed or doesn't exist
     }
   }
 

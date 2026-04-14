@@ -119,6 +119,7 @@ export class IncomeService {
       CASH: '💵 Efectivo',
       TRANSFER: '📲 Transferencia',
       CARD: '💳 Tarjeta',
+      PAYMENT_LINK: '🔗 Link de cobro',
       OTHER: '📦 Otro',
     };
 
@@ -147,6 +148,7 @@ export class IncomeService {
       CASH: 'efectivo',
       TRANSFER: 'transferencia',
       CARD: 'tarjeta',
+      PAYMENT_LINK: 'link de cobro',
       OTHER: 'otro',
     };
 
