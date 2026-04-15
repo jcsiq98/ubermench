@@ -52,8 +52,49 @@ export class RemindersService {
     });
   }
 
+  async findCompletable(providerId: string) {
+    return this.prisma.reminder.findMany({
+      where: {
+        providerId,
+        status: { in: [ReminderStatus.PENDING, ReminderStatus.SENT] },
+      },
+      orderBy: { remindAt: 'asc' },
+    });
+  }
+
   async findByDescription(providerId: string, description: string) {
     const reminders = await this.findActive(providerId);
+    if (!reminders.length) return [];
+
+    const needle = description.toLowerCase().trim();
+
+    const scored = reminders.map((r) => {
+      const desc = r.description.toLowerCase();
+      let score = 0;
+      if (desc === needle) score = 100;
+      else if (desc.includes(needle) || needle.includes(desc)) score = 80;
+      else {
+        const needleWords = needle.split(/\s+/);
+        const descWords = desc.split(/\s+/);
+        const overlap = needleWords.filter((w) =>
+          descWords.some((dw) => dw.includes(w) || w.includes(dw)),
+        ).length;
+        score = overlap > 0 ? 50 + overlap * 10 : 0;
+      }
+      return { reminder: r, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    if (scored[0]?.score > 0) {
+      return scored.filter((s) => s.score > 0).map((s) => s.reminder);
+    }
+
+    return [];
+  }
+
+  async findCompletableByDescription(providerId: string, description: string) {
+    const reminders = await this.findCompletable(providerId);
     if (!reminders.length) return [];
 
     const needle = description.toLowerCase().trim();
@@ -108,6 +149,19 @@ export class RemindersService {
       where: { id },
       data: { status: ReminderStatus.SENT },
     });
+  }
+
+  async markCompleted(id: string) {
+    const reminder = await this.prisma.reminder.update({
+      where: { id },
+      data: { status: ReminderStatus.COMPLETED },
+    });
+    this.logger.log(`Reminder ${id} marked as completed`);
+    return reminder;
+  }
+
+  formatReminderCompleted(description: string): string {
+    return `✅ *Recordatorio completado:* ${description}`;
   }
 
   formatReminderConfirmation(

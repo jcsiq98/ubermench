@@ -663,6 +663,10 @@ export class WhatsAppProviderHandler {
             await this.handleCancelarRecordatorio(phone, aiResponse.data, providerProfileId, tz);
             break;
 
+          case AiIntent.COMPLETAR_RECORDATORIO:
+            await this.handleCompletarRecordatorio(phone, aiResponse.data, providerProfileId);
+            break;
+
           case AiIntent.CONFIGURAR_PERFIL:
             await this.handleConfigurarPerfil(phone, aiResponse, providerProfileId);
             break;
@@ -698,6 +702,7 @@ export class WhatsAppProviderHandler {
           AiIntent.CREAR_RECORDATORIO,
           AiIntent.MODIFICAR_RECORDATORIO,
           AiIntent.CANCELAR_RECORDATORIO,
+          AiIntent.COMPLETAR_RECORDATORIO,
           AiIntent.CREAR_LINK_COBRO,
           AiIntent.ACTIVAR_COBROS,
         ];
@@ -1780,7 +1785,7 @@ export class WhatsAppProviderHandler {
     phone: string,
     data: Record<string, any> | undefined,
     providerProfileId?: string,
-    _tz: string = DEFAULT_TIMEZONE,
+    tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
@@ -1796,15 +1801,29 @@ export class WhatsAppProviderHandler {
       return;
     }
 
-    const appointment = await this.appointmentsService.findRecentPastAppointment(
-      providerProfileId,
-      data?.clientName,
-    );
+    let appointment: Awaited<ReturnType<typeof this.appointmentsService.findByContext>>[number] | null = null;
+
+    const dateHint = this.appointmentsService.parseScheduledDate(data?.date, data?.time, tz);
+    if (dateHint || data?.clientName) {
+      const matches = await this.appointmentsService.findByContext(
+        providerProfileId,
+        data?.clientName,
+        dateHint ?? undefined,
+      );
+      if (matches.length > 0) appointment = matches[0];
+    }
+
+    if (!appointment) {
+      appointment = await this.appointmentsService.findRecentPastAppointment(
+        providerProfileId,
+        data?.clientName,
+      );
+    }
 
     if (!appointment) {
       await this.sendAndRecord(
         phone,
-        '🤔 No encontré una cita reciente para confirmar.',
+        '🤔 No encontré una cita que coincida. ¿Podrías decirme el nombre del cliente o la hora?\n\nEscribe *"mi agenda"* para ver tus citas.',
       );
       return;
     }
@@ -2595,6 +2614,45 @@ export class WhatsAppProviderHandler {
     } catch (error: any) {
       this.logger.error(`Error cancelling reminder: ${error.message}`);
       await this.sendAndRecord(phone, '❌ No se pudo cancelar el recordatorio. Intenta de nuevo.');
+    }
+  }
+
+  private async handleCompletarRecordatorio(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      return;
+    }
+
+    const description = data?.description;
+    if (!description) {
+      await this.sendAndRecord(phone, '🤔 ¿Cuál recordatorio completaste?');
+      return;
+    }
+
+    try {
+      const matches = await this.remindersService.findCompletableByDescription(providerProfileId, description);
+
+      if (matches.length === 0) {
+        await this.sendAndRecord(
+          phone,
+          `🤔 No encontré un recordatorio pendiente que coincida con "${description}".`,
+        );
+        return;
+      }
+
+      const reminder = matches[0];
+      await this.remindersService.markCompleted(reminder.id);
+      this.cancelPersonalReminder(reminder.id);
+
+      const msg = this.remindersService.formatReminderCompleted(reminder.description);
+      await this.sendAndRecord(phone, msg, AiIntent.COMPLETAR_RECORDATORIO);
+    } catch (error: any) {
+      this.logger.error(`Error completing reminder: ${error.message}`);
+      await this.sendAndRecord(phone, '❌ No se pudo completar el recordatorio. Intenta de nuevo.');
     }
   }
 

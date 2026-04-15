@@ -4,7 +4,7 @@ import { Job } from 'bullmq';
 import { QUEUE_NAMES } from '../queue.constants';
 import { WhatsAppService } from '../../../modules/whatsapp/whatsapp.service';
 import { AiContextService } from '../../../modules/ai/ai-context.service';
-import { RemindersService } from '../../../modules/reminders/reminders.service';
+import { PrismaService } from '../../../prisma/prisma.service';
 
 export interface PersonalReminderJobData {
   reminderId: string;
@@ -22,7 +22,7 @@ export class PersonalReminderProcessor extends WorkerHost {
   constructor(
     private readonly whatsappService: WhatsAppService,
     private readonly aiContextService: AiContextService,
-    private readonly remindersService: RemindersService,
+    private readonly prisma: PrismaService,
   ) {
     super();
   }
@@ -34,15 +34,23 @@ export class PersonalReminderProcessor extends WorkerHost {
       `Processing personal reminder ${reminderId}: "${description}"`,
     );
 
+    const claimed = await this.prisma.reminder.updateMany({
+      where: { id: reminderId, status: 'PENDING' },
+      data: { status: 'SENT' },
+    });
+
+    if (claimed.count === 0) {
+      this.logger.warn(
+        `Skipping reminder ${reminderId}: already processed (not PENDING)`,
+      );
+      return;
+    }
+
     try {
       const msg = `🔔 *Recordatorio:* ${description}`;
-
       await this.whatsappService.sendTextMessage(providerPhone, msg);
       await this.aiContextService.addMessage(providerPhone, 'assistant', msg, 'recordatorio_personal')
         .catch((err) => this.logger.warn(`Failed to log personal reminder context: ${err.message}`));
-      await this.remindersService.markSent(reminderId).catch((err) =>
-        this.logger.warn(`Failed to mark reminder ${reminderId} as sent: ${err.message}`),
-      );
     } catch (err: any) {
       this.logger.error(`Failed to send personal reminder ${reminderId}: ${err.message}`);
       throw err;

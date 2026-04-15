@@ -15,6 +15,7 @@ export enum AiIntent {
   VER_RECORDATORIOS = 'ver_recordatorios',
   MODIFICAR_RECORDATORIO = 'modificar_recordatorio',
   CANCELAR_RECORDATORIO = 'cancelar_recordatorio',
+  COMPLETAR_RECORDATORIO = 'completar_recordatorio',
   CONFIGURAR_PERFIL = 'configurar_perfil',
   CREAR_LINK_COBRO = 'crear_link_cobro',
   ACTIVAR_COBROS = 'activar_cobros',

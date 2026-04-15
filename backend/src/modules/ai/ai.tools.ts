@@ -86,6 +86,9 @@ export const TOOL_TO_INTENT: Record<
   cancelar_recordatorio: {
     intent: AiIntent.CANCELAR_RECORDATORIO,
   },
+  completar_recordatorio: {
+    intent: AiIntent.COMPLETAR_RECORDATORIO,
+  },
   crear_link_cobro: {
     intent: AiIntent.CREAR_LINK_COBRO,
   },
@@ -448,7 +451,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'confirmar_resultado_cita',
       description:
-        'Registrar el resultado de una cita pasada: si se completó, si el cliente no llegó, o si se canceló. Usar cuando el usuario responde a "¿Se hizo tu cita?" o menciona que una cita se completó o no.',
+        'Registrar el resultado de una cita de trabajo: si se completó, si el cliente no llegó, o si se canceló. Usar cuando el usuario responde a "¿Se hizo tu cita?" o menciona que una cita se completó o no. NO usar para recordatorios personales — para eso usar completar_recordatorio.',
       parameters: {
         type: 'object',
         properties: {
@@ -460,6 +463,14 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           clientName: {
             type: 'string',
             description: 'Nombre del cliente de la cita.',
+          },
+          date: {
+            type: 'string',
+            description: 'Fecha de la cita. Usar "hoy", "mañana", día de la semana, o YYYY-MM-DD.',
+          },
+          time: {
+            type: 'string',
+            description: 'Hora de la cita. Formato HH:MM (24h). "la de las 3pm" = "15:00".',
           },
         },
         required: ['status'],
@@ -639,6 +650,25 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           description: {
             type: 'string',
             description: 'Descripción del recordatorio a cancelar (para identificar cuál).',
+          },
+        },
+        required: ['description'],
+      },
+    },
+  },
+
+  {
+    type: 'function',
+    function: {
+      name: 'completar_recordatorio',
+      description:
+        'Marcar un recordatorio personal como completado/hecho. Usar cuando el usuario dice "ya lo hice", "ya mandé X", "listo el recordatorio de X", "X completado", "ya quedó X" refiriéndose a algo que tenía pendiente como recordatorio. NO confundir con confirmar_resultado_cita (que es para citas de trabajo con clientes).',
+      parameters: {
+        type: 'object',
+        properties: {
+          description: {
+            type: 'string',
+            description: 'Descripción del recordatorio a completar (para identificar cuál).',
           },
         },
         required: ['description'],
