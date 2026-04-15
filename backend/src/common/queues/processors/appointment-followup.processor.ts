@@ -6,12 +6,14 @@ import { WhatsAppService } from '../../../modules/whatsapp/whatsapp.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AiContextService } from '../../../modules/ai/ai-context.service';
 import { AppointmentStatus } from '@prisma/client';
+import { formatTime, DEFAULT_TIMEZONE } from '../../utils/timezone.utils';
 
 export interface AppointmentFollowupJobData {
   appointmentId: string;
   providerPhone: string;
   clientName?: string;
   scheduledAt: string; // ISO string
+  timezone?: string;
 }
 
 @Processor(QUEUE_NAMES.APPOINTMENT_FOLLOWUP, {
@@ -29,7 +31,8 @@ export class AppointmentFollowupProcessor extends WorkerHost {
   }
 
   async process(job: Job<AppointmentFollowupJobData>): Promise<any> {
-    const { appointmentId, providerPhone, clientName, scheduledAt } = job.data;
+    const { appointmentId, providerPhone, clientName, scheduledAt, timezone } = job.data;
+    const tz = timezone || DEFAULT_TIMEZONE;
 
     this.logger.debug(
       `Processing followup for appointment ${appointmentId} (provider: ${providerPhone})`,
@@ -41,7 +44,6 @@ export class AppointmentFollowupProcessor extends WorkerHost {
 
     if (!appointment) return;
 
-    // Only follow up on appointments still PENDING or CONFIRMED
     if (
       appointment.status !== AppointmentStatus.PENDING &&
       appointment.status !== AppointmentStatus.CONFIRMED
@@ -52,12 +54,7 @@ export class AppointmentFollowupProcessor extends WorkerHost {
       return;
     }
 
-    const timeStr = new Date(scheduledAt).toLocaleTimeString('es-MX', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-      timeZone: 'America/Mexico_City',
-    });
+    const timeStr = formatTime(new Date(scheduledAt), tz);
 
     const clientLabel = clientName || 'tu cliente';
     let msg = `📋 Oye, ya pasó tu cita de las *${timeStr}* con *${clientLabel}*. ¿Se hizo?`;

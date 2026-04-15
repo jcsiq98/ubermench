@@ -7,6 +7,12 @@ import {
   ClientPatterns,
   SchedulePatterns,
 } from './provider-model.types';
+import {
+  toLocalTime,
+  getWeekStartUtc,
+  getMonthStartUtc,
+  DEFAULT_TIMEZONE,
+} from '../../common/utils/timezone.utils';
 
 const CACHE_PREFIX = 'provider_model:';
 const CACHE_TTL = 300; // 5 minutes
@@ -41,10 +47,12 @@ export class ProviderModelService {
     }
 
     try {
+      const tz = await this.getProviderTimezone(providerId);
+
       const [financial, clients, schedule] = await Promise.all([
-        this.computeFinancialPatterns(providerId),
+        this.computeFinancialPatterns(providerId, tz),
         this.computeClientPatterns(providerId),
-        this.computeSchedulePatterns(providerId),
+        this.computeSchedulePatterns(providerId, tz),
       ]);
 
       const model: ProviderModel = { financial, clients, schedule };
@@ -66,22 +74,31 @@ export class ProviderModelService {
     await this.redis.del(`${CACHE_PREFIX}${providerId}`).catch(() => {});
   }
 
+  private async getProviderTimezone(providerId: string): Promise<string> {
+    try {
+      const ws = await this.prisma.workspaceProfile.findUnique({
+        where: { providerId },
+        select: { timezone: true },
+      });
+      return ws?.timezone || DEFAULT_TIMEZONE;
+    } catch {
+      return DEFAULT_TIMEZONE;
+    }
+  }
+
   private async computeFinancialPatterns(
     providerId: string,
+    tz: string,
   ): Promise<FinancialPatterns> {
-    const now = this.cdmxNow();
+    const now = toLocalTime(new Date(), tz);
 
     const thirtyDaysAgo = new Date(now);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const thisWeekStart = this.getWeekStart(now);
+    const thisWeekStart = getWeekStartUtc(tz);
     const lastWeekStart = new Date(thisWeekStart);
     lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-    const thisMonthStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      1,
-    );
+    const thisMonthStart = getMonthStartUtc(tz);
 
     const [incomes30d, expensesMonth] = await Promise.all([
       this.prisma.income.findMany({
@@ -102,7 +119,8 @@ export class ProviderModelService {
     for (const inc of incomes30d) {
       const amount = Number(inc.amount);
       const date = new Date(inc.date);
-      const dow = date.getDay();
+      const localDate = toLocalTime(date, tz);
+      const dow = localDate.getDay();
 
       dayTotals.set(dow, (dayTotals.get(dow) || 0) + amount);
 
@@ -121,16 +139,15 @@ export class ProviderModelService {
       0,
     );
 
-    // Use actual span from earliest income to now, minimum 1 week
     let avgWeeklyIncome: number | null = null;
     if (incomes30d.length > 0) {
       const earliestDate = incomes30d.reduce((min, i) => {
         const d = new Date(i.date);
         return d < min ? d : min;
-      }, now);
+      }, new Date());
       const daySpan = Math.max(
         7,
-        (now.getTime() - earliestDate.getTime()) / 86_400_000,
+        (Date.now() - earliestDate.getTime()) / 86_400_000,
       );
       avgWeeklyIncome = Math.round(total30d / (daySpan / 7));
     }
@@ -140,7 +157,6 @@ export class ProviderModelService {
         ? Math.round(total30d / incomes30d.length)
         : null;
 
-    // Best day of week by total income
     let bestDayOfWeek: string | null = null;
     if (dayTotals.size > 0) {
       let maxDay = 0;
@@ -169,7 +185,7 @@ export class ProviderModelService {
   private async computeClientPatterns(
     providerId: string,
   ): Promise<ClientPatterns> {
-    const thirtyDaysAgo = new Date(this.cdmxNow());
+    const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const incomes = await this.prisma.income.findMany({
@@ -225,13 +241,12 @@ export class ProviderModelService {
 
   private async computeSchedulePatterns(
     providerId: string,
+    tz: string,
   ): Promise<SchedulePatterns> {
-    const now = this.cdmxNow();
-
-    const thirtyDaysAgo = new Date(now);
+    const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const thisWeekStart = this.getWeekStart(now);
+    const thisWeekStart = getWeekStartUtc(tz);
     const nextWeekStart = new Date(thisWeekStart);
     nextWeekStart.setDate(nextWeekStart.getDate() + 7);
     const nextWeekEnd = new Date(nextWeekStart);
@@ -242,7 +257,7 @@ export class ProviderModelService {
         this.prisma.appointment.findMany({
           where: {
             providerId,
-            scheduledAt: { gte: thirtyDaysAgo, lte: now },
+            scheduledAt: { gte: thirtyDaysAgo, lte: new Date() },
           },
           select: { scheduledAt: true },
         }),
@@ -266,7 +281,8 @@ export class ProviderModelService {
     if (recentAppointments.length > 0) {
       const dayCounts = new Map<number, number>();
       for (const apt of recentAppointments) {
-        const dow = new Date(apt.scheduledAt).getDay();
+        const localDate = toLocalTime(new Date(apt.scheduledAt), tz);
+        const dow = localDate.getDay();
         dayCounts.set(dow, (dayCounts.get(dow) || 0) + 1);
       }
       let maxDay = 0;
@@ -285,18 +301,5 @@ export class ProviderModelService {
       appointmentsThisWeek: thisWeekCount,
       appointmentsNextWeek: nextWeekCount,
     };
-  }
-
-  private cdmxNow(): Date {
-    const utc = new Date();
-    const cdmxOffset = -6 * 60;
-    return new Date(utc.getTime() + cdmxOffset * 60 * 1000);
-  }
-
-  private getWeekStart(date: Date): Date {
-    const start = new Date(date);
-    start.setDate(start.getDate() - start.getDay());
-    start.setHours(0, 0, 0, 0);
-    return start;
   }
 }

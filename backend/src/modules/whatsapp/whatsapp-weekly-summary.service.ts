@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WhatsAppService } from './whatsapp.service';
+import { getLocalHour, getLocalDayOfWeek, DEFAULT_TIMEZONE } from '../../common/utils/timezone.utils';
 
 @Injectable()
 export class WhatsAppWeeklySummaryService {
@@ -12,25 +13,29 @@ export class WhatsAppWeeklySummaryService {
     private whatsapp: WhatsAppService,
   ) {}
 
-  @Cron('0 10 * * 0') // Every Sunday at 10:00 AM
+  @Cron('0 * * * 0') // Every hour on Sundays
   async sendWeeklySummaries() {
-    this.logger.log('Starting weekly summary cron...');
-
     const providers = await this.prisma.providerProfile.findMany({
       where: { isAvailable: true },
       include: {
         user: { select: { phone: true, name: true, ratingAverage: true, ratingCount: true } },
+        workspaceProfile: { select: { timezone: true } },
       },
     });
-
-    const now = new Date();
-    const startOfWeek = new Date(now);
-    startOfWeek.setDate(now.getDate() - 7);
-    startOfWeek.setHours(0, 0, 0, 0);
 
     let sent = 0;
     for (const provider of providers) {
       try {
+        const tz = provider.workspaceProfile?.timezone || DEFAULT_TIMEZONE;
+
+        if (getLocalHour(tz) !== 10) continue;
+        if (getLocalDayOfWeek(tz) !== 0) continue;
+
+        const now = new Date();
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - 7);
+        startOfWeek.setHours(0, 0, 0, 0);
+
         const weekJobs = await this.prisma.booking.findMany({
           where: {
             providerId: provider.id,
@@ -44,11 +49,10 @@ export class WhatsAppWeeklySummaryService {
 
         const totalEarnings = weekJobs.reduce((sum, j) => sum + (j.price || 0), 0);
 
-        // Find best day
         const byDay: Record<string, number> = {};
         for (const job of weekJobs) {
           if (job.completedAt) {
-            const day = job.completedAt.toLocaleDateString('es-MX', { weekday: 'long' });
+            const day = job.completedAt.toLocaleDateString('es-MX', { weekday: 'long', timeZone: tz });
             byDay[day] = (byDay[day] || 0) + (job.price || 0);
           }
         }
@@ -77,6 +81,8 @@ export class WhatsAppWeeklySummaryService {
       }
     }
 
-    this.logger.log(`Weekly summaries sent: ${sent}/${providers.length}`);
+    if (sent > 0) {
+      this.logger.log(`Weekly summaries sent: ${sent}/${providers.length}`);
+    }
   }
 }

@@ -11,33 +11,42 @@ import {
   WorkspaceContextDto,
 } from './ai.types';
 import { AI_TOOLS, TOOL_TO_INTENT } from './ai.tools';
+import {
+  toLocalTime,
+  getTimezoneLabel,
+  DEFAULT_TIMEZONE,
+} from '../../common/utils/timezone.utils';
 
 const RATE_LIMIT_PREFIX = 'ai_rate:';
 const RATE_LIMIT_MAX = 30;
 const RATE_LIMIT_WINDOW = 3600; // 1 hour
 
 function buildSystemPrompt(workspaceContext?: WorkspaceContextDto): string {
+  const tz = workspaceContext?.timezone || DEFAULT_TIMEZONE;
+  const tzLabel = getTimezoneLabel(tz);
   const now = new Date();
   const dateStr = now.toLocaleDateString('es-MX', {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
     day: 'numeric',
+    timeZone: tz,
   });
   const timeStr = now.toLocaleTimeString('es-MX', {
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
-    timeZone: 'America/Mexico_City',
+    timeZone: tz,
   });
-  const isoDate = now.toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+  const isoDate = now.toLocaleDateString('en-CA', { timeZone: tz });
 
-  const dayOfMonth = now.getDate();
-  const tomorrowDay = new Date(now.getTime() + 86400000).getDate();
+  const localNow = toLocalTime(now, tz);
+  const dayOfMonth = localNow.getDate();
+  const tomorrowDay = new Date(localNow.getTime() + 86400000).getDate();
 
   return `Eres **Chalán**. El ayudante del maestro. Te encargas de las cuentas, las citas y lo administrativo para que él se enfoque en chambear.
 
-Fecha: ${dateStr}, ${timeStr} (CDMX). ISO: ${isoDate}. Día del mes: ${dayOfMonth}. Mañana es día: ${tomorrowDay}.
+Fecha: ${dateStr}, ${timeStr} (${tzLabel}). ISO: ${isoDate}. Día del mes: ${dayOfMonth}. Mañana es día: ${tomorrowDay}.
 
 Personalidad: Eres el chalán del maestro. Hablas en español mexicano, directo, sin rodeos. No eres un bot — eres un ayudante con criterio.
 
@@ -75,7 +84,8 @@ Anti-patrones (NUNCA hacer):
 16. **Citas vs recordatorios:** "Recuérdame ir al gym", "recuérdame comprar X", "avísame a las Y" = recordatorio personal → usar crear_recordatorio. "Tengo cita con el cliente", "agendar trabajo a las X" = cita de trabajo → usar agendar_cita. Regla simple: si no hay cliente ni trabajo de oficio, es recordatorio personal.
 17. **Links de cobro vs ingreso:** "Cóbrale", "mándale el cobro", "genera link de pago", "envíale el link" = crear_link_cobro (genera un link para que el cliente pague con tarjeta/OXXO/SPEI). "Cobré", "me pagó", "ya me depositó" = registrar_ingreso (dinero ya recibido). Si no menciona teléfono del cliente, generar el link y dárselo al proveedor para que lo reenvíe. Si el usuario dice "quiero activar cobros", "configurar pagos", "habilitar links de cobro" → usar activar_cobros.
 18. **"Cobro" vs "gasto" — ambigüedad coloquial:** En habla coloquial mexicana, "cobro" a veces se usa para referirse a un gasto (ej: "me cobraron 4 mil"). Antes de clasificar como ingreso, revisa TODO el mensaje. Si el contexto general indica que es un gasto (ej: "gasto del rancho", "gasté", "compré", "me cobraron por material"), usa registrar_gasto aunque la palabra "cobro" aparezca. registrar_ingreso es solo para dinero que el proveedor RECIBIÓ por su trabajo.
-19. **No re-registrar lo que ya está confirmado:** Cuando el usuario pide registrar algo específico, registra SOLO lo que pide. Si en la conversación anterior ya hay una confirmación "✅ ¡Gasto registrado!" o "Anotado" para un monto+descripción, NO lo vuelvas a registrar. Cada tool call debe corresponder a UNA entrada nueva que el usuario está pidiendo explícitamente en ESE mensaje.` + buildWorkspaceSection(workspaceContext);
+19. **No re-registrar lo que ya está confirmado:** Cuando el usuario pide registrar algo específico, registra SOLO lo que pide. Si en la conversación anterior ya hay una confirmación "✅ ¡Gasto registrado!" o "Anotado" para un monto+descripción, NO lo vuelvas a registrar. Cada tool call debe corresponder a UNA entrada nueva que el usuario está pidiendo explícitamente en ESE mensaje.
+20. **Zona horaria:** Si el usuario menciona estar en otra ciudad o zona horaria ("estoy en Miami", "vivo en Tijuana", "mi hora es diferente"), usa configurar_zona_horaria para ajustar su zona. Esto corrige las horas de sus citas, recordatorios y briefings.` + buildWorkspaceSection(workspaceContext);
 }
 
 function buildWorkspaceSection(ctx?: WorkspaceContextDto): string {

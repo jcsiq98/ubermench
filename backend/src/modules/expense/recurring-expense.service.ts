@@ -5,6 +5,12 @@ import { ExpenseService } from './expense.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { IncomeService } from '../income/income.service';
 import { AppointmentStatus, Prisma } from '@prisma/client';
+import {
+  getLocalHour,
+  getLocalDayRange,
+  formatTime,
+  DEFAULT_TIMEZONE,
+} from '../../common/utils/timezone.utils';
 
 @Injectable()
 export class RecurringExpenseService {
@@ -97,11 +103,6 @@ export class RecurringExpenseService {
     });
   }
 
-  /**
-   * Bidirectional fuzzy match with optional dayOfMonth disambiguation.
-   * When multiple expenses share the same description (e.g. two "Railway"),
-   * dayOfMonth picks the right one. Returns null if ambiguous.
-   */
   private async findByFuzzyDescription(
     providerId: string,
     description: string,
@@ -120,10 +121,6 @@ export class RecurringExpenseService {
     return null;
   }
 
-  /**
-   * Returns all active recurring expenses matching a description (fuzzy).
-   * Used by the handler to build disambiguation messages.
-   */
   async findMatchesByDescription(providerId: string, description: string) {
     const all = await this.prisma.recurringExpense.findMany({
       where: { providerId, isActive: true },
@@ -155,14 +152,13 @@ export class RecurringExpenseService {
   }
 
   /**
-   * Cron: runs daily at midnight (Mexico City time).
-   * Finds all active recurring expenses due today or earlier, creates an Expense for each,
-   * and advances nextDueDate.
+   * Hourly cron: process due recurring expenses.
+   * nextDueDate is stored as UTC midnight, so running every hour
+   * catches all providers regardless of timezone.
    */
-  @Cron('0 0 * * *', { timeZone: 'America/Mexico_City' })
+  @Cron('0 * * * *')
   async processRecurringExpenses(): Promise<void> {
     const now = new Date();
-    this.logger.log('Processing recurring expenses...');
 
     const due = await this.prisma.recurringExpense.findMany({
       where: {
@@ -176,10 +172,9 @@ export class RecurringExpenseService {
       },
     });
 
-    if (due.length === 0) {
-      this.logger.log('No recurring expenses due today.');
-      return;
-    }
+    if (due.length === 0) return;
+
+    this.logger.log(`Processing ${due.length} recurring expenses...`);
 
     for (const recurring of due) {
       try {
@@ -224,49 +219,32 @@ export class RecurringExpenseService {
         );
       }
     }
-
-    this.logger.log(`Processed ${due.length} recurring expenses.`);
   }
 
   /**
-   * Cron: 8pm Mexico City — remind providers about recurring expenses due tomorrow.
+   * Hourly cron: send expense reminders at 8pm local time per provider.
    */
-  @Cron('0 20 * * *', { timeZone: 'America/Mexico_City' })
+  @Cron('0 * * * *')
   async sendExpenseReminders(): Promise<void> {
-    const { start: tomorrowStart, end: tomorrowEnd } = this.getCDMXDayRange(1);
+    const providers = await this.getProvidersWithTimezone();
 
-    this.logger.log(
-      `Checking reminders for tomorrow CDMX: ${tomorrowStart.toISOString()} — ${tomorrowEnd.toISOString()}`,
-    );
+    for (const { providerId, phone, tz } of providers) {
+      if (getLocalHour(tz) !== 20) continue;
 
-    const upcoming = await this.prisma.recurringExpense.findMany({
-      where: {
-        isActive: true,
-        nextDueDate: { gte: tomorrowStart, lte: tomorrowEnd },
-      },
-      include: {
-        provider: {
-          include: { user: { select: { phone: true } } },
+      const tomorrow = new Date(Date.now() + 86_400_000);
+      const { start: tomorrowStart, end: tomorrowEnd } = getLocalDayRange(tz, tomorrow);
+
+      const upcoming = await this.prisma.recurringExpense.findMany({
+        where: {
+          providerId,
+          isActive: true,
+          nextDueDate: { gte: tomorrowStart, lte: tomorrowEnd },
         },
-      },
-    });
+      });
 
-    if (upcoming.length === 0) {
-      this.logger.log('No recurring expense reminders to send.');
-      return;
-    }
+      if (upcoming.length === 0) continue;
 
-    const byProvider = new Map<string, typeof upcoming>();
-    for (const exp of upcoming) {
-      const phone = exp.provider?.user?.phone;
-      if (!phone) continue;
-      const list = byProvider.get(phone) || [];
-      list.push(exp);
-      byProvider.set(phone, list);
-    }
-
-    for (const [phone, expenses] of byProvider) {
-      const lines = expenses.map(
+      const lines = upcoming.map(
         (e) => `  💸 *$${Number(e.amount).toLocaleString('es-MX')}* — ${e.description}`,
       );
       const msg =
@@ -280,96 +258,48 @@ export class RecurringExpenseService {
           this.logger.warn(`Failed to send reminder to ${phone}: ${err.message}`),
         );
     }
-
-    this.logger.log(`Sent expense reminders to ${byProvider.size} providers.`);
   }
 
   /**
-   * Cron: 7am Mexico City — daily briefing with today's appointments + expenses due.
+   * Hourly cron: send morning briefing at 7am local time per provider.
    */
-  @Cron('0 7 * * *', { timeZone: 'America/Mexico_City' })
+  @Cron('0 * * * *')
   async sendMorningBriefing(): Promise<void> {
-    const { start: startOfDay, end: endOfDay } = this.getCDMXDayRange(0);
+    const providers = await this.getProvidersWithTimezone();
 
-    this.logger.log(
-      `Morning briefing for CDMX today: ${startOfDay.toISOString()} — ${endOfDay.toISOString()}`,
-    );
+    for (const { providerId, phone, name, tz } of providers) {
+      if (getLocalHour(tz) !== 7) continue;
 
-    const [todayExpenses, todayAppointments] = await Promise.all([
-      this.prisma.recurringExpense.findMany({
-        where: {
-          isActive: true,
-          lastProcessedAt: { gte: startOfDay, lte: endOfDay },
-        },
-        include: {
-          provider: {
-            include: { user: { select: { phone: true, name: true } } },
+      const { start: startOfDay, end: endOfDay } = getLocalDayRange(tz);
+
+      const [todayExpenses, todayAppointments] = await Promise.all([
+        this.prisma.recurringExpense.findMany({
+          where: {
+            providerId,
+            isActive: true,
+            lastProcessedAt: { gte: startOfDay, lte: endOfDay },
           },
-        },
-      }),
-      this.prisma.appointment.findMany({
-        where: {
-          scheduledAt: { gte: startOfDay, lte: endOfDay },
-          status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED] },
-        },
-        include: {
-          provider: {
-            include: { user: { select: { phone: true, name: true } } },
+        }),
+        this.prisma.appointment.findMany({
+          where: {
+            providerId,
+            scheduledAt: { gte: startOfDay, lte: endOfDay },
+            status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED] },
           },
-        },
-      }),
-    ]);
+        }),
+      ]);
 
-    const briefings = new Map<string, { name: string; providerId: string; appointments: any[]; expenses: any[] }>();
+      if (todayAppointments.length === 0 && todayExpenses.length === 0) continue;
 
-    for (const appt of todayAppointments) {
-      const phone = appt.provider?.user?.phone;
-      if (!phone) continue;
-      const entry = briefings.get(phone) || {
-        name: appt.provider?.user?.name || '',
-        providerId: appt.providerId,
-        appointments: [],
-        expenses: [],
-      };
-      entry.appointments.push(appt);
-      briefings.set(phone, entry);
-    }
-
-    for (const exp of todayExpenses) {
-      const phone = exp.provider?.user?.phone;
-      if (!phone) continue;
-      const entry = briefings.get(phone) || {
-        name: exp.provider?.user?.name || '',
-        providerId: exp.providerId,
-        appointments: [],
-        expenses: [],
-      };
-      entry.expenses.push(exp);
-      briefings.set(phone, entry);
-    }
-
-    if (briefings.size === 0) {
-      this.logger.log('No morning briefings to send.');
-      return;
-    }
-
-    for (const [phone, data] of briefings) {
-      if (data.appointments.length === 0 && data.expenses.length === 0) continue;
-
-      const greeting = data.name ? `Buenos días, *${data.name}*.` : 'Buenos días.';
+      const greeting = name ? `Buenos días, *${name}*.` : 'Buenos días.';
       const lines: string[] = [greeting];
 
-      if (data.appointments.length > 0) {
+      if (todayAppointments.length > 0) {
         lines.push('');
-        const citaWord = data.appointments.length === 1 ? 'cita' : 'citas';
-        lines.push(`Hoy tienes *${data.appointments.length} ${citaWord}:*`);
-        for (const a of data.appointments) {
-          const timeStr = new Date(a.scheduledAt).toLocaleTimeString('es-MX', {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true,
-            timeZone: 'America/Mexico_City',
-          });
+        const citaWord = todayAppointments.length === 1 ? 'cita' : 'citas';
+        lines.push(`Hoy tienes *${todayAppointments.length} ${citaWord}:*`);
+        for (const a of todayAppointments) {
+          const timeStr = formatTime(new Date(a.scheduledAt), tz);
           let line = `• *${timeStr}*`;
           if (a.clientName) line += ` con ${a.clientName}`;
           if (a.description) line += ` — ${a.description}`;
@@ -378,17 +308,17 @@ export class RecurringExpenseService {
         }
       }
 
-      if (data.expenses.length > 0) {
-        if (data.appointments.length > 0) lines.push('');
-        const gastoWord = data.expenses.length === 1 ? 'gasto fijo se registra' : 'gastos fijos se registran';
-        lines.push(`También ${data.expenses.length} ${gastoWord} hoy:`);
-        for (const e of data.expenses) {
+      if (todayExpenses.length > 0) {
+        if (todayAppointments.length > 0) lines.push('');
+        const gastoWord = todayExpenses.length === 1 ? 'gasto fijo se registra' : 'gastos fijos se registran';
+        lines.push(`También ${todayExpenses.length} ${gastoWord} hoy:`);
+        for (const e of todayExpenses) {
           lines.push(`• *$${Number(e.amount).toLocaleString('es-MX')}* — ${e.description}`);
         }
       }
 
       try {
-        const weekSummary = await this.incomeService.getWeekSummary(data.providerId);
+        const weekSummary = await this.incomeService.getWeekSummary(providerId, tz);
         if (weekSummary.total > 0) {
           lines.push('');
           lines.push(`Llevas *$${weekSummary.total.toLocaleString('es-MX')}* esta semana.`);
@@ -403,42 +333,35 @@ export class RecurringExpenseService {
           this.logger.warn(`Failed to send briefing to ${phone}: ${err.message}`),
         );
     }
-
-    this.logger.log(`Sent morning briefings to ${briefings.size} providers.`);
   }
 
-  /**
-   * Returns { year, month (0-indexed), day } in CDMX timezone.
-   * Ensures all cron date logic uses CDMX calendar dates regardless of server TZ.
-   */
-  private getCDMXDate(date?: Date): { year: number; month: number; day: number } {
-    const d = date || new Date();
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Mexico_City',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(d);
-    const [year, month, day] = parts.split('-').map(Number);
-    return { year, month: month - 1, day };
-  }
+  private async getProvidersWithTimezone(): Promise<
+    { providerId: string; phone: string; name: string; tz: string }[]
+  > {
+    const profiles = await this.prisma.providerProfile.findMany({
+      where: { isAvailable: true },
+      include: {
+        user: { select: { phone: true, name: true } },
+        workspaceProfile: { select: { timezone: true } },
+      },
+    });
 
-  /**
-   * Returns start (00:00 UTC) and end (23:59:59.999 UTC) for a CDMX calendar date.
-   * nextDueDate is stored at midnight UTC, so this range captures it.
-   */
-  private getCDMXDayRange(offsetDays: number = 0): { start: Date; end: Date } {
-    const { year, month, day } = this.getCDMXDate();
-    const start = new Date(Date.UTC(year, month, day + offsetDays, 0, 0, 0, 0));
-    const end = new Date(Date.UTC(year, month, day + offsetDays, 23, 59, 59, 999));
-    return { start, end };
+    return profiles.map((p) => ({
+      providerId: p.id,
+      phone: p.user.phone,
+      name: p.user.name || '',
+      tz: p.workspaceProfile?.timezone || DEFAULT_TIMEZONE,
+    }));
   }
 
   private calculateNextDueDate(
     frequency: string,
     dayOfMonth: number,
   ): Date {
-    const { year, month, day } = this.getCDMXDate();
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const month = now.getUTCMonth();
+    const day = now.getUTCDate();
 
     if (frequency === 'weekly') {
       return new Date(Date.UTC(year, month, day + 7, 0, 0, 0, 0));

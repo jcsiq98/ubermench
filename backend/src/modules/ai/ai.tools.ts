@@ -92,6 +92,9 @@ export const TOOL_TO_INTENT: Record<
   activar_cobros: {
     intent: AiIntent.ACTIVAR_COBROS,
   },
+  configurar_zona_horaria: {
+    intent: AiIntent.CONFIGURAR_ZONA_HORARIA,
+  },
 };
 
 // ─── Tool definitions ────────────────────────────────────────
@@ -685,6 +688,27 @@ export const AI_TOOLS: ChatCompletionTool[] = [
       parameters: {
         type: 'object',
         properties: {},
+      },
+    },
+  },
+
+  // --- Timezone configuration ---
+  {
+    type: 'function',
+    function: {
+      name: 'configurar_zona_horaria',
+      description:
+        'Configurar la zona horaria del proveedor. Usar cuando el usuario menciona estar en una ciudad/país diferente o quiere cambiar su zona horaria. Ejemplos: "estoy en Miami", "mi zona horaria es Eastern", "vivo en Tijuana", "cámbiame la hora a Nueva York".',
+      parameters: {
+        type: 'object',
+        properties: {
+          timezone: {
+            type: 'string',
+            description:
+              'Ciudad, zona o IANA timezone string. Ejemplos: "Miami", "Tijuana", "Eastern", "America/New_York", "Chihuahua", "CDMX".',
+          },
+        },
+        required: ['timezone'],
       },
     },
   },

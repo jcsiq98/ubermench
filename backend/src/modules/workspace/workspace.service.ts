@@ -10,6 +10,7 @@ import {
   WorkspaceAutoReply,
   StructuredFact,
 } from '../ai/ai.types';
+import { isValidTimezone, DEFAULT_TIMEZONE } from '../../common/utils/timezone.utils';
 
 const CACHE_PREFIX = 'workspace:';
 const CACHE_TTL = 86400; // 24 hours
@@ -33,6 +34,7 @@ export class WorkspaceService {
         message: '',
       },
       notes: workspace.notes,
+      timezone: workspace.timezone || DEFAULT_TIMEZONE,
       learnedFacts: this.parseLearnedFacts(workspace.learnedFacts),
     };
   }
@@ -254,6 +256,28 @@ export class WorkspaceService {
     this.logger.log(
       `Learned facts updated for provider ${providerId}: ${facts.length} facts`,
     );
+  }
+
+  async setTimezone(
+    providerId: string,
+    timezone: string,
+  ): Promise<{ success: boolean; message: string }> {
+    if (!isValidTimezone(timezone)) {
+      return { success: false, message: `"${timezone}" no es una zona horaria válida.` };
+    }
+
+    await this.prisma.workspaceProfile.update({
+      where: { providerId },
+      data: { timezone },
+    });
+    await this.invalidateCache(providerId);
+    this.logger.log(`Timezone set to ${timezone} for provider ${providerId}`);
+    return { success: true, message: `Zona horaria configurada: ${timezone}` };
+  }
+
+  async getTimezone(providerId: string): Promise<string> {
+    const workspace = await this.getWorkspace(providerId);
+    return workspace.timezone || DEFAULT_TIMEZONE;
   }
 
   private async invalidateCache(providerId: string): Promise<void> {

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { getWeekStartUtc, getMonthStartUtc, DEFAULT_TIMEZONE } from '../../common/utils/timezone.utils';
 
 export interface CreateExpenseDto {
   providerId: string;
@@ -41,20 +42,14 @@ export class ExpenseService {
     return expense;
   }
 
-  async getWeekSummary(providerId: string): Promise<ExpenseSummary> {
-    const now = new Date();
-    const startOfWeek = new Date(now);
-    startOfWeek.setDate(now.getDate() - now.getDay());
-    startOfWeek.setHours(0, 0, 0, 0);
-
-    return this.getSummary(providerId, startOfWeek, now, 'esta semana');
+  async getWeekSummary(providerId: string, tz: string = DEFAULT_TIMEZONE): Promise<ExpenseSummary> {
+    const startOfWeek = getWeekStartUtc(tz);
+    return this.getSummary(providerId, startOfWeek, new Date(), 'esta semana');
   }
 
-  async getMonthSummary(providerId: string): Promise<ExpenseSummary> {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-    return this.getSummary(providerId, startOfMonth, now, 'este mes');
+  async getMonthSummary(providerId: string, tz: string = DEFAULT_TIMEZONE): Promise<ExpenseSummary> {
+    const startOfMonth = getMonthStartUtc(tz);
+    return this.getSummary(providerId, startOfMonth, new Date(), 'este mes');
   }
 
   private async getSummary(

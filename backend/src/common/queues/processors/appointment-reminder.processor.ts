@@ -6,6 +6,7 @@ import { WhatsAppService } from '../../../modules/whatsapp/whatsapp.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AiContextService } from '../../../modules/ai/ai-context.service';
 import { AppointmentStatus } from '@prisma/client';
+import { formatTime, DEFAULT_TIMEZONE } from '../../utils/timezone.utils';
 
 export interface AppointmentReminderJobData {
   appointmentId: string;
@@ -13,6 +14,7 @@ export interface AppointmentReminderJobData {
   clientName?: string;
   scheduledAt: string; // ISO string
   reminderMinutes: number;
+  timezone?: string;
 }
 
 @Processor(QUEUE_NAMES.APPOINTMENT_REMINDER, {
@@ -30,7 +32,8 @@ export class AppointmentReminderProcessor extends WorkerHost {
   }
 
   async process(job: Job<AppointmentReminderJobData>): Promise<any> {
-    const { appointmentId, providerPhone, clientName, scheduledAt, reminderMinutes } = job.data;
+    const { appointmentId, providerPhone, clientName, scheduledAt, reminderMinutes, timezone } = job.data;
+    const tz = timezone || DEFAULT_TIMEZONE;
 
     this.logger.debug(
       `Processing reminder for appointment ${appointmentId} (${reminderMinutes}min before)`,
@@ -52,12 +55,7 @@ export class AppointmentReminderProcessor extends WorkerHost {
       return;
     }
 
-    const timeStr = new Date(scheduledAt).toLocaleTimeString('es-MX', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-      timeZone: 'America/Mexico_City',
-    });
+    const timeStr = formatTime(new Date(scheduledAt), tz);
 
     const clientLabel = clientName || 'tu cliente';
     const msg = `⏰ Recordatorio: en *${reminderMinutes} minutos* tienes cita de las *${timeStr}* con *${clientLabel}*.`;

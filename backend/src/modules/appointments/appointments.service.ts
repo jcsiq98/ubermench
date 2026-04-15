@@ -2,6 +2,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppointmentStatus } from '@prisma/client';
+import {
+  formatDate,
+  formatTime,
+  getLocalDayRange,
+  parseScheduledDate as tzParseScheduledDate,
+  wallClockToUtc,
+  toLocalTime,
+  DEFAULT_TIMEZONE,
+} from '../../common/utils/timezone.utils';
 
 export interface CreateAppointmentDto {
   providerId: string;
@@ -48,10 +57,6 @@ export class AppointmentsService {
     return appointment;
   }
 
-  /**
-   * Find appointments matching a context (client name, date range).
-   * Returns the best matches ordered by proximity to now.
-   */
   /**
    * Find appointments matching a context (client name, date range).
    * When dateHint includes a specific time (not midnight), ties are broken
@@ -171,9 +176,6 @@ export class AppointmentsService {
     'no sé', 'no se', 'no recuerdo', 'cualquiera', 'n/a',
   ]);
 
-  /**
-   * Find the most recent past appointment for follow-up confirmation.
-   */
   async findRecentPastAppointment(providerId: string, clientName?: string) {
     const normalized = clientName?.trim().toLowerCase();
     const isValidName = normalized
@@ -201,19 +203,10 @@ export class AppointmentsService {
     clientName?: string,
     description?: string,
     address?: string,
+    tz: string = DEFAULT_TIMEZONE,
   ): string {
-    const dateStr = scheduledAt.toLocaleDateString('es-MX', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      timeZone: 'America/Mexico_City',
-    });
-    const timeStr = scheduledAt.toLocaleTimeString('es-MX', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-      timeZone: 'America/Mexico_City',
-    });
+    const dateStr = formatDate(scheduledAt, tz);
+    const timeStr = formatTime(scheduledAt, tz);
 
     let msg = `✏️ *¡Cita modificada!*\n\n🗓 ${dateStr}\n⏰ ${timeStr}`;
     if (clientName) msg += `\n👤 ${clientName}`;
@@ -226,47 +219,31 @@ export class AppointmentsService {
   formatAppointmentCancelled(
     clientName?: string,
     scheduledAt?: Date,
+    tz: string = DEFAULT_TIMEZONE,
   ): string {
-    let msg = '🗑️ *Cita cancelada.*';
+    let msg = '🗑️ *Cita cancelada.* Registrado.';
     if (clientName) msg += `\n👤 ${clientName}`;
     if (scheduledAt) {
-      const timeStr = scheduledAt.toLocaleTimeString('es-MX', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-        timeZone: 'America/Mexico_City',
-      });
-      msg += `\n⏰ ${timeStr}`;
+      msg += `\n⏰ ${formatTime(scheduledAt, tz)}`;
     }
     return msg;
   }
 
-  async getTodayAgenda(providerId: string) {
-    const { start, end } = this.getCdmxDayRange(0);
+  async getTodayAgenda(providerId: string, tz: string = DEFAULT_TIMEZONE) {
+    const { start, end } = getLocalDayRange(tz);
     return this.getAgenda(providerId, start, end);
   }
 
-  async getTomorrowAgenda(providerId: string) {
-    const { start, end } = this.getCdmxDayRange(1);
+  async getTomorrowAgenda(providerId: string, tz: string = DEFAULT_TIMEZONE) {
+    const tomorrow = new Date(Date.now() + 86_400_000);
+    const { start, end } = getLocalDayRange(tz, tomorrow);
     return this.getAgenda(providerId, start, end);
   }
 
-  private getCdmxDayRange(offsetDays: number): { start: Date; end: Date } {
-    const nowCdmx = this.toCdmx(new Date());
-    nowCdmx.setDate(nowCdmx.getDate() + offsetDays);
-    const year = nowCdmx.getFullYear();
-    const month = nowCdmx.getMonth();
-    const day = nowCdmx.getDate();
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    const start = new Date(`${year}-${pad(month + 1)}-${pad(day)}T00:00:00-06:00`);
-    const end = new Date(`${year}-${pad(month + 1)}-${pad(day)}T23:59:59.999-06:00`);
-    return { start, end };
-  }
-
-  async getWeekAgenda(providerId: string) {
-    const { start } = this.getCdmxDayRange(0);
-    const { end } = this.getCdmxDayRange(7 - start.getDay());
-
+  async getWeekAgenda(providerId: string, tz: string = DEFAULT_TIMEZONE) {
+    const { start } = getLocalDayRange(tz);
+    const endDate = new Date(start.getTime() + 7 * 86_400_000);
+    const { end } = getLocalDayRange(tz, endDate);
     return this.getAgenda(providerId, start, end);
   }
 
@@ -298,19 +275,10 @@ export class AppointmentsService {
     clientName?: string,
     description?: string,
     address?: string,
+    tz: string = DEFAULT_TIMEZONE,
   ): string {
-    const dateStr = scheduledAt.toLocaleDateString('es-MX', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      timeZone: 'America/Mexico_City',
-    });
-    const timeStr = scheduledAt.toLocaleTimeString('es-MX', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-      timeZone: 'America/Mexico_City',
-    });
+    const dateStr = formatDate(scheduledAt, tz);
+    const timeStr = formatTime(scheduledAt, tz);
 
     let msg = `Listo, quedó tu cita. *${dateStr}* a las *${timeStr}*`;
     if (clientName) msg += ` con ${clientName}`;
@@ -321,7 +289,11 @@ export class AppointmentsService {
     return msg;
   }
 
-  formatAgendaMessage(appointments: any[], label: string): string {
+  formatAgendaMessage(
+    appointments: any[],
+    label: string,
+    tz: string = DEFAULT_TIMEZONE,
+  ): string {
     if (appointments.length === 0) {
       return `📅 No tienes citas ${label}.`;
     }
@@ -329,12 +301,7 @@ export class AppointmentsService {
     let msg = `📅 *Agenda ${label}* (${appointments.length} cita${appointments.length > 1 ? 's' : ''}):\n`;
 
     for (const apt of appointments) {
-      const timeStr = new Date(apt.scheduledAt).toLocaleTimeString('es-MX', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-        timeZone: 'America/Mexico_City',
-      });
+      const timeStr = formatTime(new Date(apt.scheduledAt), tz);
 
       msg += `\n⏰ *${timeStr}*`;
       if (apt.clientName) msg += ` — ${apt.clientName}`;
@@ -346,109 +313,29 @@ export class AppointmentsService {
     return msg;
   }
 
-  parseScheduledDate(dateStr?: string, timeStr?: string): Date | null {
-    if (!dateStr && !timeStr) return null;
-
-    // All date math in CDMX timezone
-    const nowCdmx = this.toCdmx(new Date());
-
-    let hours = 9;
-    let minutes = 0;
-    if (timeStr) {
-      const parts = timeStr.split(':').map(Number);
-      if (!isNaN(parts[0])) {
-        hours = parts[0];
-        minutes = parts[1] || 0;
-      }
-    }
-
-    // If only time is provided, assume today (or tomorrow if past)
-    if (!dateStr && timeStr) {
-      const date = new Date(nowCdmx);
-      date.setHours(hours, minutes, 0, 0);
-      if (date <= nowCdmx) {
-        date.setDate(date.getDate() + 1);
-      }
-      return this.cdmxToUtc(date, hours, minutes);
-    }
-
-    try {
-      let dateCdmx: Date;
-      const lower = (dateStr || '').toLowerCase().trim();
-
-      if (lower === 'hoy' || lower === 'today') {
-        dateCdmx = new Date(nowCdmx);
-      } else if (lower === 'mañana' || lower === 'manana' || lower === 'tomorrow') {
-        dateCdmx = new Date(nowCdmx);
-        dateCdmx.setDate(dateCdmx.getDate() + 1);
-      } else if (lower.includes('pasado mañana') || lower.includes('pasado manana')) {
-        dateCdmx = new Date(nowCdmx);
-        dateCdmx.setDate(dateCdmx.getDate() + 2);
-      } else if (/^(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)/.test(lower)) {
-        dateCdmx = this.getNextDayOfWeek(lower, nowCdmx);
-      } else {
-        const isoMatch = lower.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if (isoMatch) {
-          const [, y, m, d] = isoMatch.map(Number);
-          dateCdmx = new Date(y, m - 1, d);
-        } else {
-          dateCdmx = new Date(dateStr!);
-          if (isNaN(dateCdmx.getTime())) return null;
-        }
-      }
-
-      return this.cdmxToUtc(dateCdmx, hours, minutes);
-    } catch {
-      return null;
-    }
+  parseScheduledDate(
+    dateStr?: string,
+    timeStr?: string,
+    tz: string = DEFAULT_TIMEZONE,
+  ): Date | null {
+    return tzParseScheduledDate(dateStr, timeStr, tz);
   }
 
   /**
-   * Convert a "wall clock" CDMX date+time to a proper UTC Date.
-   * E.g. 10:00 CDMX (UTC-6) → 16:00 UTC.
+   * Convert wall-clock time to UTC for a given timezone.
+   * Used by the handler for time-only modifications.
    */
-  private cdmxToUtc(dateCdmx: Date, hours: number, minutes: number): Date {
-    const year = dateCdmx.getFullYear();
-    const month = dateCdmx.getMonth();
-    const day = dateCdmx.getDate();
-    // Build an ISO string that represents the CDMX wall-clock time
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    const isoStr = `${year}-${pad(month + 1)}-${pad(day)}T${pad(hours)}:${pad(minutes)}:00-06:00`;
-    return new Date(isoStr);
-  }
-
-  private toCdmx(utcDate: Date): Date {
-    // Get CDMX representation by formatting and re-parsing
-    const cdmxStr = utcDate.toLocaleString('en-CA', {
-      timeZone: 'America/Mexico_City',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-    return new Date(cdmxStr);
-  }
-
-  private getNextDayOfWeek(dayName: string, from: Date): Date {
-    const days: Record<string, number> = {
-      domingo: 0, lunes: 1, martes: 2,
-      'miércoles': 3, miercoles: 3,
-      jueves: 4, viernes: 5,
-      'sábado': 6, sabado: 6,
-    };
-
-    const targetDay = days[dayName.split(' ')[0]];
-    if (targetDay === undefined) return new Date(from);
-
-    const result = new Date(from);
-    const currentDay = result.getDay();
-    let daysAhead = targetDay - currentDay;
-    if (daysAhead <= 0) daysAhead += 7;
-    result.setDate(result.getDate() + daysAhead);
-    return result;
+  wallClockToUtc(
+    date: Date,
+    hours: number,
+    minutes: number,
+    tz: string = DEFAULT_TIMEZONE,
+  ): Date {
+    const local = toLocalTime(date, tz);
+    return wallClockToUtc(
+      local.getFullYear(), local.getMonth(), local.getDate(),
+      hours, minutes, tz,
+    );
   }
 
   /**

@@ -24,6 +24,14 @@ import { AppointmentReminderJobData } from '../../common/queues/processors/appoi
 import { PersonalReminderJobData } from '../../common/queues/processors/personal-reminder.processor';
 import { RemindersService } from '../reminders/reminders.service';
 import { PaymentsService } from '../payments/payments.service';
+import {
+  formatTime,
+  wallClockToUtc,
+  toLocalTime,
+  DEFAULT_TIMEZONE,
+  resolveTimezone,
+  getTimezoneLabel,
+} from '../../common/utils/timezone.utils';
 
 const JUNK_CLIENT_NAMES = new Set([
   'ninguno', 'ninguna', 'no', 'n/a', 'na', 'nada',
@@ -544,15 +552,17 @@ export class WhatsAppProviderHandler {
 
     // Load workspace context + financial data for personalized AI responses
     let workspaceContext;
+    let tz = DEFAULT_TIMEZONE;
     if (providerProfileId) {
       try {
-        const [wsCtx, recentExpenses, activeRecurring, providerModel, todayAppts] =
+        const wsCtx = await this.workspaceService.getWorkspaceContext(providerProfileId);
+        tz = wsCtx.timezone || DEFAULT_TIMEZONE;
+        const [recentExpenses, activeRecurring, providerModel, todayAppts] =
           await Promise.all([
-            this.workspaceService.getWorkspaceContext(providerProfileId),
             this.expenseService.getRecent(providerProfileId, 5),
             this.recurringExpenseService.listActive(providerProfileId),
             this.providerModelService.getProviderModel(providerProfileId),
-            this.appointmentsService.getTodayAgenda(providerProfileId),
+            this.appointmentsService.getTodayAgenda(providerProfileId, tz),
           ]);
 
         workspaceContext = {
@@ -571,12 +581,7 @@ export class WhatsAppProviderHandler {
           })),
           providerModel,
           todayAppointments: todayAppts.map((a: any) => ({
-            time: new Date(a.scheduledAt).toLocaleTimeString('es-MX', {
-              hour: '2-digit',
-              minute: '2-digit',
-              hour12: true,
-              timeZone: 'America/Mexico_City',
-            }),
+            time: formatTime(new Date(a.scheduledAt), tz),
             clientName: a.clientName || undefined,
             description: a.description || undefined,
             address: a.address || undefined,
@@ -614,27 +619,27 @@ export class WhatsAppProviderHandler {
             break;
 
           case AiIntent.VER_RESUMEN:
-            await this.handleVerResumen(phone, aiResponse.data, providerProfileId);
+            await this.handleVerResumen(phone, aiResponse.data, providerProfileId, tz);
             break;
 
           case AiIntent.AGENDAR_CITA:
-            await this.handleAgendarCita(phone, aiResponse.data, providerProfileId);
+            await this.handleAgendarCita(phone, aiResponse.data, providerProfileId, tz);
             break;
 
           case AiIntent.MODIFICAR_CITA:
-            await this.handleModificarCita(phone, aiResponse.data, providerProfileId);
+            await this.handleModificarCita(phone, aiResponse.data, providerProfileId, tz);
             break;
 
           case AiIntent.CANCELAR_CITA:
-            await this.handleCancelarCita(phone, aiResponse.data, providerProfileId);
+            await this.handleCancelarCita(phone, aiResponse.data, providerProfileId, tz);
             break;
 
           case AiIntent.CONFIRMAR_RESULTADO_CITA:
-            await this.handleConfirmarResultadoCita(phone, aiResponse.data, providerProfileId);
+            await this.handleConfirmarResultadoCita(phone, aiResponse.data, providerProfileId, tz);
             break;
 
           case AiIntent.VER_AGENDA:
-            await this.handleVerAgenda(phone, providerProfileId);
+            await this.handleVerAgenda(phone, providerProfileId, tz);
             break;
 
           case AiIntent.CONFIRMAR_CLIENTE:
@@ -643,19 +648,19 @@ export class WhatsAppProviderHandler {
             break;
 
           case AiIntent.CREAR_RECORDATORIO:
-            await this.handleCrearRecordatorio(phone, aiResponse.data, providerProfileId);
+            await this.handleCrearRecordatorio(phone, aiResponse.data, providerProfileId, tz);
             break;
 
           case AiIntent.VER_RECORDATORIOS:
-            await this.handleVerRecordatorios(phone, providerProfileId);
+            await this.handleVerRecordatorios(phone, providerProfileId, tz);
             break;
 
           case AiIntent.MODIFICAR_RECORDATORIO:
-            await this.handleModificarRecordatorio(phone, aiResponse.data, providerProfileId);
+            await this.handleModificarRecordatorio(phone, aiResponse.data, providerProfileId, tz);
             break;
 
           case AiIntent.CANCELAR_RECORDATORIO:
-            await this.handleCancelarRecordatorio(phone, aiResponse.data, providerProfileId);
+            await this.handleCancelarRecordatorio(phone, aiResponse.data, providerProfileId, tz);
             break;
 
           case AiIntent.CONFIGURAR_PERFIL:
@@ -668,6 +673,10 @@ export class WhatsAppProviderHandler {
 
           case AiIntent.ACTIVAR_COBROS:
             await this.handleActivarCobros(phone, providerProfileId);
+            break;
+
+          case AiIntent.CONFIGURAR_ZONA_HORARIA:
+            tz = await this.handleConfigurarZonaHoraria(phone, aiResponse.data, providerProfileId);
             break;
 
           default:
@@ -874,6 +883,57 @@ export class WhatsAppProviderHandler {
           '❌ No se pudo configurar tu cuenta de cobros. Intenta de nuevo.',
         );
       }
+    }
+  }
+
+  // ─── Timezone configuration ──────────────────────────────
+
+  private async handleConfigurarZonaHoraria(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+  ): Promise<string> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      return DEFAULT_TIMEZONE;
+    }
+
+    const input = data?.timezone;
+    if (!input) {
+      await this.sendAndRecord(
+        phone,
+        '🤔 ¿En qué ciudad o zona horaria estás?\n\nEjemplo: *"Estoy en Miami"* o *"Mi zona es Tijuana"*',
+      );
+      return DEFAULT_TIMEZONE;
+    }
+
+    const resolved = resolveTimezone(input);
+    if (!resolved) {
+      await this.sendAndRecord(
+        phone,
+        `🤔 No reconozco "${input}" como zona horaria. Prueba con el nombre de tu ciudad.\n\nEjemplos: *Miami*, *Tijuana*, *CDMX*, *Chihuahua*`,
+      );
+      return DEFAULT_TIMEZONE;
+    }
+
+    try {
+      const result = await this.workspaceService.setTimezone(providerProfileId, resolved);
+      if (!result.success) {
+        await this.sendAndRecord(phone, `❌ ${result.message}`);
+        return DEFAULT_TIMEZONE;
+      }
+
+      const label = getTimezoneLabel(resolved);
+      await this.sendAndRecord(
+        phone,
+        `🕐 *Zona horaria configurada:* ${label}\n\nTodas tus citas, recordatorios y briefings ahora usan esta hora.`,
+        AiIntent.CONFIGURAR_ZONA_HORARIA,
+      );
+      return resolved;
+    } catch (error: any) {
+      this.logger.error(`Error setting timezone: ${error.message}`);
+      await this.sendAndRecord(phone, '❌ No se pudo configurar la zona horaria. Intenta de nuevo.');
+      return DEFAULT_TIMEZONE;
     }
   }
 
@@ -1375,6 +1435,7 @@ export class WhatsAppProviderHandler {
     phone: string,
     data: Record<string, any> | undefined,
     providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(
@@ -1387,10 +1448,10 @@ export class WhatsAppProviderHandler {
     try {
       const [weekIncome, monthIncome, weekExpense, monthExpense] =
         await Promise.all([
-          this.incomeService.getWeekSummary(providerProfileId),
-          this.incomeService.getMonthSummary(providerProfileId),
-          this.expenseService.getWeekSummary(providerProfileId),
-          this.expenseService.getMonthSummary(providerProfileId),
+          this.incomeService.getWeekSummary(providerProfileId, tz),
+          this.incomeService.getMonthSummary(providerProfileId, tz),
+          this.expenseService.getWeekSummary(providerProfileId, tz),
+          this.expenseService.getMonthSummary(providerProfileId, tz),
         ]);
 
       const weekIncomeMsg = this.incomeService.formatSummaryMessage(weekIncome);
@@ -1429,6 +1490,7 @@ export class WhatsAppProviderHandler {
     phone: string,
     data: Record<string, any> | undefined,
     providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(
@@ -1441,6 +1503,7 @@ export class WhatsAppProviderHandler {
     const scheduledAt = this.appointmentsService.parseScheduledDate(
       data?.date,
       data?.time,
+      tz,
     );
 
     if (!scheduledAt) {
@@ -1469,6 +1532,7 @@ export class WhatsAppProviderHandler {
         data?.clientName,
         data?.description,
         data?.address,
+        tz,
       );
 
       if (data?.clientName && !JUNK_CLIENT_NAMES.has(data.clientName.trim().toLowerCase())) {
@@ -1492,7 +1556,7 @@ export class WhatsAppProviderHandler {
 
       if (reminderMinutes) {
         const scheduled = this.scheduleAppointmentReminder(
-          appointment.id, phone, scheduledAt, reminderMinutes, data?.clientName,
+          appointment.id, phone, scheduledAt, reminderMinutes, data?.clientName, tz,
         );
         if (scheduled) {
           confirmation += `\n\n🔔 Te recordaré *${reminderMinutes} minutos* antes.`;
@@ -1504,7 +1568,7 @@ export class WhatsAppProviderHandler {
       await this.sendAndRecord(phone, confirmation);
 
       this.scheduleAppointmentFollowup(
-        appointment.id, phone, scheduledAt, data?.clientName,
+        appointment.id, phone, scheduledAt, data?.clientName, tz,
       );
     } catch (error: any) {
       this.logger.error(`Error creating appointment: ${error.message}`);
@@ -1520,6 +1584,7 @@ export class WhatsAppProviderHandler {
   private async handleVerAgenda(
     phone: string,
     providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(
@@ -1530,11 +1595,11 @@ export class WhatsAppProviderHandler {
     }
 
     try {
-      const todayAppts = await this.appointmentsService.getTodayAgenda(providerProfileId);
-      const tomorrowAppts = await this.appointmentsService.getTomorrowAgenda(providerProfileId);
+      const todayAppts = await this.appointmentsService.getTodayAgenda(providerProfileId, tz);
+      const tomorrowAppts = await this.appointmentsService.getTomorrowAgenda(providerProfileId, tz);
 
-      const todayMsg = this.appointmentsService.formatAgendaMessage(todayAppts, 'de hoy');
-      const tomorrowMsg = this.appointmentsService.formatAgendaMessage(tomorrowAppts, 'de mañana');
+      const todayMsg = this.appointmentsService.formatAgendaMessage(todayAppts, 'de hoy', tz);
+      const tomorrowMsg = this.appointmentsService.formatAgendaMessage(tomorrowAppts, 'de mañana', tz);
 
       await this.sendAndRecord(
         phone,
@@ -1555,13 +1620,14 @@ export class WhatsAppProviderHandler {
     phone: string,
     data: Record<string, any> | undefined,
     providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
       return;
     }
 
-    const dateHint = this.appointmentsService.parseScheduledDate(data?.date, data?.time);
+    const dateHint = this.appointmentsService.parseScheduledDate(data?.date, data?.time, tz);
     const matches = await this.appointmentsService.findByContext(
       providerProfileId,
       data?.clientName,
@@ -1578,10 +1644,7 @@ export class WhatsAppProviderHandler {
 
     if (matches.length > 1 && !data?.time && !data?.clientName) {
       const lines = matches.map((a) => {
-        const timeStr = a.scheduledAt.toLocaleTimeString('es-MX', {
-          hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Mexico_City',
-        });
-        return `  ⏰ *${timeStr}* — ${a.clientName || 'Sin nombre'}`;
+        return `  ⏰ *${formatTime(a.scheduledAt, tz)}* — ${a.clientName || 'Sin nombre'}`;
       });
       await this.sendAndRecord(
         phone,
@@ -1593,15 +1656,17 @@ export class WhatsAppProviderHandler {
     const target = matches[0];
     const updates: import('../appointments/appointments.service').UpdateAppointmentDto = {};
 
-    const newScheduledAt = this.appointmentsService.parseScheduledDate(data?.newDate, data?.newTime);
+    const newScheduledAt = this.appointmentsService.parseScheduledDate(data?.newDate, data?.newTime, tz);
     if (newScheduledAt) {
       updates.scheduledAt = newScheduledAt;
     } else if (data?.newTime) {
-      const updated = new Date(target.scheduledAt);
       const [h, m] = data.newTime.split(':').map(Number);
       if (!isNaN(h)) {
-        updated.setUTCHours(h + 6, m || 0, 0, 0);
-        updates.scheduledAt = updated;
+        const local = toLocalTime(target.scheduledAt, tz);
+        updates.scheduledAt = wallClockToUtc(
+          local.getFullYear(), local.getMonth(), local.getDate(),
+          h, m || 0, tz,
+        );
       }
     }
 
@@ -1626,11 +1691,12 @@ export class WhatsAppProviderHandler {
         updated.clientName ?? undefined,
         updated.description ?? undefined,
         updated.address ?? undefined,
+        tz,
       );
 
       if (updates.scheduledAt) {
         this.scheduleAppointmentFollowup(
-          updated.id, phone, updated.scheduledAt, updated.clientName ?? undefined,
+          updated.id, phone, updated.scheduledAt, updated.clientName ?? undefined, tz,
         );
       }
 
@@ -1638,7 +1704,7 @@ export class WhatsAppProviderHandler {
       if (activeReminder && (updates.scheduledAt || updates.reminderMinutes !== undefined)) {
         this.cancelAppointmentReminder(updated.id);
         const scheduled = this.scheduleAppointmentReminder(
-          updated.id, phone, updated.scheduledAt, activeReminder, updated.clientName ?? undefined,
+          updated.id, phone, updated.scheduledAt, activeReminder, updated.clientName ?? undefined, tz,
         );
         if (scheduled) {
           confirmation += `\n\n🔔 Recordatorio reprogramado: *${activeReminder} minutos* antes.`;
@@ -1658,13 +1724,14 @@ export class WhatsAppProviderHandler {
     phone: string,
     data: Record<string, any> | undefined,
     providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
       return;
     }
 
-    const dateHint = this.appointmentsService.parseScheduledDate(data?.date, data?.time);
+    const dateHint = this.appointmentsService.parseScheduledDate(data?.date, data?.time, tz);
     const matches = await this.appointmentsService.findByContext(
       providerProfileId,
       data?.clientName,
@@ -1681,10 +1748,7 @@ export class WhatsAppProviderHandler {
 
     if (matches.length > 1 && !data?.time && !data?.clientName) {
       const lines = matches.map((a) => {
-        const timeStr = a.scheduledAt.toLocaleTimeString('es-MX', {
-          hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Mexico_City',
-        });
-        return `  ⏰ *${timeStr}* — ${a.clientName || 'Sin nombre'}`;
+        return `  ⏰ *${formatTime(a.scheduledAt, tz)}* — ${a.clientName || 'Sin nombre'}`;
       });
       await this.sendAndRecord(
         phone,
@@ -1701,6 +1765,7 @@ export class WhatsAppProviderHandler {
       const confirmation = this.appointmentsService.formatAppointmentCancelled(
         target.clientName ?? undefined,
         target.scheduledAt,
+        tz,
       );
       await this.sendAndRecord(phone, confirmation);
     } catch (error: any) {
@@ -1715,6 +1780,7 @@ export class WhatsAppProviderHandler {
     phone: string,
     data: Record<string, any> | undefined,
     providerProfileId?: string,
+    _tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
@@ -2373,13 +2439,14 @@ export class WhatsAppProviderHandler {
     phone: string,
     data: Record<string, any> | undefined,
     providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
       return;
     }
 
-    const remindAt = this.remindersService.parseScheduledDate(data?.date, data?.time);
+    const remindAt = this.remindersService.parseScheduledDate(data?.date, data?.time, tz);
 
     if (!remindAt) {
       await this.sendAndRecord(
@@ -2398,7 +2465,7 @@ export class WhatsAppProviderHandler {
         remindAt,
       });
 
-      const confirmation = this.remindersService.formatReminderConfirmation(description, remindAt);
+      const confirmation = this.remindersService.formatReminderConfirmation(description, remindAt, tz);
       await this.sendAndRecord(phone, confirmation, AiIntent.CREAR_RECORDATORIO);
 
       this.schedulePersonalReminder(reminder.id, phone, description, remindAt);
@@ -2411,6 +2478,7 @@ export class WhatsAppProviderHandler {
   private async handleVerRecordatorios(
     phone: string,
     providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
@@ -2419,7 +2487,7 @@ export class WhatsAppProviderHandler {
 
     try {
       const reminders = await this.remindersService.findActive(providerProfileId);
-      const msg = this.remindersService.formatRemindersList(reminders);
+      const msg = this.remindersService.formatRemindersList(reminders, tz);
       await this.sendAndRecord(phone, msg, AiIntent.VER_RECORDATORIOS);
     } catch (error: any) {
       this.logger.error(`Error listing reminders: ${error.message}`);
@@ -2431,6 +2499,7 @@ export class WhatsAppProviderHandler {
     phone: string,
     data: Record<string, any> | undefined,
     providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
@@ -2461,7 +2530,7 @@ export class WhatsAppProviderHandler {
         updateData.description = data.newDescription;
       }
 
-      const newRemindAt = this.remindersService.parseScheduledDate(data?.newDate, data?.newTime);
+      const newRemindAt = this.remindersService.parseScheduledDate(data?.newDate, data?.newTime, tz);
       if (newRemindAt) {
         updateData.remindAt = newRemindAt;
       }
@@ -2481,7 +2550,7 @@ export class WhatsAppProviderHandler {
         updated.remindAt,
       );
 
-      const msg = this.remindersService.formatReminderModified(updated.description, updated.remindAt);
+      const msg = this.remindersService.formatReminderModified(updated.description, updated.remindAt, tz);
       await this.sendAndRecord(phone, msg, AiIntent.MODIFICAR_RECORDATORIO);
     } catch (error: any) {
       this.logger.error(`Error modifying reminder: ${error.message}`);
@@ -2493,6 +2562,7 @@ export class WhatsAppProviderHandler {
     phone: string,
     data: Record<string, any> | undefined,
     providerProfileId?: string,
+    _tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
@@ -2574,6 +2644,7 @@ export class WhatsAppProviderHandler {
     providerPhone: string,
     scheduledAt: Date,
     clientName?: string,
+    timezone?: string,
   ): void {
     const FOLLOWUP_DELAY_MS = 30 * 60 * 1000; // 30 minutes after appointment time
     const delay = scheduledAt.getTime() - Date.now() + FOLLOWUP_DELAY_MS;
@@ -2585,6 +2656,7 @@ export class WhatsAppProviderHandler {
       providerPhone,
       clientName,
       scheduledAt: scheduledAt.toISOString(),
+      timezone,
     };
 
     this.queueService
@@ -2605,6 +2677,7 @@ export class WhatsAppProviderHandler {
     scheduledAt: Date,
     reminderMinutes: number,
     clientName?: string,
+    timezone?: string,
   ): boolean {
     const delay = scheduledAt.getTime() - Date.now() - reminderMinutes * 60 * 1000;
 
@@ -2616,6 +2689,7 @@ export class WhatsAppProviderHandler {
       clientName,
       scheduledAt: scheduledAt.toISOString(),
       reminderMinutes,
+      timezone,
     };
 
     this.queueService

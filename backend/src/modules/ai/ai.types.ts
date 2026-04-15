@@ -18,6 +18,7 @@ export enum AiIntent {
   CONFIGURAR_PERFIL = 'configurar_perfil',
   CREAR_LINK_COBRO = 'crear_link_cobro',
   ACTIVAR_COBROS = 'activar_cobros',
+  CONFIGURAR_ZONA_HORARIA = 'configurar_zona_horaria',
   CONVERSACION_GENERAL = 'conversacion_general',
 }
 
@@ -148,6 +149,7 @@ export interface WorkspaceContextDto {
   schedule: WorkspaceSchedule;
   autoReply: WorkspaceAutoReply;
   notes?: string | null;
+  timezone?: string;
   learnedFacts?: StructuredFact[];
   recentExpenses?: RecentExpenseContext[];
   activeRecurringExpenses?: ActiveRecurringContext[];
