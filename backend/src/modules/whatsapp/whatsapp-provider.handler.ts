@@ -25,6 +25,11 @@ import { PersonalReminderJobData } from '../../common/queues/processors/personal
 import { RemindersService } from '../reminders/reminders.service';
 import { PaymentsService } from '../payments/payments.service';
 
+const JUNK_CLIENT_NAMES = new Set([
+  'ninguno', 'ninguna', 'no', 'n/a', 'na', 'nada',
+  'sin nombre', 'desconocido', 'nadie',
+]);
+
 // ─── Provider session states ────────────────────────────────
 
 export enum ProviderState {
@@ -787,12 +792,21 @@ export class WhatsAppProviderHandler {
         clientName: data?.clientName,
       });
 
-      const confirmation = this.incomeService.formatIncomeConfirmation(
+      let confirmation = this.incomeService.formatIncomeConfirmation(
         amount,
         data?.description,
         data?.clientName,
         paymentMethod,
       );
+
+      try {
+        const weekSummary = await this.incomeService.getWeekSummary(providerProfileId);
+        if (weekSummary.count > 1 && weekSummary.total > 0) {
+          confirmation += `\nLlevas *$${weekSummary.total.toLocaleString('es-MX')}* esta semana.`;
+        }
+      } catch {
+        // non-critical enrichment
+      }
 
       await this.sendAndRecord(phone, confirmation);
     } catch (error: any) {
@@ -899,9 +913,8 @@ export class WhatsAppProviderHandler {
 
     const sanitize = (val: any): string | undefined => {
       if (!val || typeof val !== 'string') return undefined;
-      const lower = val.toLowerCase().trim();
-      const junk = ['ninguno', 'ninguna', 'no', 'n/a', 'na', 'nada', 'sin nombre', 'desconocido'];
-      return junk.includes(lower) ? undefined : val.trim();
+      const trimmed = val.trim();
+      return JUNK_CLIENT_NAMES.has(trimmed.toLowerCase()) ? undefined : trimmed;
     };
 
     const description = sanitize(data?.description);
@@ -1457,6 +1470,25 @@ export class WhatsAppProviderHandler {
         data?.description,
         data?.address,
       );
+
+      if (data?.clientName && !JUNK_CLIENT_NAMES.has(data.clientName.trim().toLowerCase())) {
+        try {
+          const pastVisits = await this.prisma.appointment.count({
+            where: {
+              providerId: providerProfileId,
+              clientName: { contains: data.clientName.trim(), mode: 'insensitive' },
+              id: { not: appointment.id },
+              status: { in: ['CONFIRMED', 'COMPLETED'] },
+            },
+          });
+
+          if (pastVisits >= 2) {
+            confirmation += `\nYa van *${pastVisits + 1} veces* con ${data.clientName}.`;
+          }
+        } catch {
+          // non-critical enrichment
+        }
+      }
 
       if (reminderMinutes) {
         const scheduled = this.scheduleAppointmentReminder(

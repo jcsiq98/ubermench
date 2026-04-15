@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ExpenseService } from './expense.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { IncomeService } from '../income/income.service';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 
 @Injectable()
@@ -13,6 +14,7 @@ export class RecurringExpenseService {
     private prisma: PrismaService,
     private expenseService: ExpenseService,
     private whatsappService: WhatsAppService,
+    private incomeService: IncomeService,
   ) {}
 
   async create(dto: {
@@ -318,13 +320,14 @@ export class RecurringExpenseService {
       }),
     ]);
 
-    const briefings = new Map<string, { name: string; appointments: any[]; expenses: any[] }>();
+    const briefings = new Map<string, { name: string; providerId: string; appointments: any[]; expenses: any[] }>();
 
     for (const appt of todayAppointments) {
       const phone = appt.provider?.user?.phone;
       if (!phone) continue;
       const entry = briefings.get(phone) || {
         name: appt.provider?.user?.name || '',
+        providerId: appt.providerId,
         appointments: [],
         expenses: [],
       };
@@ -337,6 +340,7 @@ export class RecurringExpenseService {
       if (!phone) continue;
       const entry = briefings.get(phone) || {
         name: exp.provider?.user?.name || '',
+        providerId: exp.providerId,
         appointments: [],
         expenses: [],
       };
@@ -381,6 +385,16 @@ export class RecurringExpenseService {
         for (const e of data.expenses) {
           lines.push(`• *$${Number(e.amount).toLocaleString('es-MX')}* — ${e.description}`);
         }
+      }
+
+      try {
+        const weekSummary = await this.incomeService.getWeekSummary(data.providerId);
+        if (weekSummary.total > 0) {
+          lines.push('');
+          lines.push(`Llevas *$${weekSummary.total.toLocaleString('es-MX')}* esta semana.`);
+        }
+      } catch (err: any) {
+        this.logger.warn(`Failed to get weekly income for briefing: ${err.message}`);
       }
 
       this.whatsappService

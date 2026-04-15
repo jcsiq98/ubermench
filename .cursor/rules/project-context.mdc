@@ -57,6 +57,10 @@ All project documentation, organized by function:
 - `payments/` — Stripe Connect Express integration (Cap. 32). Global module. 2 LLM tools (`crear_link_cobro`, `activar_cobros`). Provider onboarding creates Express account → hosted form → webhook `account.updated` activates. Payment links create Checkout Sessions on connected account with configurable `APPLICATION_FEE_RATE` (0% during testing). Webhook `checkout.session.completed` auto-creates Income with `paymentMethod: PAYMENT_LINK`. Model `PaymentLink` (amount, description, clientName, clientPhone, status, stripeSessionId). `ProviderProfile` has `stripeAccountId` + `stripeOnboardingStatus` (NONE/PENDING/ACTIVE/RESTRICTED). Raw body enabled in `main.ts` for Stripe webhook signature verification.
 - `providers/`, `users/`, `auth/`, `admin/`, `notifications/`, `verification/`, `zones/`, `addresses/`, `provider-dashboard/`
 
+## Founder Testing Accounts
+
+- **José Carlos (founder):** +526565884840 — personal number used for testing. User "José Carlos", role PROVIDER, trade "trabajador independiente."
+
 ## Internal Observability Endpoints (verify-token protected)
 
 - `GET /api/internal/users` — List all users with message counts

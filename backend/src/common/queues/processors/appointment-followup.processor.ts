@@ -60,7 +60,28 @@ export class AppointmentFollowupProcessor extends WorkerHost {
     });
 
     const clientLabel = clientName || 'tu cliente';
-    const msg = `📋 Oye, ya pasó tu cita de las *${timeStr}* con *${clientLabel}*. ¿Se hizo?`;
+    let msg = `📋 Oye, ya pasó tu cita de las *${timeStr}* con *${clientLabel}*. ¿Se hizo?`;
+
+    const JUNK_NAMES = ['ninguno', 'ninguna', 'no', 'n/a', 'na', 'nada', 'sin nombre', 'desconocido', 'nadie'];
+    const cleanName = clientName?.trim();
+    if (cleanName && !JUNK_NAMES.includes(cleanName.toLowerCase())) {
+      try {
+        const lastIncome = await this.prisma.income.findFirst({
+          where: {
+            providerId: appointment.providerId,
+            clientName: { contains: cleanName, mode: 'insensitive' },
+          },
+          orderBy: { date: 'desc' },
+          select: { amount: true },
+        });
+
+        if (lastIncome) {
+          msg += `\nLa vez pasada le cobraste *$${Number(lastIncome.amount).toLocaleString('es-MX')}*.`;
+        }
+      } catch (err: any) {
+        this.logger.warn(`Failed to get client history for followup: ${err.message}`);
+      }
+    }
 
     await this.whatsappService.sendTextMessage(providerPhone, msg);
     await this.aiContextService.addMessage(providerPhone, 'assistant', msg, 'followup_cita')
