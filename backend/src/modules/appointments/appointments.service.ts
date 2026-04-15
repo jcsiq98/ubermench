@@ -242,33 +242,32 @@ export class AppointmentsService {
   }
 
   async getTodayAgenda(providerId: string) {
-    const now = new Date();
-    const startOfDay = new Date(now);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(now);
-    endOfDay.setHours(23, 59, 59, 999);
-
-    return this.getAgenda(providerId, startOfDay, endOfDay);
+    const { start, end } = this.getCdmxDayRange(0);
+    return this.getAgenda(providerId, start, end);
   }
 
   async getTomorrowAgenda(providerId: string) {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const startOfDay = new Date(tomorrow);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(tomorrow);
-    endOfDay.setHours(23, 59, 59, 999);
+    const { start, end } = this.getCdmxDayRange(1);
+    return this.getAgenda(providerId, start, end);
+  }
 
-    return this.getAgenda(providerId, startOfDay, endOfDay);
+  private getCdmxDayRange(offsetDays: number): { start: Date; end: Date } {
+    const nowCdmx = this.toCdmx(new Date());
+    nowCdmx.setDate(nowCdmx.getDate() + offsetDays);
+    const year = nowCdmx.getFullYear();
+    const month = nowCdmx.getMonth();
+    const day = nowCdmx.getDate();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const start = new Date(`${year}-${pad(month + 1)}-${pad(day)}T00:00:00-06:00`);
+    const end = new Date(`${year}-${pad(month + 1)}-${pad(day)}T23:59:59.999-06:00`);
+    return { start, end };
   }
 
   async getWeekAgenda(providerId: string) {
-    const now = new Date();
-    const endOfWeek = new Date(now);
-    endOfWeek.setDate(now.getDate() + (7 - now.getDay()));
-    endOfWeek.setHours(23, 59, 59, 999);
+    const { start } = this.getCdmxDayRange(0);
+    const { end } = this.getCdmxDayRange(7 - start.getDay());
 
-    return this.getAgenda(providerId, now, endOfWeek);
+    return this.getAgenda(providerId, start, end);
   }
 
   async getUpcoming(providerId: string, limit = 5) {
