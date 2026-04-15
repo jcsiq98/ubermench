@@ -350,11 +350,15 @@ export class RecurringExpenseService {
     }
 
     for (const [phone, data] of briefings) {
-      const greeting = data.name ? `Buenos días, *${data.name}*` : 'Buenos días';
-      const lines: string[] = [`☀️ ${greeting}! Tu día de un vistazo:\n`];
+      if (data.appointments.length === 0 && data.expenses.length === 0) continue;
+
+      const greeting = data.name ? `Buenos días, *${data.name}*.` : 'Buenos días.';
+      const lines: string[] = [greeting];
 
       if (data.appointments.length > 0) {
-        lines.push(`📅 *${data.appointments.length} cita${data.appointments.length > 1 ? 's' : ''}:*`);
+        lines.push('');
+        const citaWord = data.appointments.length === 1 ? 'cita' : 'citas';
+        lines.push(`Hoy tienes *${data.appointments.length} ${citaWord}:*`);
         for (const a of data.appointments) {
           const timeStr = new Date(a.scheduledAt).toLocaleTimeString('es-MX', {
             hour: '2-digit',
@@ -362,26 +366,22 @@ export class RecurringExpenseService {
             hour12: true,
             timeZone: 'America/Mexico_City',
           });
-          let line = `  ⏰ *${timeStr}*`;
-          if (a.clientName) line += ` — ${a.clientName}`;
-          if (a.description) line += ` (${a.description})`;
-          if (a.address) line += `\n      📍 ${a.address}`;
+          let line = `• *${timeStr}*`;
+          if (a.clientName) line += ` con ${a.clientName}`;
+          if (a.description) line += ` — ${a.description}`;
+          if (a.address) line += ` (${a.address})`;
           lines.push(line);
         }
       }
 
       if (data.expenses.length > 0) {
         if (data.appointments.length > 0) lines.push('');
-        lines.push(`💸 *${data.expenses.length} gasto${data.expenses.length > 1 ? 's' : ''} fijo${data.expenses.length > 1 ? 's' : ''}:*`);
+        const gastoWord = data.expenses.length === 1 ? 'gasto fijo se registra' : 'gastos fijos se registran';
+        lines.push(`También ${data.expenses.length} ${gastoWord} hoy:`);
         for (const e of data.expenses) {
-          lines.push(`  💸 *$${Number(e.amount).toLocaleString('es-MX')}* — ${e.description}`);
+          lines.push(`• *$${Number(e.amount).toLocaleString('es-MX')}* — ${e.description}`);
         }
-        lines.push('  _(se registran automáticamente)_');
       }
-
-      if (data.appointments.length === 0 && data.expenses.length === 0) continue;
-
-      lines.push('\n¡Éxito hoy! 💪');
 
       this.whatsappService
         .sendTextMessage(phone, lines.join('\n'))

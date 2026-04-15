@@ -152,12 +152,12 @@ export class IncomeService {
       OTHER: 'otro',
     };
 
-    let msg = `✅ *¡Ingreso registrado!*\n\n💰 *$${amount.toLocaleString('es-MX')}*`;
+    let msg = `Anotado. *$${amount.toLocaleString('es-MX')}*`;
 
-    if (description) msg += `\n📝 ${description}`;
-    if (clientName) msg += `\n👤 ${clientName}`;
-    if (paymentMethod)
-      msg += `\n💳 ${methodLabels[paymentMethod] || paymentMethod}`;
+    if (description) msg += ` por ${description}`;
+    if (clientName) msg += ` — ${clientName}`;
+    if (paymentMethod) msg += `, en ${methodLabels[paymentMethod] || paymentMethod}`;
+    msg += '.';
 
     return msg;
   }

@@ -253,15 +253,7 @@ Si no puedes identificar un oficio, usa el texto tal cual: {"trade": "${trimmed}
 
       await this.sendAndLog(
         phone,
-        `¡Listo, *${session.name}*! Ya tienes tu Chalán. 🎉\n\n` +
-          `Esto es lo que puedo hacer por ti:\n\n` +
-          `💰 *Registrar ingresos* — "Cobré 1,200 por un tinaco"\n` +
-          `💸 *Registrar gastos* — "Gasté 200 en material"\n` +
-          `📅 *Agendar citas* — "Mañana tengo trabajo a las 10"\n` +
-          `📊 *Ver tu resumen* — "¿Cuánto llevo esta semana?"\n` +
-          `📋 *Ver tu agenda* — "¿Qué tengo hoy?"\n` +
-          `⚙️ *Configurar tu negocio* — "Cobro 800 por visita"\n\n` +
-          `Dime qué necesitas. Por texto o nota de voz. 🎙️`,
+        `Listo, *${session.name}*. Ya tienes tu Chalán.\n\nDime qué necesitas — por texto o por audio.`,
       );
 
       this.logger.log(

@@ -312,10 +312,11 @@ export class AppointmentsService {
       timeZone: 'America/Mexico_City',
     });
 
-    let msg = `📅 *¡Cita agendada!*\n\n🗓 ${dateStr}\n⏰ ${timeStr}`;
-    if (clientName) msg += `\n👤 ${clientName}`;
-    if (description) msg += `\n📝 ${description}`;
-    if (address) msg += `\n📍 ${address}`;
+    let msg = `Listo, quedó tu cita. *${dateStr}* a las *${timeStr}*`;
+    if (clientName) msg += ` con ${clientName}`;
+    if (description) msg += ` — ${description}`;
+    if (address) msg += `.\n📍 ${address}`;
+    else msg += '.';
 
     return msg;
   }
