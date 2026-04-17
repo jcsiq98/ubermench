@@ -34,8 +34,12 @@ prisma/migrations/**/migration_lock.toml
 sw.js
 workbox-*.js
 
-# Cursor
-.cursor/
+# Cursor — excluir todo EXCEPTO las reglas (que son documentación viva
+# del proyecto y deben ir versionadas). Si una regla es privada/local,
+# usar sufijo `.local.mdc` y se ignora.
+.cursor/*
+!.cursor/rules/
+.cursor/rules/*.local.mdc
 
 # TypeScript
 *.tsbuildinfo
