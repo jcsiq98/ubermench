@@ -1450,41 +1450,69 @@ export class WhatsAppProviderHandler {
       return;
     }
 
-    try {
-      const [weekIncome, monthIncome, weekExpense, monthExpense] =
-        await Promise.all([
-          this.incomeService.getWeekSummary(providerProfileId, tz),
-          this.incomeService.getMonthSummary(providerProfileId, tz),
-          this.expenseService.getWeekSummary(providerProfileId, tz),
-          this.expenseService.getMonthSummary(providerProfileId, tz),
-        ]);
+    // Use allSettled so a single query failure doesn't kill the whole summary.
+    // Previously Promise.all + generic catch caused the same canned error
+    // pattern as ver_agenda (Cap. 38).
+    const [weekIncomeR, monthIncomeR, weekExpenseR, monthExpenseR] = await Promise.allSettled([
+      this.incomeService.getWeekSummary(providerProfileId, tz),
+      this.incomeService.getMonthSummary(providerProfileId, tz),
+      this.expenseService.getWeekSummary(providerProfileId, tz),
+      this.expenseService.getMonthSummary(providerProfileId, tz),
+    ]);
 
-      const weekIncomeMsg = this.incomeService.formatSummaryMessage(weekIncome);
-      const weekExpenseMsg = this.expenseService.formatExpenseSummaryMessage(weekExpense);
-      const weekNet = weekIncome.total - weekExpense.total;
-
-      const monthIncomeMsg = this.incomeService.formatSummaryMessage(monthIncome);
-      const monthExpenseMsg = this.expenseService.formatExpenseSummaryMessage(monthExpense);
-      const monthNet = monthIncome.total - monthExpense.total;
-
-      let msg = weekIncomeMsg;
-      if (weekExpense.count > 0) {
-        msg += `\n${weekExpenseMsg}`;
-        msg += `\n💰 *Balance semana: $${weekNet.toLocaleString('es-MX')}*`;
+    const logIfRejected = (label: string, r: PromiseSettledResult<any>) => {
+      if (r.status === 'rejected') {
+        this.logger.error(
+          `${label} failed (provider=${providerProfileId}, tz=${tz}): ${r.reason?.message}\n${r.reason?.stack}`,
+        );
       }
+    };
+    logIfRejected('getWeekSummary(income)', weekIncomeR);
+    logIfRejected('getMonthSummary(income)', monthIncomeR);
+    logIfRejected('getWeekSummary(expense)', weekExpenseR);
+    logIfRejected('getMonthSummary(expense)', monthExpenseR);
 
-      msg += `\n\n${monthIncomeMsg}`;
-      if (monthExpense.count > 0) {
-        msg += `\n${monthExpenseMsg}`;
-        msg += `\n💰 *Balance mes: $${monthNet.toLocaleString('es-MX')}*`;
-      }
+    const allFailed =
+      weekIncomeR.status === 'rejected' &&
+      monthIncomeR.status === 'rejected' &&
+      weekExpenseR.status === 'rejected' &&
+      monthExpenseR.status === 'rejected';
 
-      await this.sendAndRecord(phone, msg);
-    } catch (error: any) {
-      this.logger.error(`Error getting summary: ${error.message}`);
+    if (allFailed) {
       await this.sendAndRecord(
         phone,
-        '❌ No se pudo obtener el resumen. Intenta de nuevo.',
+        'No pude leer tus números en este momento. Ya quedó registrado el error — intenta en un minuto.',
+      );
+      return;
+    }
+
+    const parts: string[] = [];
+
+    if (weekIncomeR.status === 'fulfilled') {
+      let weekBlock = this.incomeService.formatSummaryMessage(weekIncomeR.value);
+      if (weekExpenseR.status === 'fulfilled' && weekExpenseR.value.count > 0) {
+        weekBlock += `\n${this.expenseService.formatExpenseSummaryMessage(weekExpenseR.value)}`;
+        const weekNet = weekIncomeR.value.total - weekExpenseR.value.total;
+        weekBlock += `\n💰 *Balance semana: $${weekNet.toLocaleString('es-MX')}*`;
+      }
+      parts.push(weekBlock);
+    }
+
+    if (monthIncomeR.status === 'fulfilled') {
+      let monthBlock = this.incomeService.formatSummaryMessage(monthIncomeR.value);
+      if (monthExpenseR.status === 'fulfilled' && monthExpenseR.value.count > 0) {
+        monthBlock += `\n${this.expenseService.formatExpenseSummaryMessage(monthExpenseR.value)}`;
+        const monthNet = monthIncomeR.value.total - monthExpenseR.value.total;
+        monthBlock += `\n💰 *Balance mes: $${monthNet.toLocaleString('es-MX')}*`;
+      }
+      parts.push(monthBlock);
+    }
+
+    try {
+      await this.sendAndRecord(phone, parts.join('\n\n'));
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to send summary to ${phone}: ${error.message}\n${error.stack}`,
       );
     }
   }
@@ -1599,22 +1627,54 @@ export class WhatsAppProviderHandler {
       return;
     }
 
-    try {
-      const todayAppts = await this.appointmentsService.getTodayAgenda(providerProfileId, tz);
-      const tomorrowAppts = await this.appointmentsService.getTomorrowAgenda(providerProfileId, tz);
+    // Resolve each half independently — if one query fails, still show the other.
+    // Previously a single Promise.all + bare catch caused the entire response to
+    // collapse into a generic canned error (Cap. 38, bug Oscar 16-abr).
+    const today = await this.appointmentsService
+      .getTodayAgenda(providerProfileId, tz)
+      .then((appts) => ({ ok: true as const, appts }))
+      .catch((err: any) => {
+        this.logger.error(
+          `getTodayAgenda failed (provider=${providerProfileId}, tz=${tz}): ${err.message}\n${err.stack}`,
+        );
+        return { ok: false as const, err };
+      });
 
-      const todayMsg = this.appointmentsService.formatAgendaMessage(todayAppts, 'de hoy', tz);
-      const tomorrowMsg = this.appointmentsService.formatAgendaMessage(tomorrowAppts, 'de mañana', tz);
+    const tomorrow = await this.appointmentsService
+      .getTomorrowAgenda(providerProfileId, tz)
+      .then((appts) => ({ ok: true as const, appts }))
+      .catch((err: any) => {
+        this.logger.error(
+          `getTomorrowAgenda failed (provider=${providerProfileId}, tz=${tz}): ${err.message}\n${err.stack}`,
+        );
+        return { ok: false as const, err };
+      });
 
+    if (!today.ok && !tomorrow.ok) {
       await this.sendAndRecord(
         phone,
-        `${todayMsg}\n\n${tomorrowMsg}`,
+        'No pude leer la agenda en este momento. Ya quedó registrado el error — intenta en un minuto.',
       );
+      return;
+    }
+
+    const parts: string[] = [];
+    if (today.ok) {
+      parts.push(this.appointmentsService.formatAgendaMessage(today.appts, 'de hoy', tz));
+    } else {
+      parts.push('No pude leer la agenda de hoy.');
+    }
+    if (tomorrow.ok) {
+      parts.push(this.appointmentsService.formatAgendaMessage(tomorrow.appts, 'de mañana', tz));
+    } else {
+      parts.push('No pude leer la agenda de mañana.');
+    }
+
+    try {
+      await this.sendAndRecord(phone, parts.join('\n\n'));
     } catch (error: any) {
-      this.logger.error(`Error getting agenda: ${error.message}`);
-      await this.sendAndRecord(
-        phone,
-        '❌ No se pudo obtener la agenda. Intenta de nuevo.',
+      this.logger.error(
+        `Failed to send agenda to ${phone}: ${error.message}\n${error.stack}`,
       );
     }
   }
@@ -1700,6 +1760,7 @@ export class WhatsAppProviderHandler {
       );
 
       if (updates.scheduledAt) {
+        this.cancelAppointmentFollowup(updated.id);
         this.scheduleAppointmentFollowup(
           updated.id, phone, updated.scheduledAt, updated.clientName ?? undefined, tz,
         );
@@ -1767,6 +1828,7 @@ export class WhatsAppProviderHandler {
     try {
       await this.appointmentsService.cancel(target.id);
       this.cancelAppointmentReminder(target.id);
+      this.cancelAppointmentFollowup(target.id);
       const confirmation = this.appointmentsService.formatAppointmentCancelled(
         target.clientName ?? undefined,
         target.scheduledAt,
@@ -1830,6 +1892,8 @@ export class WhatsAppProviderHandler {
 
     try {
       await this.appointmentsService.markResult(appointment.id, status);
+      this.cancelAppointmentFollowup(appointment.id);
+      this.cancelAppointmentReminder(appointment.id);
 
       const statusLabels: Record<string, string> = {
         completed: '✅ *Cita completada.* ¡Buen trabajo!',
@@ -2768,6 +2832,18 @@ export class WhatsAppProviderHandler {
     const queue = (this.queueService as any).queues?.[QUEUE_NAMES.APPOINTMENT_REMINDER];
     if (!queue) return;
     queue.remove(`reminder-${appointmentId}`).catch(() => {});
+  }
+
+  /**
+   * Cancel a pending appointment followup ("¿Se hizo?" 30min after).
+   * Must be called whenever the appointment is rescheduled, cancelled, or
+   * marked completed/no-show — otherwise the old followup fires with stale
+   * data and confuses the user (Cap. 38, bug Oscar 16-abr).
+   */
+  private cancelAppointmentFollowup(appointmentId: string): void {
+    const queue = (this.queueService as any).queues?.[QUEUE_NAMES.APPOINTMENT_FOLLOWUP];
+    if (!queue) return;
+    queue.remove(`followup-${appointmentId}`).catch(() => {});
   }
 
   // ─── Dashboard / Help ───────────────────────────────────
