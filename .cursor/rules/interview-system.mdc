@@ -1,0 +1,41 @@
+---
+description: Customer discovery interview system — how to transcribe, analyze, and access interview data. Activate when user mentions interviews, entrevistas, audios, customer discovery, or research.
+alwaysApply: false
+---
+
+# Interview System
+
+## File locations
+
+All interview data lives in `/home/jcsiq98/ubermench-docs/research/`:
+
+- `ENTREVISTAS_INDEX.md` — **Read this first.** Master index with all interviews, accumulated signals, and verdicts.
+- `GUION_ENTREVISTAS.md` — The interview script (20 questions, what to look for, go/no-go criteria).
+- `audios/` — Audio files + transcripts + analyses:
+  - `[Name].m4a` / `.mp3` — raw audio
+  - `[Name].transcript.md` — Whisper transcription with timestamps
+  - `[Name].analysis.md` — structured analysis with profile, signals, verdict
+- `transcribe.py` — Script to transcribe audio via OpenAI Whisper API
+
+## Workflow
+
+### User says "transcribe [file]" or drops a new audio
+1. Run: `cd /home/jcsiq98/ubermench-docs/research && python3 transcribe.py audios/[file]`
+2. Read the generated `.transcript.md`
+3. Analyze using the structure from existing `.analysis.md` files
+4. Save as `[Name].analysis.md` next to the transcript
+5. Update `ENTREVISTAS_INDEX.md` with the new entry
+
+### User asks about interviews / patterns / signals
+1. Read `ENTREVISTAS_INDEX.md` for the accumulated view
+2. Read specific `.analysis.md` files for detail
+3. Cross-reference with `GUION_ENTREVISTAS.md` for the go/no-go criteria
+
+## Analysis structure
+
+Each analysis must include:
+- **Profile:** Oficio, experience, team, sales channel, business model
+- **Key responses:** Mapped to the interview guide questions (especially Q5, Q9, Q11, Q15-18)
+- **Signals:** Positive (pain confirmed) and negative (no pain / not target)
+- **Verdict:** IS TARGET / NOT TARGET for Ubermench, with reasoning
+- **Interview notes:** What went well, what to improve for next time

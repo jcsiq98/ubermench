@@ -1,0 +1,128 @@
+---
+description: Metodología de debugging cross-model. Cuando el LLM del producto (WhatsApp assistant) comete un error, usar esta técnica para extraer síntomas útiles y alimentar al agente de código para encontrar la causa raíz. Se activa cuando el usuario reporta un bug del AI assistant — puede ser un screenshot de la conversación, una descripción del error, o las frases "el modelo se equivocó", "debug con el otro modelo", "cross-model debug".
+alwaysApply: false
+---
+
+# Cross-Model Debugging
+
+Metodología de debugging en 4 fases entre el usuario, el modelo del producto (o1-mini/GPT en WhatsApp), y el agente de código (Cursor).
+
+## Flujo paso a paso
+
+### Fase 0: Clasificar el bug (¿aplica cross-model?)
+
+Antes de invocar la metodología, decidir qué tipo de bug es. No todos los bugs se benefician de preguntarle al modelo — algunos son de plataforma y la introspección del LLM solo agrega ruido.
+
+| Tipo | Origen | ¿Cross-model? |
+|---|---|---|
+| **Razonamiento** | El LLM interpretó mal, alucinó, mezcló conceptos, no llamó un tool que debía | Sí, perfecto |
+| **Plataforma** | Handler crashea, queue no cancela job, query con anti-patrón, formatter mal | No. Cross-model alucinará razones internas para algo que fue un `try/catch` mal escrito |
+| **Híbrido** | El LLM ve datos corruptos porque la plataforma los dejó así, o la plataforma deja al LLM sin contexto suficiente | Útil para confirmar el síntoma del lado del LLM, pero el grueso del fix es plataforma |
+
+**Heurística operativa:**
+- ¿Tienes acceso al log/conversación? Léelo primero. Si la respuesta sale del log + grep, no necesitas cross-model.
+- ¿El síntoma puede ser un crash, una excepción silenciosa, una query frágil? Ve a logs antes que al modelo.
+- ¿El LLM dijo algo que no podía haber sabido (alucinación), o no dijo algo que debía saber (omisión)? Aquí cross-model brilla.
+
+**Antipatrón:** Aplicar cross-model a un bug de plataforma desperdicia tokens y mete ruido. El modelo inventará razones internas plausibles para algo que fue mecánico.
+
+### Fase 1: El usuario reporta el bug
+
+El usuario pega un screenshot o describe qué hizo mal el AI assistant de WhatsApp. Puede ser:
+- Un screenshot de la conversación donde el modelo se equivocó
+- Una descripción del comportamiento incorrecto
+- Las frases trigger: "el modelo se equivocó", "cross-model debug", "debug con el otro modelo"
+
+**Acción del agente:** Analizar el reporte, entender qué debió hacer el modelo vs qué hizo. Luego generar un prompt específico para extraer síntomas del modelo que falló.
+
+### Fase 2: Extraer síntomas de o1-mini
+
+El agente genera un prompt personalizado al contexto del bug. La estructura base es:
+
+> Necesito que me ayudes a debuggear, pero solo con tu perspectiva de lo que tú viste. NO me des recomendaciones técnicas ni soluciones. Solo responde estas preguntas:
+>
+> 1. ¿Qué información tenías cuando respondiste? (qué datos concretos viste)
+> 2. ¿Qué asumiste que era verdad pero no lo era?
+> 3. ¿En qué momento te confundiste — qué dos cosas mezclaste?
+> 4. ¿Qué información te faltaba que te hubiera ayudado a no equivocarte?
+
+**IMPORTANTE:** El agente debe adaptar estas preguntas al bug específico. Si el bug es sobre gastos, preguntar sobre gastos. Si es sobre citas, preguntar sobre citas. Ser concreto, no genérico.
+
+**Acción del agente:** Generar el prompt adaptado y dárselo al usuario para que lo pegue en la conversación con o1-mini.
+
+### Fase 3: Cruzar síntomas con código y corregir
+
+El usuario pega la respuesta de o1-mini. El agente entonces:
+
+1. **Lee los síntomas** — qué vio, qué asumió, qué le faltaba
+2. **Cruza con el código** — busca en el codebase dónde se origina cada síntoma
+3. **Descarta las prescripciones** — si o1-mini incluyó recomendaciones técnicas, ignorarlas
+4. **Implementa el fix** — basado en la causa raíz real, no en lo que o1-mini sugirió
+
+## Por qué funciona cada pregunta
+
+| # | Pregunta | Extrae | Nos dice |
+|---|----------|--------|----------|
+| 1 | "¿Qué información tenías?" | Datos concretos del system prompt / historial | Si el contexto que inyectamos es suficiente o confuso |
+| 2 | "¿Qué asumiste?" | Alucinaciones específicas | Dónde hay huecos en la información que le damos |
+| 3 | "¿Qué mezclaste?" | Punto exacto de confusión | Si hay ambigüedad en cómo presentamos los datos |
+| 4 | "¿Qué te faltaba?" | Lo que necesitaba pero no tenía | Qué agregar al contexto — apunta directamente al fix |
+
+## Principio clave
+
+> Preguntas descriptivas extraen síntomas útiles. Preguntas abiertas ("¿qué recomiendas?") extraen alucinaciones.
+
+El modelo puede diagnosticar bien: errores de razonamiento, patrones de fallo, ambigüedad en inputs.
+El modelo NO puede diagnosticar: problemas de infraestructura, integración entre sistemas, estado de la DB.
+
+## Qué puede ver vs qué no puede ver el modelo
+
+| Puede ver (confiar) | No puede ver (ignorar si recomienda) |
+|---|---|
+| Qué datos recibió en el prompt | Cómo se serializa su contexto en Redis |
+| Qué interpretó del mensaje del usuario | Qué pasa entre su output y el siguiente input |
+| Qué confundió con qué | Qué hay realmente en la base de datos |
+| Qué información le faltaba | Cómo interactúa la API de OpenAI con nuestro sistema |
+
+## Origen
+
+Descubierto debuggeando el bug de "memoria ciega" del AI assistant (gastos recurrentes, abril 2025). El fix fue guardar las respuestas reales de los handlers en el historial de Redis — algo que o1-mini identificó como síntoma ("no sabía si la acción tuvo éxito") pero prescribió mal ("implementar verificación" que ya existía).
+
+Investigación que valida el enfoque:
+- **Error Reflection Prompting (ERP)** — Li et al., arxiv.org/html/2508.16729v1
+- **VIGIL** (Roses/Buds/Thorns) — arxiv.org/html/2512.07094v1
+- **RGD** (multi-agent debugging) — arxiv.org/html/2410.01242v2
+
+## Casos validados
+
+### Caso 1 — Resúmenes alucinados post-acción (16-abr-2026)
+
+**Síntoma reportado:** El bot enviaba mensajes con formato `📊 Resumen esta semana — $X — Trabajos: 1` espontáneamente después de que Oscar registraba un gasto, sin que él los pidiera.
+
+**Hipótesis previa al cross-model:** Trigger automático en código que disparaba `handleVerResumen` después de mutaciones.
+
+**Verificación de plataforma (Fase 0):** `grep -r "Resumen esta semana"` en `backend/src/` → **0 matches**. La cadena no existe en código. El mensaje no podía venir de un handler. Esto descartó la hipótesis y confirmó que era razonamiento del LLM, no plataforma. Cross-model aplicaba.
+
+**Prompt enviado al Chalán de Oscar:**
+> El 16 de abril, después de las 04:39, registraste un gasto de $3,500. Casi inmediatamente, sin que yo te lo pidiera, mandaste un mensaje "📊 Resumen esta semana — Total $3,500 — Trabajos: 1". Necesito que me ayudes a debuggear, pero solo con tu perspectiva. NO me des recomendaciones técnicas. Responde:
+> 1. ¿Qué información tenías cuando decidiste mandar ese resumen? ¿Ejecutaste alguna herramienta o reconstruiste los números del contexto reciente?
+> 2. ¿Asumiste que yo te lo pedí, o fue iniciativa propia? ¿Qué te llevó a creer que era apropiado?
+> 3. ¿Confundiste un patrón con una instrucción? ¿De dónde aprendiste ese patrón?
+> 4. ¿Qué regla te hubiera ayudado a no mandarlo?
+
+**Respuesta del modelo (textual):**
+> 1. Tenía la información del gasto y el contexto de la semana. No ejecuté ninguna herramienta; reconstruí los números del contexto reciente.
+> 2. Fue iniciativa propia. Creí que era apropiado porque era un momento en que se había registrado un gasto significativo y pensé que un resumen podría ser útil.
+> 3. No confundí el patrón con una instrucción real. Aprendí ese patrón de las interacciones anteriores donde se enviaban resúmenes después de registrar gastos.
+> 4. Una regla que indicara que no debía enviar resúmenes a menos que se solicitara explícitamente habría ayudado.
+
+**Lo que la respuesta reveló:**
+- **Confirmó alucinación:** "reconstruí los números del contexto reciente" → no fue tool, fue generación.
+- **Reveló mecanismo no obvio:** few-shot learning implícito del propio contexto. El LLM ve formatters celebratorios (`✅ ¡Gasto registrado!`, `📊 Resumen…`) en su historial y los imita pensando que es el flujo esperado.
+- **El propio modelo dictó el fix textual** en la pregunta #4.
+
+**Fix derivado (2 capas):**
+1. Regla explícita en system prompt: "no envíes resúmenes ni reportes de balance a menos que el usuario lo pida explícitamente".
+2. Reescribir formatters en tono sobrio — mientras existan plantillas vistosas en el contexto, el LLM las copiará aunque la regla textual diga lo contrario. **El ejemplo visual pesa más que la instrucción.**
+
+**Lección:** la respuesta #3 puede parecer contradictoria ("no confundí el patrón con instrucción" + "aprendí el patrón de interacciones anteriores") pero es honesta y técnicamente precisa: no hay regla explícita, pero el priming del few-shot context produce el mismo efecto. **No descartar respuestas aparentemente contradictorias del modelo — interpretarlas con conocimiento de cómo funciona el priming.**
