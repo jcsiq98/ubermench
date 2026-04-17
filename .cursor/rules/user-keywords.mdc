@@ -22,6 +22,7 @@ Registro vivo de triggers y comandos personalizados. Cuando el usuario dice una 
 | "deja registro" | Registrar el chat actual en la documentación o en las reglas para referencia futura |
 | "prepara checks", "crea checks", "check prompts", "checks" | Crear check prompts de validación (3 niveles: structural, logic, integration) para la feature recién implementada. Ver regla `check-prompts.mdc` |
 | "cross-model debug", "debug con el otro modelo", "el modelo se equivocó" | Activar metodología de debugging cross-model: extraer síntomas del modelo que falló y cruzar con el código. Ver regla `cross-model-debugging.mdc` |
+| "nuevo SOTA", "validar SOTA", "branch por modelo", "metodología SOTA", "¿esto va a main directo?" | Consultar `sota-validation.mdc` para decidir flujo según magnitud del cambio (fix quirúrgico → main directo; cambio de prompt → branch staging; cambio estructural → servicio paralelo) |
 | "transcribe [archivo]", "analiza la entrevista [nombre]", "nueva entrevista" | Transcribir audio → analizar con contexto del proyecto → guardar análisis → actualizar índice. Ver regla `interview-system.mdc` |
 
 ## Cómo agregar nuevas palabras clave

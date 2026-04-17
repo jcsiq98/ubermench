@@ -1,0 +1,86 @@
+---
+description: Metodología de validación cuando aparece un nuevo modelo SOTA (codeador o producto), o cuando se hacen cambios significativos al sistema. Define qué flujo seguir según la magnitud del riesgo del cambio. Se activa al iniciar trabajo con un modelo nuevo, o cuando hay duda sobre si un cambio debe ir a main directo o pasar por staging.
+alwaysApply: false
+---
+
+# SOTA Validation — Metodología por Magnitud de Riesgo
+
+> No toda modificación necesita el mismo flujo. Una metodología que el equipo nunca usa porque siempre la salta es peor que una flexible.
+
+Cada vez que aparece un nuevo modelo SOTA — sea como **agente codeador** (claude-opus-X, gpt-Y) o como **modelo del producto** (el que vive en WhatsApp respondiendo a usuarios) — se abre un ciclo de validación. Lo mismo aplica para cambios significativos hechos por agentes existentes.
+
+La graduación abajo decide qué flujo seguir.
+
+## Graduación por tipo de cambio
+
+| Tipo de cambio | Riesgo | Flujo |
+|---|---|---|
+| **Fix quirúrgico de bug identificado** — causa raíz clara, no toca schema/AI/pagos, solo handlers de lectura o lógica defensiva | Bajo | Branch → commit → merge directo a main |
+| **Cambio de comportamiento del LLM** — system prompt, voz, reglas, formatters que el modelo imita | Medio | Branch SOTA → 3-5 días observación con Oscar → merge si net positivo |
+| **Cambio estructural** — schema, migrations, queues, payment flow, auth | Alto | Servicio paralelo en Railway + número WhatsApp secundario + DB clonada → 5-7 días → merge |
+| **Nuevo modelo SOTA codeador** — Claude X, GPT Y, etc. | Alto | Toda la metodología completa, branch dedicado por modelo (`<modelo>-adventures`) |
+| **Nuevo modelo SOTA del producto** — cambiar el modelo que responde en WhatsApp | Crítico | Servicio paralelo + número secundario + 7-10 días observación + cross-model debug a cualquier regresión |
+
+## Branch por SOTA codeador
+
+Cuando se prueba un nuevo agente codeador:
+
+### 1. Branch dedicado
+- Nombre: `<modelo>-adventures` (ej: `4.7-adventures`, `gpt-5-adventures`).
+- Salida desde `main`, nunca desde otro branch de modelo.
+- Vida: hasta promoción o descarte.
+
+### 2. Período de observación
+- Deploy del branch en Railway (servicio paralelo si toca schema/AI; servicio principal si son fixes quirúrgicos).
+- Oscar y founder usan el bot. Cualquier regresión se documenta.
+- Aplicar **cross-model debugging** a bugs de razonamiento (ver `cross-model-debugging.mdc`).
+
+### 3. Criterios de promoción a main
+
+| Criterio | Significa |
+|---|---|
+| **No regresión** | Ningún bug previamente cerrado vuelve a aparecer |
+| **Net positivo** | Más bugs cerrados que bugs nuevos introducidos |
+| **Validación humana** | Al menos un usuario real (Oscar o founder) firma "esto es mejor que antes" |
+
+- 3 de 3 → merge a main.
+- 1-2 de 3 → cherry-pick selectivo de los commits limpios.
+- 0 de 3 → branch se archiva (no se borra), es histórico de aprendizaje.
+
+### 4. Documento de cierre
+Al promover o archivar, agregar entrada en `ubermench-docs/proyecto/HISTORIA_DECISIONES.md`:
+- Qué modelo se probó
+- Cuántos bugs cerró / introdujo
+- Patrones nuevos descubiertos
+- Decisión: promover / cherry-pick / archivar
+- Costo aproximado en tokens
+
+## Cambios estructurales — setup en Railway
+
+Cuando el cambio es de Alto riesgo (schema, queues, payment), **no se deploya al servicio principal**. Se monta paralelo:
+
+1. **Servicio Railway paralelo** apuntando al branch a validar (mismo Dockerfile, distinto service).
+2. **Número WhatsApp secundario** registrado en Meta Business bajo la misma WABA. Su webhook apunta al servicio paralelo.
+3. **DB clonada** (snapshot al momento del deploy) — Oscar valida con datos reales pero los cambios no afectan producción.
+4. **Período de observación** según graduación.
+5. Al promover: merge a main + apagar servicio paralelo (o mantenerlo como `next-version-preview` permanente).
+
+## Anti-patrones explícitos
+
+- **Nunca** mergear branch de modelo nuevo a otro branch de modelo. Siempre vía main.
+- **Nunca** force-push a main.
+- **Nunca** validar solo con el founder hablando solo con el bot — necesitas tráfico orgánico (Oscar es ideal hoy).
+- **Nunca** prometer "este modelo es mejor" antes del período de observación. Datos primero.
+- **Nunca** aplicar el flujo de Alto riesgo a un fix quirúrgico — es overkill y deja a Oscar viviendo con bugs sabidos más tiempo del necesario.
+
+## Cuándo escalar la graduación
+
+Si dudas entre dos niveles, escala uno:
+- Fix quirúrgico que toca un handler crítico → trátalo como cambio de comportamiento del LLM.
+- Cambio de prompt que introduce un nuevo flujo o tool → trátalo como cambio estructural.
+
+El costo de pasar 3-5 días en staging es bajo. El costo de romper producción frente a Oscar (o un usuario nuevo) es alto: pérdida de confianza, no solo de datos.
+
+## Origen
+
+Definido el 16-abr-2026 durante el primer ciclo de validación con Claude 4.7 (`4.7-adventures`). Ese ciclo cerró 2 bugs (Bug #1 followups zombie, Bug #3 catch frágil), descartó 2 hipótesis erróneas (Bug #2, #11) por verificación temprana, y dejó documentado el primer caso validado de cross-model debugging. Ver `HISTORIA_DECISIONES.md` Cap. 38.
