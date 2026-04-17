@@ -81,6 +81,24 @@ Si dudas entre dos niveles, escala uno:
 
 El costo de pasar 3-5 días en staging es bajo. El costo de romper producción frente a Oscar (o un usuario nuevo) es alto: pérdida de confianza, no solo de datos.
 
+## Excepciones documentadas
+
+### Excepción #1 — Regla #22 del system prompt (16-abr-2026)
+
+**Cambio:** Agregar regla #22 al system prompt prohibiendo resúmenes no solicitados (commit `c136a39`, merge `ac1c49d`).
+
+**Magnitud según graduación:** Medium (cambio de comportamiento del LLM) → debería ir a branch staging por 3-5 días.
+
+**Por qué se hizo excepción:**
+1. **Setup paralelo no existía.** El servicio Railway secundario y el número WhatsApp de staging aún no estaban montados al momento del fix. Esperar a tenerlos = dejar el bug vivo en producción más tiempo.
+2. **Costo de no hacerlo > riesgo del cambio.** El bug actual (LLM inventando resúmenes financieros con números falsos pero apariencia real) destruye confianza silenciosamente. El peor caso del fix (sobre-restricción del LLM, ~5% probabilidad) es visible y reversible.
+3. **Reversibilidad instantánea.** `git revert` + push toma <60s. No hay datos en riesgo, no hay schema modificado, solo string del prompt.
+4. **Circuit breaker humano.** Oscar fue avisado explícitamente de reportar regresiones en 24-48h. Si aparecen, revert inmediato.
+
+**Lección extraída:** la graduación es correcta, pero **debe respaldarse con setup paralelo MONTADO** para que sea aplicable. Sin setup paralelo, "branch staging por 3-5 días" se traduce a "bug vivo más tiempo", lo cual viola el principio de no dejar a Oscar sufriendo bugs sabidos.
+
+**Tarea derivada:** montar el servicio Railway paralelo + número WhatsApp secundario antes del próximo cambio de prompt. Hasta entonces, la excepción es justificable; después de eso, no hay justificación posible.
+
 ## Origen
 
 Definido el 16-abr-2026 durante el primer ciclo de validación con Claude 4.7 (`4.7-adventures`). Ese ciclo cerró 2 bugs (Bug #1 followups zombie, Bug #3 catch frágil), descartó 2 hipótesis erróneas (Bug #2, #11) por verificación temprana, y dejó documentado el primer caso validado de cross-model debugging. Ver `HISTORIA_DECISIONES.md` Cap. 38.
