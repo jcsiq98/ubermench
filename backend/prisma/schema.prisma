@@ -1,5 +1,5 @@
 // ──────────────────────────────────────────────
-// Handy — Prisma Schema
+// Ubermench — Prisma Schema
 // ──────────────────────────────────────────────
 
 generator client {

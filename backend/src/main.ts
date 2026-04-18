@@ -53,8 +53,8 @@ async function bootstrap() {
   // Swagger API docs (dev only)
   if (!isProd) {
     const config = new DocumentBuilder()
-      .setTitle('Handy API')
-      .setDescription('API for the Handy service marketplace')
+      .setTitle('Ubermench API')
+      .setDescription('AI Business Assistant API for independent trades workers')
       .setVersion('1.0')
       .addBearerAuth()
       .build();
@@ -67,7 +67,7 @@ async function bootstrap() {
 
   logger.log('');
   logger.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  logger.log(`🚀 Handy API running on port ${port}`);
+  logger.log(`🚀 Ubermench API running on port ${port}`);
   if (!isProd) {
     logger.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
     logger.log(`📊 Bull Board:   http://localhost:${port}/admin/queues`);
