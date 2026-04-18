@@ -1,5 +1,5 @@
 ---
-description: Reglas meta sobre cómo el agente colabora con el usuario — verificar antes de afirmar, lentitud deliberada en cambios sensibles, ritual de versión, acción directa en lo trivial, preguntar antes de rediseñar.
+description: Reglas meta sobre cómo el agente colabora con el usuario — verificar antes de afirmar, lentitud deliberada en cambios sensibles, ritual de versión, acción directa en lo trivial, preguntar antes de rediseñar, escalar tras dos intentos fallidos.
 alwaysApply: true
 ---
 
@@ -48,10 +48,20 @@ condiciones:
    `expense/`, `income/`, `reminders/`, `workspace/`, `onboarding/`).
 2. La decisión cambia el system prompt del LLM (`ai.service.ts`) o
    añade/modifica un tool definition en `ai.tools.ts`.
-3. La decisión reinterpreta un capítulo de
-   `ubermench-docs/proyecto/HISTORIA_DECISIONES.md` o cambia una
-   decisión estratégica documentada.
-4. La decisión aplica una regla `.mdc` con más de 3 meses sin revisión.
+3. La decisión interpreta feedback humano vivo: comentarios de code
+   review en PR, hallazgos de architecture review, o reportes de bug
+   del usuario que se van a traducir en cambio. Riesgo: overfit a un
+   comentario aislado, o malinterpretar la intención del reviewer.
+4. La decisión aplica una regla `.mdc` con más de 3 meses sin revisión,
+   o reinterpreta un capítulo de
+   `ubermench-docs/proyecto/HISTORIA_DECISIONES.md` para justificar un
+   cambio actual.
+5. La decisión es de **alto impacto irreversible aunque sea de bajo
+   volumen**: migraciones de Prisma en producción, cambios en endpoints
+   públicos, código de seguridad (`auth/`, validación de input, manejo
+   de tokens, webhooks), o cambios que rompan compatibilidad hacia
+   atrás. Esta categoría es ortogonal a "alto volumen" — no se dispara
+   por frecuencia sino por irreversibilidad.
 
 En esos casos el agente DEBE: (a) mostrar al usuario la evidencia y
 el razonamiento antes de actuar, (b) presentar al menos una
@@ -128,10 +138,53 @@ otro contexto?", no "esta regla no aterriza, dame ejemplos del repo".
 
 ---
 
+## AB-06 — Escalar al usuario tras dos intentos fallidos
+
+El agente tiene sesgo fuerte hacia resolver autónomamente. Cuando una
+herramienta o estrategia falla, la respuesta natural es probar otra,
+luego patchearla, luego inventar un workaround. En tres iteraciones
+puede quemar mucho tiempo (y mucho contexto) cuando una pregunta de
+diez segundos al usuario habría desbloqueado todo.
+
+Regla: después de **dos intentos fallidos sobre el mismo problema**
+— build que no compila, query que no devuelve lo esperado, comando
+que falla por razón distinta cada vez, comportamiento del LLM que no
+matchea expectativa — el agente DEBE detenerse y preguntar al usuario
+antes del tercer intento.
+
+La pregunta debe incluir: (a) qué intentó, (b) qué falló, (c) cuál es
+su mejor hipótesis de qué información le falta para desbloquear.
+
+> El sesgo a resolver autónomamente parece eficiencia y es lo
+> contrario: optimiza por no molestar al usuario y termina costándole
+> más tiempo del que ahorró.
+
+---
+
+## Filtro para futuras reglas
+
+Heurística de admisión: cada regla en este archivo debe activarse al
+menos **una vez por semana** en uso real para justificar su renglón.
+Más allá de seis u ocho reglas el agente paga costo de "checklist
+overflow" donde nadie las lee. Si una regla nueva no pasa este filtro,
+no entra — se subsume como excepción dentro de otra regla existente.
+
+---
+
 ## Origen de estas reglas
 
 AB-01, AB-02 y AB-03 nacieron en una sesión de diseño metodológico
 con otra instancia de Opus 4.7 corriendo en otro workspace
-(2026-04-18). AB-04 y AB-05 se agregaron al traer las reglas a este
-repo, como resultado directo de errores que el agente cometió al
-auditarlas.
+(2026-04-18, primera ronda).
+
+AB-04 y AB-05 se agregaron al traer las reglas a este repo, como
+resultado directo de errores que el agente cometió al auditarlas.
+
+AB-06 se importó de la AB-04 del otro Opus 4.7 en una segunda ronda
+de validación cruzada (2026-04-18). En esa misma ronda se refinó
+AB-02: la condición 3 se separó (feedback humano vivo vs. lectura de
+registros históricos) y se agregó la condición 5 (alto impacto
+irreversible) que era agujero estructural en la versión inicial.
+
+El filtro "una vez por semana" también vino de esa segunda ronda como
+heurística de admisión para futuras reglas.
