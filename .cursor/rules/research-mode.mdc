@@ -21,7 +21,7 @@ When researching anything related to Ubermench, ALWAYS check these locations for
   - `sesiones/` — Deep thinking sessions
   - `arquitectura/` — ADRs
 - **`/home/jcsiq98/ubermench/_archive/`** — Historical reference:
-  - `handy-docs/` — LATAM market research (PDF report)
+  - `handy-docs/` — Costs analysis, DB access notes, LATAM market research PDFs (`COSTS.md`, `ACCEDER_BD_RAILWAY.md`, industry reports)
   - `ROADMAP_MARKETPLACE_V1.md` — Original marketplace roadmap (pre-pivot)
   - `STATUS_MARKETPLACE.md` — Marketplace status at time of pivot
 
