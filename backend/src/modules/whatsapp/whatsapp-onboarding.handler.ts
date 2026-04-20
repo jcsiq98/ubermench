@@ -198,16 +198,33 @@ Responde con JSON: {"name": "Nombre Extraído"} o {"name": null}`,
       return;
     }
 
-    // Use LLM to extract the trade/occupation
+    // Use LLM to extract the trade/occupation. The text may come from a long
+    // voice transcription (Whisper), so we instruct the LLM to extract just
+    // the trade — and to return null if no clear trade is mentioned.
     const extracted = await this.aiService.extractFromText(
       trimmed,
       `El usuario está respondiendo a la pregunta "¿A qué te dedicas?".
-Extrae el oficio o profesión. Ignora frases como "soy", "me dedico a", "trabajo de", etc.
-Responde con JSON: {"trade": "oficio extraído"}
-Si no puedes identificar un oficio, usa el texto tal cual: {"trade": "${trimmed}"}`,
+Extrae SOLO el oficio o profesión, en 1-3 palabras máximo, en minúsculas, sin artículos ni muletillas.
+Ejemplos:
+- "soy plomero" → {"trade": "plomero"}
+- "el flomero, lo que sea. ah ok, ok, ok..." → {"trade": "plomero"}
+- "yo me dedico a la electricidad residencial" → {"trade": "electricista"}
+- "pues hago de todo, albañilería, plomería..." → {"trade": "albañil"}
+Si NO puedes identificar un oficio claro, responde: {"trade": null}
+Responde con JSON.`,
     );
 
-    const trade = extracted?.trade || trimmed;
+    const sanitized = this.sanitizeTrade(extracted?.trade);
+
+    if (!sanitized) {
+      await this.sendAndLog(
+        phone,
+        `No te entendí bien el oficio. Dime en pocas palabras a qué te dedicas (plomero, electricista, albañil, etc.).`,
+      );
+      return;
+    }
+
+    const trade = sanitized;
     session.trade = trade;
 
     try {
@@ -220,8 +237,8 @@ Si no puedes identificar un oficio, usa el texto tal cual: {"trade": "${trimmed}
           role: 'PROVIDER',
           providerProfile: {
             create: {
-              bio: session.trade,
-              serviceTypes: [trade.toLowerCase()],
+              bio: trade,
+              serviceTypes: [trade],
               isVerified: true,
               isAvailable: true,
             },
@@ -233,8 +250,8 @@ Si no puedes identificar un oficio, usa el texto tal cual: {"trade": "${trimmed}
         where: { phone: dbPhone },
         update: {
           name: session.name,
-          bio: session.trade,
-          categories: [trade.toLowerCase()],
+          bio: trade,
+          categories: [trade],
           onboardingStep: 'DONE',
           verificationStatus: 'APPROVED',
         },
@@ -242,7 +259,7 @@ Si no puedes identificar un oficio, usa el texto tal cual: {"trade": "${trimmed}
           phone: dbPhone,
           name: session.name,
           bio: trade,
-          categories: [trade.toLowerCase()],
+          categories: [trade],
           serviceZones: [],
           onboardingStep: 'DONE',
           verificationStatus: 'APPROVED',
@@ -267,6 +284,41 @@ Si no puedes identificar un oficio, usa el texto tal cual: {"trade": "${trimmed}
       await this.sendAndLog(phone, `Hubo un error. Intenta de nuevo enviando cualquier mensaje.`);
       await this.clearSession(phone);
     }
+  }
+
+  /**
+   * Final safety net for the trade field. Even if the LLM returns garbage
+   * (e.g. a long Whisper transcription), we never persist more than a short,
+   * lowercase, punctuation-free string. Returns null if nothing usable remains.
+   */
+  private sanitizeTrade(raw: unknown): string | null {
+    if (typeof raw !== 'string') return null;
+
+    let cleaned = raw
+      .toLowerCase()
+      .normalize('NFC')
+      .replace(/[.,;:!?"'`()¿¡]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    cleaned = cleaned.replace(
+      /^(soy un|soy una|soy|yo soy|me dedico a la|me dedico a el|me dedico a|trabajo de|trabajo como|hago de|el|la|los|las|un|una)\s+/i,
+      '',
+    );
+
+    if (!cleaned) return null;
+
+    const words = cleaned.split(' ').slice(0, 3).join(' ');
+
+    if (words.length < 3 || words.length > 40) return null;
+
+    const filler = new Set(['ok', 'eh', 'mm', 'pues', 'este', 'lo', 'que', 'sea', 'ah']);
+    const meaningful = words
+      .split(' ')
+      .filter((w) => !filler.has(w));
+    if (meaningful.length === 0) return null;
+
+    return meaningful.join(' ');
   }
 
   private normalizePhoneForDb(phone: string): string {

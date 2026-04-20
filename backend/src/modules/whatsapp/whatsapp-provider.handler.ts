@@ -467,7 +467,7 @@ export class WhatsAppProviderHandler {
         return this.handleEditingBio(senderPhone, text, session);
 
       default:
-        return this.sendProviderDashboard(senderPhone, senderName);
+        return this.sendFallbackPrompt(senderPhone);
     }
   }
 
@@ -537,7 +537,7 @@ export class WhatsAppProviderHandler {
       return this.handleAiConversation(phone, text, name);
     }
 
-    return this.sendProviderDashboard(phone, name);
+    return this.sendFallbackPrompt(phone);
   }
 
   // ─── AI Conversational Handler ──────────────────────────
@@ -2902,15 +2902,19 @@ export class WhatsAppProviderHandler {
   // ─── Dashboard / Help ───────────────────────────────────
 
   private async sendProviderDashboard(phone: string, name: string) {
+    const greeting = name ? `Soy tu Chalán, *${name}*. ` : `Soy tu Chalán. `;
     await this.whatsapp.sendTextMessage(
       phone,
-      `👋 Hola *${name}*! Soy tu Chalán.\n\n` +
-        `Puedo ayudarte con:\n` +
-        `💰 Registrar ingresos y gastos\n` +
-        `📅 Agendar citas y recordatorios\n` +
-        `📊 Resúmenes de tu negocio\n` +
-        `⚙️ Configurar servicios y horarios\n\n` +
-        `Escribe *"ayuda"* para ver ejemplos, o simplemente dime qué necesitas.`,
+      `${greeting}Te llevo lo administrativo del negocio — ingresos, gastos, agenda, cobros, lo que se ofrezca. ` +
+        `Tú concéntrate en el oficio; del papeleo me encargo yo.\n\n` +
+        `Dime qué necesitas — por texto o por audio, como te acomode.`,
+    );
+  }
+
+  private async sendFallbackPrompt(phone: string) {
+    await this.whatsapp.sendTextMessage(
+      phone,
+      `No te cacé esa, maestro. Dime qué necesitas — por texto o audio.`,
     );
   }
 
