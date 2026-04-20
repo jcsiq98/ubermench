@@ -67,6 +67,7 @@ export class AppointmentsService {
     providerId: string,
     clientName?: string,
     dateHint?: Date,
+    tz: string = DEFAULT_TIMEZONE,
   ) {
     const where: any = {
       providerId,
@@ -74,11 +75,8 @@ export class AppointmentsService {
     };
 
     if (dateHint) {
-      const dayStart = new Date(dateHint);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(dateHint);
-      dayEnd.setHours(23, 59, 59, 999);
-      where.scheduledAt = { gte: dayStart, lte: dayEnd };
+      const { start, end } = getLocalDayRange(tz, dateHint);
+      where.scheduledAt = { gte: start, lte: end };
     }
 
     const appointments = await this.prisma.appointment.findMany({

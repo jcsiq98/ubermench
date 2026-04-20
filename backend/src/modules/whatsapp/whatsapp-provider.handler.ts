@@ -1549,6 +1549,52 @@ export class WhatsAppProviderHandler {
 
     const reminderMinutes = data?.reminderMinutes ? Number(data.reminderMinutes) : undefined;
 
+    // Guard: if there's already an active appointment with the same client on the same day,
+    // the LLM likely misclassified a modify request as a new appointment.
+    // Auto-redirect to update instead of creating a duplicate.
+    if (data?.clientName && !JUNK_CLIENT_NAMES.has(data.clientName.trim().toLowerCase())) {
+      try {
+        const existing = await this.appointmentsService.findByContext(
+          providerProfileId, data.clientName, scheduledAt, tz,
+        );
+        if (existing.length > 0) {
+          const target = existing[0];
+          const oldTime = formatTime(target.scheduledAt, tz);
+          const updates: import('../appointments/appointments.service').UpdateAppointmentDto = {
+            scheduledAt,
+          };
+          if (data.address) updates.address = data.address;
+          if (data.description) updates.description = data.description;
+          if (reminderMinutes !== undefined) updates.reminderMinutes = reminderMinutes;
+
+          const updated = await this.appointmentsService.update(target.id, updates);
+          const newTime = formatTime(updated.scheduledAt, tz);
+          let confirmation = `♻️ Ya tenías una cita con *${target.clientName}* a las *${oldTime}* — la moví a las *${newTime}*.`;
+
+          if (updates.scheduledAt) {
+            await this.cancelAppointmentFollowup(updated.id);
+            this.scheduleAppointmentFollowup(
+              updated.id, phone, updated.scheduledAt, updated.clientName ?? undefined, tz,
+            );
+          }
+          if (reminderMinutes) {
+            await this.cancelAppointmentReminder(updated.id);
+            const scheduled = await this.scheduleAppointmentReminder(
+              updated.id, phone, updated.scheduledAt, reminderMinutes, updated.clientName ?? undefined, tz,
+            );
+            if (scheduled) {
+              confirmation += `\n\n🔔 Recordatorio reprogramado: *${reminderMinutes} minutos* antes.`;
+            }
+          }
+
+          await this.sendAndRecord(phone, confirmation);
+          return;
+        }
+      } catch (err: any) {
+        this.logger.warn(`Duplicate check failed, proceeding with create: ${err.message}`);
+      }
+    }
+
     try {
       const appointment = await this.appointmentsService.create({
         providerId: providerProfileId,
@@ -1588,7 +1634,7 @@ export class WhatsAppProviderHandler {
       }
 
       if (reminderMinutes) {
-        const scheduled = this.scheduleAppointmentReminder(
+        const scheduled = await this.scheduleAppointmentReminder(
           appointment.id, phone, scheduledAt, reminderMinutes, data?.clientName, tz,
         );
         if (scheduled) {
@@ -1697,6 +1743,7 @@ export class WhatsAppProviderHandler {
       providerProfileId,
       data?.clientName,
       dateHint ?? undefined,
+      tz,
     );
 
     if (matches.length === 0) {
@@ -1760,7 +1807,7 @@ export class WhatsAppProviderHandler {
       );
 
       if (updates.scheduledAt) {
-        this.cancelAppointmentFollowup(updated.id);
+        await this.cancelAppointmentFollowup(updated.id);
         this.scheduleAppointmentFollowup(
           updated.id, phone, updated.scheduledAt, updated.clientName ?? undefined, tz,
         );
@@ -1768,8 +1815,8 @@ export class WhatsAppProviderHandler {
 
       const activeReminder = updated.reminderMinutes ?? (target as any).reminderMinutes;
       if (activeReminder && (updates.scheduledAt || updates.reminderMinutes !== undefined)) {
-        this.cancelAppointmentReminder(updated.id);
-        const scheduled = this.scheduleAppointmentReminder(
+        await this.cancelAppointmentReminder(updated.id);
+        const scheduled = await this.scheduleAppointmentReminder(
           updated.id, phone, updated.scheduledAt, activeReminder, updated.clientName ?? undefined, tz,
         );
         if (scheduled) {
@@ -1802,6 +1849,7 @@ export class WhatsAppProviderHandler {
       providerProfileId,
       data?.clientName,
       dateHint ?? undefined,
+      tz,
     );
 
     if (matches.length === 0) {
@@ -1827,8 +1875,8 @@ export class WhatsAppProviderHandler {
 
     try {
       await this.appointmentsService.cancel(target.id);
-      this.cancelAppointmentReminder(target.id);
-      this.cancelAppointmentFollowup(target.id);
+      await this.cancelAppointmentReminder(target.id);
+      await this.cancelAppointmentFollowup(target.id);
       const confirmation = this.appointmentsService.formatAppointmentCancelled(
         target.clientName ?? undefined,
         target.scheduledAt,
@@ -1871,6 +1919,7 @@ export class WhatsAppProviderHandler {
         providerProfileId,
         data?.clientName,
         dateHint ?? undefined,
+        tz,
       );
       if (matches.length > 0) appointment = matches[0];
     }
@@ -1892,8 +1941,8 @@ export class WhatsAppProviderHandler {
 
     try {
       await this.appointmentsService.markResult(appointment.id, status);
-      this.cancelAppointmentFollowup(appointment.id);
-      this.cancelAppointmentReminder(appointment.id);
+      await this.cancelAppointmentFollowup(appointment.id);
+      await this.cancelAppointmentReminder(appointment.id);
 
       const statusLabels: Record<string, string> = {
         completed: '✅ *Cita completada.* ¡Buen trabajo!',
@@ -2625,7 +2674,7 @@ export class WhatsAppProviderHandler {
 
       const updated = await this.remindersService.update(reminder.id, updateData);
 
-      this.cancelPersonalReminder(reminder.id);
+      await this.cancelPersonalReminder(reminder.id);
       this.schedulePersonalReminder(
         updated.id,
         phone,
@@ -2671,7 +2720,7 @@ export class WhatsAppProviderHandler {
 
       const reminder = matches[0];
       await this.remindersService.cancel(reminder.id);
-      this.cancelPersonalReminder(reminder.id);
+      await this.cancelPersonalReminder(reminder.id);
 
       const msg = this.remindersService.formatReminderCancelled(reminder.description);
       await this.sendAndRecord(phone, msg, AiIntent.CANCELAR_RECORDATORIO);
@@ -2710,7 +2759,7 @@ export class WhatsAppProviderHandler {
 
       const reminder = matches[0];
       await this.remindersService.markCompleted(reminder.id);
-      this.cancelPersonalReminder(reminder.id);
+      await this.cancelPersonalReminder(reminder.id);
 
       const msg = this.remindersService.formatReminderCompleted(reminder.description);
       await this.sendAndRecord(phone, msg, AiIntent.COMPLETAR_RECORDATORIO);
@@ -2753,10 +2802,11 @@ export class WhatsAppProviderHandler {
     return true;
   }
 
-  private cancelPersonalReminder(reminderId: string): void {
-    const queue = (this.queueService as any).queues?.[QUEUE_NAMES.PERSONAL_REMINDER];
-    if (!queue) return;
-    queue.remove(`personal-reminder-${reminderId}`).catch(() => {});
+  private async cancelPersonalReminder(reminderId: string): Promise<void> {
+    await this.queueService.removeJob(
+      QUEUE_NAMES.PERSONAL_REMINDER,
+      `personal-reminder-${reminderId}`,
+    );
   }
 
   // ─── Appointment followup scheduling ────────────────────
@@ -2793,14 +2843,14 @@ export class WhatsAppProviderHandler {
       );
   }
 
-  private scheduleAppointmentReminder(
+  private async scheduleAppointmentReminder(
     appointmentId: string,
     providerPhone: string,
     scheduledAt: Date,
     reminderMinutes: number,
     clientName?: string,
     timezone?: string,
-  ): boolean {
+  ): Promise<boolean> {
     const delay = scheduledAt.getTime() - Date.now() - reminderMinutes * 60 * 1000;
 
     if (delay <= 0) return false;
@@ -2814,24 +2864,26 @@ export class WhatsAppProviderHandler {
       timezone,
     };
 
-    this.queueService
+    const jobId = await this.queueService
       .addJob(
         QUEUE_NAMES.APPOINTMENT_REMINDER,
         'reminder',
         jobData,
         { delay, jobId: `reminder-${appointmentId}` },
       )
-      .catch((err) =>
-        this.logger.warn(`Failed to schedule appointment reminder: ${err.message}`),
-      );
+      .catch((err) => {
+        this.logger.warn(`Failed to schedule appointment reminder: ${err.message}`);
+        return null;
+      });
 
-    return true;
+    return jobId !== null;
   }
 
-  private cancelAppointmentReminder(appointmentId: string): void {
-    const queue = (this.queueService as any).queues?.[QUEUE_NAMES.APPOINTMENT_REMINDER];
-    if (!queue) return;
-    queue.remove(`reminder-${appointmentId}`).catch(() => {});
+  private async cancelAppointmentReminder(appointmentId: string): Promise<void> {
+    await this.queueService.removeJob(
+      QUEUE_NAMES.APPOINTMENT_REMINDER,
+      `reminder-${appointmentId}`,
+    );
   }
 
   /**
@@ -2840,10 +2892,11 @@ export class WhatsAppProviderHandler {
    * marked completed/no-show — otherwise the old followup fires with stale
    * data and confuses the user (Cap. 38, bug Oscar 16-abr).
    */
-  private cancelAppointmentFollowup(appointmentId: string): void {
-    const queue = (this.queueService as any).queues?.[QUEUE_NAMES.APPOINTMENT_FOLLOWUP];
-    if (!queue) return;
-    queue.remove(`followup-${appointmentId}`).catch(() => {});
+  private async cancelAppointmentFollowup(appointmentId: string): Promise<void> {
+    await this.queueService.removeJob(
+      QUEUE_NAMES.APPOINTMENT_FOLLOWUP,
+      `followup-${appointmentId}`,
+    );
   }
 
   // ─── Dashboard / Help ───────────────────────────────────
