@@ -4,6 +4,7 @@ import { RedisService } from '../../config/redis.service';
 import { WhatsAppService } from './whatsapp.service';
 import { AiService } from '../ai/ai.service';
 import { AiContextService } from '../ai/ai-context.service';
+import { sanitizeForWhatsApp } from '../../common/utils/whatsapp-format.utils';
 
 export enum OnboardingStep {
   NAME = 'NAME',
@@ -37,8 +38,9 @@ export class WhatsAppOnboardingHandler {
     message: string,
     intent = 'onboarding',
   ): Promise<void> {
-    await this.whatsapp.sendTextMessage(phone, message);
-    await this.aiContextService.addMessage(phone, 'assistant', message, intent);
+    const clean = sanitizeForWhatsApp(message);
+    await this.whatsapp.sendTextMessage(phone, clean);
+    await this.aiContextService.addMessage(phone, 'assistant', clean, intent);
   }
 
   private async getSession(phone: string): Promise<OnboardingSession | null> {

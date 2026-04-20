@@ -32,6 +32,7 @@ import {
   resolveTimezone,
   getTimezoneLabel,
 } from '../../common/utils/timezone.utils';
+import { sanitizeForWhatsApp } from '../../common/utils/whatsapp-format.utils';
 
 const JUNK_CLIENT_NAMES = new Set([
   'ninguno', 'ninguna', 'no', 'n/a', 'na', 'nada',
@@ -736,8 +737,9 @@ export class WhatsAppProviderHandler {
     message: string,
     intent?: string,
   ): Promise<void> {
-    await this.whatsapp.sendTextMessage(phone, message);
-    await this.aiContextService.addMessage(phone, 'assistant', message, intent);
+    const clean = sanitizeForWhatsApp(message);
+    await this.whatsapp.sendTextMessage(phone, clean);
+    await this.aiContextService.addMessage(phone, 'assistant', clean, intent);
   }
 
   // ─── Workspace: configurar perfil ───────────────────────
