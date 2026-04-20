@@ -1,6 +1,6 @@
 ---
-description: Reglas meta sobre cómo el agente colabora con el usuario — verificar antes de afirmar, lentitud deliberada en cambios sensibles, ritual de versión, acción directa en lo trivial, preguntar antes de rediseñar, escalar tras dos intentos fallidos.
-alwaysApply: true
+description: Reglas meta sobre cómo el agente colabora con el usuario — verificar antes de afirmar, lentitud deliberada en cambios sensibles, ritual de versión, acción directa en lo trivial, preguntar antes de rediseñar, escalar tras dos intentos fallidos. Activar con "modo colaboración", "aplica AB", "debug en equipo".
+alwaysApply: false
 ---
 
 # Reglas de Colaboración del Agente
