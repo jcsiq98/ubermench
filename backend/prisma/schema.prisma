@@ -265,6 +265,7 @@ model Appointment {
   locationLng     Float?            @map("location_lng")
   scheduledAt     DateTime          @map("scheduled_at")
   reminderMinutes Int?              @map("reminder_minutes")
+  estimatedPrice  Float?            @map("estimated_price")
   status          AppointmentStatus @default(PENDING)
   createdAt       DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @updatedAt @map("updated_at")

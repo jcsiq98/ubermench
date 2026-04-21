@@ -20,6 +20,7 @@ export interface CreateAppointmentDto {
   address?: string;
   scheduledAt: Date;
   reminderMinutes?: number;
+  estimatedPrice?: number;
 }
 
 export interface UpdateAppointmentDto {
@@ -29,6 +30,7 @@ export interface UpdateAppointmentDto {
   description?: string;
   address?: string;
   reminderMinutes?: number | null;
+  estimatedPrice?: number | null;
 }
 
 @Injectable()
@@ -47,6 +49,7 @@ export class AppointmentsService {
         address: dto.address,
         scheduledAt: dto.scheduledAt,
         reminderMinutes: dto.reminderMinutes ?? null,
+        estimatedPrice: dto.estimatedPrice ?? null,
       },
     });
 
@@ -274,6 +277,7 @@ export class AppointmentsService {
     description?: string,
     address?: string,
     tz: string = DEFAULT_TIMEZONE,
+    estimatedPrice?: number,
   ): string {
     const dateStr = formatDate(scheduledAt, tz);
     const timeStr = formatTime(scheduledAt, tz);
@@ -283,6 +287,7 @@ export class AppointmentsService {
     if (description) msg += ` — ${description}`;
     if (address) msg += `.\n📍 ${address}`;
     else msg += '.';
+    if (estimatedPrice) msg += `\n💰 Cobro estimado: *$${estimatedPrice.toLocaleString('es-MX')}*`;
 
     return msg;
   }
@@ -303,6 +308,7 @@ export class AppointmentsService {
 
       msg += `\n⏰ *${timeStr}*`;
       if (apt.clientName) msg += ` — ${apt.clientName}`;
+      if (apt.estimatedPrice) msg += ` — *$${apt.estimatedPrice.toLocaleString('es-MX')}*`;
       if (apt.description) msg += `\n   📝 ${apt.description}`;
       if (apt.address) msg += `\n   📍 ${apt.address}`;
       msg += '\n';
@@ -360,5 +366,38 @@ export class AppointmentsService {
     }
 
     return result.count;
+  }
+
+  /**
+   * Sum estimatedPrice from upcoming (PENDING/CONFIRMED) appointments
+   * within a date range for a provider.
+   */
+  async getProjectedIncome(
+    providerId: string,
+    from: Date,
+    to: Date,
+  ): Promise<{ total: number; count: number; appointments: { clientName: string | null; scheduledAt: Date; estimatedPrice: number }[] }> {
+    const appointments = await this.prisma.appointment.findMany({
+      where: {
+        providerId,
+        status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED] },
+        scheduledAt: { gte: from, lte: to },
+        estimatedPrice: { not: null },
+      },
+      orderBy: { scheduledAt: 'asc' },
+      select: {
+        clientName: true,
+        scheduledAt: true,
+        estimatedPrice: true,
+      },
+    });
+
+    const total = appointments.reduce((sum, a) => sum + (a.estimatedPrice ?? 0), 0);
+
+    return {
+      total,
+      count: appointments.length,
+      appointments: appointments as { clientName: string | null; scheduledAt: Date; estimatedPrice: number }[],
+    };
   }
 }

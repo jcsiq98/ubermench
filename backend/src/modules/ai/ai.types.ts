@@ -20,6 +20,7 @@ export enum AiIntent {
   CREAR_LINK_COBRO = 'crear_link_cobro',
   ACTIVAR_COBROS = 'activar_cobros',
   CONFIGURAR_ZONA_HORARIA = 'configurar_zona_horaria',
+  VER_INGRESOS_PROYECTADOS = 'ver_ingresos_proyectados',
   CONVERSACION_GENERAL = 'conversacion_general',
 }
 

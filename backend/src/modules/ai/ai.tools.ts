@@ -98,6 +98,9 @@ export const TOOL_TO_INTENT: Record<
   configurar_zona_horaria: {
     intent: AiIntent.CONFIGURAR_ZONA_HORARIA,
   },
+  ver_ingresos_proyectados: {
+    intent: AiIntent.VER_INGRESOS_PROYECTADOS,
+  },
 };
 
 // ─── Tool definitions ────────────────────────────────────────
@@ -130,6 +133,10 @@ export const AI_TOOLS: ChatCompletionTool[] = [
             type: 'string',
             description: 'Nombre del cliente si se menciona.',
           },
+          date: {
+            type: 'string',
+            description: 'Fecha del ingreso si es diferente a hoy. Usar palabra relativa ("ayer", "antier", "el lunes") o nombre del día ("martes", "viernes"). Solo usar YYYY-MM-DD si el usuario da fecha numérica exacta. Si no se menciona fecha, NO incluir — se asume hoy.',
+          },
         },
         required: ['amount'],
       },
@@ -158,6 +165,10 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           description: {
             type: 'string',
             description: 'Descripción breve del gasto (ej: "tubo de cobre", "gasolina").',
+          },
+          date: {
+            type: 'string',
+            description: 'Fecha del gasto si es diferente a hoy. Usar palabra relativa ("ayer", "antier", "el lunes") o nombre del día ("martes", "viernes"). Solo usar YYYY-MM-DD si el usuario da fecha numérica exacta. Si no se menciona fecha, NO incluir — se asume hoy.',
           },
         },
         required: ['amount'],
@@ -324,10 +335,15 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'ver_resumen',
       description:
-        'Ver resumen financiero general: cuánto lleva ganado/gastado esta semana o mes, balance, desglose por categoría. NO usar cuando preguntan por gastos fijos/recurrentes — para eso usar listar_gastos_recurrentes.',
+        'Ver resumen financiero: ingresos, gastos, balance. Soporta periodos específicos. NO usar cuando preguntan por gastos fijos/recurrentes — para eso usar listar_gastos_recurrentes.',
       parameters: {
         type: 'object',
-        properties: {},
+        properties: {
+          period: {
+            type: 'string',
+            description: 'Periodo a consultar. "esta semana" (default), "este mes", "hoy", "ayer", "la semana pasada", "el mes pasado", "marzo", "enero 2026", o un rango como "del 1 al 15 de abril". Si no se menciona periodo, NO incluir — se asume esta semana.',
+          },
+        },
       },
     },
   },
@@ -370,6 +386,10 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           reminderMinutes: {
             type: 'number',
             description: 'Minutos de anticipación para el recordatorio. "recuérdame 10 min antes" = 10, "avísame 1 hora antes" = 60, "media hora antes" = 30. Solo incluir si el usuario pide recordatorio.',
+          },
+          estimatedPrice: {
+            type: 'number',
+            description: 'Monto estimado que el cliente pagará por este trabajo. "me va a pagar 3000" = 3000, "cobro 1500" = 1500. Solo incluir si el usuario menciona un precio/monto para esta cita.',
           },
         },
         required: ['date'],
@@ -416,6 +436,10 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           reminderMinutes: {
             type: 'number',
             description: 'Nuevos minutos de anticipación para recordatorio. "recuérdame 10 min antes" = 10. Solo incluir si el usuario pide cambiar el recordatorio.',
+          },
+          newEstimatedPrice: {
+            type: 'number',
+            description: 'Nuevo monto estimado si el usuario quiere corregir el precio. "no, van a ser 2000" = 2000.',
           },
         },
       },
@@ -739,6 +763,26 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
         },
         required: ['timezone'],
+      },
+    },
+  },
+
+  // --- Projected income ---
+  {
+    type: 'function',
+    function: {
+      name: 'ver_ingresos_proyectados',
+      description:
+        'Consultar los ingresos proyectados (estimados) para un periodo. Suma los montos estimados de las citas agendadas. Usar cuando el usuario pregunta "cuánto voy a ganar", "cuánto me van a pagar esta semana", "ingreso esperado", "cuánto tengo proyectado", "total de la semana". NO usar para ingresos ya recibidos — para eso es ver_resumen.',
+      parameters: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description: 'Periodo a consultar: "hoy", "mañana", "esta semana", "este mes", o un rango como "lunes a viernes".',
+          },
+        },
+        required: ['period'],
       },
     },
   },

@@ -52,6 +52,15 @@ export class ExpenseService {
     return this.getSummary(providerId, startOfMonth, new Date(), 'este mes');
   }
 
+  async getCustomSummary(
+    providerId: string,
+    from: Date,
+    to: Date,
+    period: string,
+  ): Promise<ExpenseSummary> {
+    return this.getSummary(providerId, from, to, period);
+  }
+
   private async getSummary(
     providerId: string,
     from: Date,

@@ -26,8 +26,10 @@ import { RemindersService } from '../reminders/reminders.service';
 import { PaymentsService } from '../payments/payments.service';
 import {
   formatTime,
+  formatDate,
   wallClockToUtc,
   toLocalTime,
+  getLocalDayRange,
   DEFAULT_TIMEZONE,
   resolveTimezone,
   getTimezoneLabel,
@@ -604,11 +606,11 @@ export class WhatsAppProviderHandler {
       for (const aiResponse of aiResponses) {
         switch (aiResponse.intent) {
           case AiIntent.REGISTRAR_INGRESO:
-            await this.handleRegistrarIngreso(phone, aiResponse.data, providerProfileId);
+            await this.handleRegistrarIngreso(phone, aiResponse.data, providerProfileId, tz);
             break;
 
           case AiIntent.REGISTRAR_GASTO:
-            await this.handleRegistrarGasto(phone, aiResponse.data, providerProfileId);
+            await this.handleRegistrarGasto(phone, aiResponse.data, providerProfileId, tz);
             break;
 
           case AiIntent.GESTIONAR_GASTO:
@@ -641,6 +643,10 @@ export class WhatsAppProviderHandler {
 
           case AiIntent.VER_AGENDA:
             await this.handleVerAgenda(phone, providerProfileId, tz);
+            break;
+
+          case AiIntent.VER_INGRESOS_PROYECTADOS:
+            await this.handleVerIngresosProyectados(phone, aiResponse.data, providerProfileId, tz);
             break;
 
           case AiIntent.CONFIRMAR_CLIENTE:
@@ -776,6 +782,7 @@ export class WhatsAppProviderHandler {
     phone: string,
     data: Record<string, any> | undefined,
     providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(
@@ -799,6 +806,10 @@ export class WhatsAppProviderHandler {
       ? (data.paymentMethod as PaymentMethod)
       : PaymentMethod.CASH;
 
+    const parsedDate = data?.date
+      ? this.appointmentsService.parseScheduledDate(data.date, undefined, tz)
+      : null;
+
     try {
       await this.incomeService.create({
         providerId: providerProfileId,
@@ -806,6 +817,7 @@ export class WhatsAppProviderHandler {
         description: data?.description,
         paymentMethod,
         clientName: data?.clientName,
+        date: parsedDate ?? undefined,
       });
 
       let confirmation = this.incomeService.formatIncomeConfirmation(
@@ -1053,6 +1065,7 @@ export class WhatsAppProviderHandler {
     phone: string,
     data: Record<string, any> | undefined,
     providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(
@@ -1071,12 +1084,17 @@ export class WhatsAppProviderHandler {
       return;
     }
 
+    const parsedDate = data?.date
+      ? this.appointmentsService.parseScheduledDate(data.date, undefined, tz)
+      : null;
+
     try {
       await this.expenseService.create({
         providerId: providerProfileId,
         amount,
         category: data?.category,
         description: data?.description,
+        date: parsedDate ?? undefined,
       });
 
       const confirmation = this.expenseService.formatExpenseConfirmation(
@@ -1452,9 +1470,39 @@ export class WhatsAppProviderHandler {
       return;
     }
 
-    // Use allSettled so a single query failure doesn't kill the whole summary.
-    // Previously Promise.all + generic catch caused the same canned error
-    // pattern as ver_agenda (Cap. 38).
+    const period = data?.period?.toLowerCase().trim();
+    const dateRange = period ? this.parsePeriodToDateRange(period, tz) : null;
+
+    if (dateRange) {
+      // Custom period: single query for the specified range
+      const [incomeR, expenseR] = await Promise.allSettled([
+        this.incomeService.getCustomSummary(providerProfileId, dateRange.from, dateRange.to, dateRange.label),
+        this.expenseService.getCustomSummary(providerProfileId, dateRange.from, dateRange.to, dateRange.label),
+      ]);
+
+      if (incomeR.status === 'rejected' && expenseR.status === 'rejected') {
+        this.logger.error(`Custom summary failed for ${providerProfileId}: ${(incomeR as PromiseRejectedResult).reason?.message}`);
+        await this.sendAndRecord(phone, 'No pude leer tus números en este momento. Intenta en un minuto.');
+        return;
+      }
+
+      let msg = '';
+      if (incomeR.status === 'fulfilled') {
+        msg += this.incomeService.formatSummaryMessage(incomeR.value);
+      }
+      if (expenseR.status === 'fulfilled' && expenseR.value.count > 0) {
+        msg += `\n${this.expenseService.formatExpenseSummaryMessage(expenseR.value)}`;
+        if (incomeR.status === 'fulfilled') {
+          const net = incomeR.value.total - expenseR.value.total;
+          msg += `\n💰 *Balance ${dateRange.label}: $${net.toLocaleString('es-MX')}*`;
+        }
+      }
+
+      await this.sendAndRecord(phone, msg || `No hay datos ${dateRange.label}.`);
+      return;
+    }
+
+    // Default: week + month (original behavior)
     const [weekIncomeR, monthIncomeR, weekExpenseR, monthExpenseR] = await Promise.allSettled([
       this.incomeService.getWeekSummary(providerProfileId, tz),
       this.incomeService.getMonthSummary(providerProfileId, tz),
@@ -1517,6 +1565,70 @@ export class WhatsAppProviderHandler {
         `Failed to send summary to ${phone}: ${error.message}\n${error.stack}`,
       );
     }
+  }
+
+  /**
+   * Parse a human-readable period string into a { from, to, label } date range.
+   * Returns null if the period can't be parsed (falls back to default week+month).
+   */
+  private parsePeriodToDateRange(
+    period: string,
+    tz: string,
+  ): { from: Date; to: Date; label: string } | null {
+    const now = toLocalTime(new Date(), tz);
+
+    if (period === 'hoy') {
+      const range = getLocalDayRange(tz);
+      return { from: range.start, to: range.end, label: 'hoy' };
+    }
+
+    if (period === 'ayer') {
+      const yesterday = new Date(now.getTime() - 86400000);
+      const range = getLocalDayRange(tz, yesterday);
+      return { from: range.start, to: range.end, label: 'ayer' };
+    }
+
+    if (period === 'antier') {
+      const dayBeforeYesterday = new Date(now.getTime() - 2 * 86400000);
+      const range = getLocalDayRange(tz, dayBeforeYesterday);
+      return { from: range.start, to: range.end, label: 'antier' };
+    }
+
+    if (period.includes('semana pasada') || period.includes('semana anterior')) {
+      const dayOfWeek = now.getDay();
+      const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      const thisMonday = new Date(now);
+      thisMonday.setDate(now.getDate() + mondayOffset);
+      const lastMonday = new Date(thisMonday);
+      lastMonday.setDate(thisMonday.getDate() - 7);
+      const lastSunday = new Date(thisMonday);
+      lastSunday.setDate(thisMonday.getDate() - 1);
+      lastSunday.setHours(23, 59, 59, 999);
+      lastMonday.setHours(0, 0, 0, 0);
+      return { from: lastMonday, to: lastSunday, label: 'la semana pasada' };
+    }
+
+    if (period.includes('mes pasado') || period.includes('mes anterior')) {
+      const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const to = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      return { from, to, label: 'el mes pasado' };
+    }
+
+    // Named months: "marzo", "enero 2026"
+    const monthNames: Record<string, number> = {
+      enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5,
+      julio: 6, agosto: 7, septiembre: 8, octubre: 9, noviembre: 10, diciembre: 11,
+    };
+    const monthMatch = period.match(/^(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)(?:\s+(\d{4}))?$/);
+    if (monthMatch) {
+      const month = monthNames[monthMatch[1]];
+      const year = monthMatch[2] ? parseInt(monthMatch[2]) : now.getFullYear();
+      const from = new Date(year, month, 1);
+      const to = new Date(year, month + 1, 0, 23, 59, 59, 999);
+      return { from, to, label: `${monthMatch[1]}${monthMatch[2] ? ' ' + monthMatch[2] : ''}` };
+    }
+
+    return null;
   }
 
   // ─── Appointments: agendar cita ─────────────────────────
@@ -1606,6 +1718,7 @@ export class WhatsAppProviderHandler {
         address: data?.address,
         scheduledAt,
         reminderMinutes,
+        estimatedPrice: data?.estimatedPrice ? Number(data.estimatedPrice) : undefined,
       });
 
       let confirmation = this.appointmentsService.formatAppointmentConfirmation(
@@ -1614,6 +1727,7 @@ export class WhatsAppProviderHandler {
         data?.description,
         data?.address,
         tz,
+        data?.estimatedPrice ? Number(data.estimatedPrice) : undefined,
       );
 
       if (data?.clientName && !JUNK_CLIENT_NAMES.has(data.clientName.trim().toLowerCase())) {
@@ -1727,6 +1841,96 @@ export class WhatsAppProviderHandler {
     }
   }
 
+  // ─── Appointments: ingresos proyectados ────────────────
+
+  private async handleVerIngresosProyectados(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      return;
+    }
+
+    const now = toLocalTime(new Date(), tz);
+    let from: Date;
+    let to: Date;
+    let label: string;
+
+    const period = (data?.period || 'esta semana').toLowerCase().trim();
+
+    if (period === 'hoy') {
+      const range = getLocalDayRange(tz);
+      from = range.start;
+      to = range.end;
+      label = 'de hoy';
+    } else if (period === 'mañana') {
+      const tomorrow = new Date(now.getTime() + 86400000);
+      const range = getLocalDayRange(tz, tomorrow);
+      from = range.start;
+      to = range.end;
+      label = 'de mañana';
+    } else if (period.includes('mes')) {
+      from = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
+      to = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59));
+      label = 'del mes';
+    } else {
+      // Default: this week (Monday to Sunday)
+      const dayOfWeek = now.getDay();
+      const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() + mondayOffset);
+      monday.setHours(0, 0, 0, 0);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      sunday.setHours(23, 59, 59, 999);
+      from = monday;
+      to = sunday;
+      label = 'de la semana';
+    }
+
+    try {
+      const result = await this.appointmentsService.getProjectedIncome(providerProfileId, from, to);
+
+      if (result.count === 0) {
+        await this.sendAndRecord(
+          phone,
+          `No tienes ingresos proyectados ${label}. Las citas que agendes con monto estimado aparecerán aquí.`,
+        );
+        return;
+      }
+
+      let msg = `💰 *Ingresos proyectados ${label}:* *$${result.total.toLocaleString('es-MX')}*\n`;
+      msg += `(${result.count} cita${result.count > 1 ? 's' : ''} con precio estimado)\n`;
+
+      if (result.appointments.length <= 5) {
+        for (const apt of result.appointments) {
+          const dateStr = formatDate(apt.scheduledAt, tz);
+          const timeStr = formatTime(apt.scheduledAt, tz);
+          msg += `\n• *${dateStr}* ${timeStr}`;
+          if (apt.clientName) msg += ` — ${apt.clientName}`;
+          msg += `: *$${apt.estimatedPrice.toLocaleString('es-MX')}*`;
+        }
+      } else {
+        const top3 = result.appointments.slice(0, 3);
+        for (const apt of top3) {
+          const dateStr = formatDate(apt.scheduledAt, tz);
+          msg += `\n• *${dateStr}*`;
+          if (apt.clientName) msg += ` — ${apt.clientName}`;
+          msg += `: *$${apt.estimatedPrice.toLocaleString('es-MX')}*`;
+        }
+        msg += `\n... y ${result.appointments.length - 3} más.`;
+      }
+
+      await this.sendAndRecord(phone, msg);
+    } catch (error: any) {
+      this.logger.error(`Failed to get projected income: ${error.message}`);
+      await this.sendAndRecord(phone, 'No pude consultar los ingresos proyectados. Intenta de nuevo.');
+    }
+  }
+
   // ─── Appointments: modificar cita ──────────────────────
 
   private async handleModificarCita(
@@ -1788,6 +1992,9 @@ export class WhatsAppProviderHandler {
     if (data?.newDescription) updates.description = data.newDescription;
     if (data?.reminderMinutes !== undefined) {
       updates.reminderMinutes = data.reminderMinutes ? Number(data.reminderMinutes) : null;
+    }
+    if (data?.newEstimatedPrice !== undefined) {
+      updates.estimatedPrice = data.newEstimatedPrice ? Number(data.newEstimatedPrice) : null;
     }
 
     if (Object.keys(updates).length === 0) {

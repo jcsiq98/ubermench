@@ -67,6 +67,15 @@ export class IncomeService {
     });
   }
 
+  async getCustomSummary(
+    providerId: string,
+    from: Date,
+    to: Date,
+    period: string,
+  ): Promise<IncomeSummary> {
+    return this.getSummary(providerId, from, to, period);
+  }
+
   private async getSummary(
     providerId: string,
     from: Date,
