@@ -6,8 +6,8 @@ const functionTools = AI_TOOLS.filter((t) => t.type === 'function') as Array<
 >;
 
 describe('AI Tools — Function Calling definitions', () => {
-  it('should define 26 tools', () => {
-    expect(AI_TOOLS).toHaveLength(26);
+  it('should define 28 tools', () => {
+    expect(AI_TOOLS).toHaveLength(28);
   });
 
   it('every tool should have a valid name and description', () => {
@@ -125,5 +125,13 @@ describe('Tool parameter schemas', () => {
     const tool = findTool('cancelar_gasto_recurrente');
     const params = tool.function.parameters as any;
     expect(params.required).toContain('description');
+  });
+
+  it('buscar_en_historial requires query and keeps results small', () => {
+    const tool = findTool('buscar_en_historial');
+    const params = tool.function.parameters as any;
+    expect(params.required).toEqual(['query']);
+    expect(params.properties.includeAssistant.type).toBe('boolean');
+    expect(params.properties.limit.type).toBe('number');
   });
 });

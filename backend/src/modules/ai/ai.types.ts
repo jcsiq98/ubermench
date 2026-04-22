@@ -36,6 +36,25 @@ export interface AiResponse {
   data?: Record<string, any>;
 }
 
+export interface HistorySearchData {
+  query: string;
+  includeAssistant?: boolean;
+  limit?: number;
+}
+
+export interface HistorySearchSnippet {
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+}
+
+export interface HistorySearchResult {
+  query: string;
+  includeAssistant: boolean;
+  snippets: HistorySearchSnippet[];
+  totalResults: number;
+}
+
 export interface IncomeData {
   amount?: number;
   description?: string;

@@ -3,6 +3,8 @@ import { AiIntent } from './ai.types';
 
 type ChatCompletionTool = OpenAI.Chat.Completions.ChatCompletionTool;
 
+export const HISTORY_SEARCH_TOOL_NAME = 'buscar_en_historial';
+
 // ─── Tool-to-Intent mapping ─────────────────────────────────
 // Maps each tool name to the AiIntent + default data the handlers expect.
 // This keeps the handler switch in whatsapp-provider.handler.ts unchanged.
@@ -100,6 +102,9 @@ export const TOOL_TO_INTENT: Record<
   },
   ver_ingresos_proyectados: {
     intent: AiIntent.VER_INGRESOS_PROYECTADOS,
+  },
+  [HISTORY_SEARCH_TOOL_NAME]: {
+    intent: AiIntent.CONVERSACION_GENERAL,
   },
 };
 
@@ -344,6 +349,32 @@ export const AI_TOOLS: ChatCompletionTool[] = [
             description: 'Periodo a consultar. "esta semana" (default), "este mes", "hoy", "ayer", "la semana pasada", "el mes pasado", "marzo", "enero 2026", o un rango como "del 1 al 15 de abril". Si no se menciona periodo, NO incluir — se asume esta semana.',
           },
         },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: HISTORY_SEARCH_TOOL_NAME,
+      description:
+        'Buscar snippets en conversaciones pasadas del usuario actual cuando preguntan qué dijeron antes, qué se habló con un cliente, o qué quedó dicho en otro momento.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Texto clave a buscar en el historial. Puede ser nombre de cliente, tema, frase o dato recordado.',
+          },
+          includeAssistant: {
+            type: 'boolean',
+            description: 'Si true, incluye también mensajes previos del asistente. Por default busca solo mensajes del usuario.',
+          },
+          limit: {
+            type: 'number',
+            description: 'Máximo de snippets a devolver. Usa pocos resultados; default 5.',
+          },
+        },
+        required: ['query'],
       },
     },
   },

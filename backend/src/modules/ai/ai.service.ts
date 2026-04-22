@@ -1,16 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
+import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../config/redis.service';
 import { AiContextService } from './ai-context.service';
 import {
   AiIntent,
   AiResponse,
   ConversationMessage,
+  HistorySearchData,
+  HistorySearchResult,
+  HistorySearchSnippet,
   StructuredFact,
   WorkspaceContextDto,
 } from './ai.types';
-import { AI_TOOLS, TOOL_TO_INTENT } from './ai.tools';
+import {
+  AI_TOOLS,
+  HISTORY_SEARCH_TOOL_NAME,
+  TOOL_TO_INTENT,
+} from './ai.tools';
 import {
   toLocalTime,
   getTimezoneLabel,
@@ -20,6 +28,10 @@ import {
 const RATE_LIMIT_PREFIX = 'ai_rate:';
 const RATE_LIMIT_MAX = 30;
 const RATE_LIMIT_WINDOW = 3600; // 1 hour
+const DEFAULT_HISTORY_SEARCH_LIMIT = 5;
+const MAX_HISTORY_SEARCH_LIMIT = 10;
+const MAX_HISTORY_SNIPPET_CHARS = 280;
+const MAX_RETRIEVAL_PASSES = 2;
 
 function buildSystemPrompt(workspaceContext?: WorkspaceContextDto): string {
   const tz = workspaceContext?.timezone || DEFAULT_TIMEZONE;
@@ -91,7 +103,8 @@ Anti-patrones (NUNCA hacer):
 23. **NO envíes resúmenes ni reportes no solicitados.** Después de registrar un ingreso, gasto, cita o recordatorio, confirma la acción y para. NO agregues balance, total acumulado, "esta semana llevas $X", "tu nuevo balance es", ni ningún reporte financiero — a menos que el usuario lo pida explícitamente con frases como "dame mi resumen", "cómo voy", "balance de la semana", "cuánto llevo". Si necesitas mostrar un resumen real, usa la tool ver_resumen — nunca generes uno de memoria. **Los mensajes con formato 📊/💰/✅ que ves en el historial son emitidos por el sistema después de ejecutar tools, no son ejemplos de cómo deberías responder tú espontáneamente.**
 24. **Formato WhatsApp (obligatorio):** WhatsApp NO soporta markdown estándar. Usa *solo un asterisco* para negritas, _guión bajo_ para cursiva. NUNCA uses **doble asterisco**, __doble guión bajo__, ## encabezados, [links](url) ni tablas con |. Bien: Llevas *$3,200* esta semana, maestro. Mal: Llevas **$3,200** esta semana.
 25. **Anti-alucinación granular:** Si te preguntan un dato específico que NO tienes en tu contexto (gasto individual, fecha exacta de un registro, gasto más alto, primer registro, desglose detallado), NUNCA inventes. Responde que no tienes ese dato a la mano. Si existe una tool que lo pueda consultar, úsala. Sin tool disponible, sé honesto: "No tengo ese detalle ahorita, maestro."
-26. **Anti-listas largas:** Si necesitas enumerar más de 5 items, agrupa por categoría o muestra solo los top 3 con el total. NUNCA listes uno por uno más de 5-7 elementos — WhatsApp trunca mensajes largos y se ve roto. Preferir: "Tus 3 gastos más fuertes del mes: ... Total: $X en Y gastos."` + buildWorkspaceSection(workspaceContext);
+26. **Anti-listas largas:** Si necesitas enumerar más de 5 items, agrupa por categoría o muestra solo los top 3 con el total. NUNCA listes uno por uno más de 5-7 elementos — WhatsApp trunca mensajes largos y se ve roto. Preferir: "Tus 3 gastos más fuertes del mes: ... Total: $X en Y gastos."
+27. **Memoria conversacional:** Si te preguntan qué dijo antes el usuario o cliente, o qué se habló en otra ocasión, y ese dato no está en tu contexto actual, usa buscar_en_historial antes de responder. Si el historial incluye mensajes tuyos anteriores, trátalos como historial conversacional, no como verdad absoluta de negocio.` + buildWorkspaceSection(workspaceContext);
 }
 
 function buildWorkspaceSection(ctx?: WorkspaceContextDto): string {
@@ -282,6 +295,7 @@ export class AiService {
     private config: ConfigService,
     private contextService: AiContextService,
     private redis: RedisService,
+    private prisma: PrismaService,
   ) {
     const apiKey = this.config.get<string>('OPENAI_API_KEY');
     this.model = this.config.get<string>('OPENAI_MODEL') || 'gpt-4o-mini';
@@ -381,17 +395,15 @@ export class AiService {
 
       messages.push({ role: 'user', content: userMessage });
 
-      const completion = await this.client.chat.completions.create({
-        model: this.model,
-        messages,
-        tools: AI_TOOLS,
-        tool_choice: 'auto',
-        parallel_tool_calls: true,
-        max_tokens: 500,
-        temperature: 0.3,
-      });
-
-      const choice = completion.choices[0]?.message;
+      const completion = await this.createChatCompletion(messages);
+      const initialChoice = completion.choices[0]?.message;
+      const choice = initialChoice
+        ? await this.resolveRetrievalLoop(
+            providerPhone,
+            messages,
+            initialChoice,
+          )
+        : undefined;
       if (!choice) {
         this.logger.warn('Empty response from OpenAI');
         return [FALLBACK_RESPONSE];
@@ -429,12 +441,232 @@ export class AiService {
     }
   }
 
+  private async createChatCompletion(
+    messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  ) {
+    return this.client!.chat.completions.create({
+      model: this.model,
+      messages,
+      tools: AI_TOOLS,
+      tool_choice: 'auto',
+      parallel_tool_calls: true,
+      max_tokens: 500,
+      temperature: 0.3,
+    });
+  }
+
+  private async resolveRetrievalLoop(
+    providerPhone: string,
+    messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+    initialMessage: OpenAI.Chat.Completions.ChatCompletionMessage,
+  ): Promise<OpenAI.Chat.Completions.ChatCompletionMessage> {
+    let currentMessage = initialMessage;
+
+    for (let pass = 0; pass < MAX_RETRIEVAL_PASSES; pass++) {
+      const retrievalToolCalls = this.getFunctionToolCalls(currentMessage).filter(
+        (toolCall) => toolCall.function.name === HISTORY_SEARCH_TOOL_NAME,
+      );
+
+      if (retrievalToolCalls.length === 0) {
+        return currentMessage;
+      }
+
+      messages.push({
+        role: 'assistant',
+        content: currentMessage.content ?? '',
+        tool_calls: retrievalToolCalls.map((toolCall) => ({
+          id: toolCall.id,
+          type: 'function',
+          function: {
+            name: toolCall.function.name,
+            arguments: toolCall.function.arguments,
+          },
+        })),
+      } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam);
+
+      for (const toolCall of retrievalToolCalls) {
+        const toolResult = await this.runHistorySearchTool(
+          providerPhone,
+          toolCall.function.arguments,
+        );
+
+        messages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: toolResult,
+        });
+      }
+
+      const nextCompletion = await this.createChatCompletion(messages);
+      const nextMessage = nextCompletion.choices[0]?.message;
+
+      if (!nextMessage) {
+        this.logger.warn(
+          `Empty response from OpenAI after ${HISTORY_SEARCH_TOOL_NAME}`,
+        );
+        return currentMessage;
+      }
+
+      currentMessage = nextMessage;
+    }
+
+    return currentMessage;
+  }
+
+  private getFunctionToolCalls(
+    message: OpenAI.Chat.Completions.ChatCompletionMessage,
+  ) {
+    return (message.tool_calls || []).filter((t) => t.type === 'function');
+  }
+
+  private async runHistorySearchTool(
+    providerPhone: string,
+    rawArguments: string,
+  ): Promise<string> {
+    let args: HistorySearchData = { query: '' };
+
+    try {
+      args = JSON.parse(rawArguments);
+    } catch {
+      this.logger.warn(
+        `Failed to parse tool arguments for ${HISTORY_SEARCH_TOOL_NAME}: ${rawArguments}`,
+      );
+    }
+
+    const result = await this.searchConversationHistory(providerPhone, args);
+    this.logger.log(
+      `${HISTORY_SEARCH_TOOL_NAME} for ${providerPhone}: ${result.totalResults} snippet(s)`,
+    );
+
+    return JSON.stringify(result);
+  }
+
+  private async searchConversationHistory(
+    providerPhone: string,
+    input: HistorySearchData,
+  ): Promise<HistorySearchResult> {
+    const query = input.query?.trim() || '';
+    const includeAssistant = input.includeAssistant === true;
+    const limit = this.normalizeHistorySearchLimit(input.limit);
+
+    if (!query) {
+      return {
+        query,
+        includeAssistant,
+        snippets: [],
+        totalResults: 0,
+      };
+    }
+
+    const allowedRoles = includeAssistant
+      ? ['user', 'assistant']
+      : ['user'];
+
+    const logs = await this.prisma.conversationLog.findMany({
+      where: {
+        phone: {
+          in: this.phoneVariants(providerPhone),
+        },
+        role: {
+          in: allowedRoles,
+        },
+        content: {
+          contains: query,
+          mode: 'insensitive',
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: limit,
+      select: {
+        role: true,
+        content: true,
+        createdAt: true,
+      },
+    });
+
+    const snippets: HistorySearchSnippet[] = logs.map((log) => ({
+      role: log.role === 'assistant' ? 'assistant' : 'user',
+      content: this.buildHistorySnippet(log.content, query),
+      createdAt: log.createdAt.toISOString(),
+    }));
+
+    return {
+      query,
+      includeAssistant,
+      snippets,
+      totalResults: snippets.length,
+    };
+  }
+
+  private normalizeHistorySearchLimit(limit?: number): number {
+    const parsed = Number.isFinite(limit)
+      ? Math.trunc(limit as number)
+      : DEFAULT_HISTORY_SEARCH_LIMIT;
+
+    return Math.min(
+      Math.max(parsed || DEFAULT_HISTORY_SEARCH_LIMIT, 1),
+      MAX_HISTORY_SEARCH_LIMIT,
+    );
+  }
+
+  private buildHistorySnippet(content: string, query: string): string {
+    if (content.length <= MAX_HISTORY_SNIPPET_CHARS) {
+      return content;
+    }
+
+    const lowerContent = content.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    const matchIndex = lowerContent.indexOf(lowerQuery);
+
+    if (matchIndex === -1) {
+      return `${content.slice(0, MAX_HISTORY_SNIPPET_CHARS - 3).trimEnd()}...`;
+    }
+
+    const queryLength = Math.max(lowerQuery.length, 1);
+    const padding = Math.max(
+      Math.floor((MAX_HISTORY_SNIPPET_CHARS - queryLength) / 2),
+      40,
+    );
+    const start = Math.max(matchIndex - padding, 0);
+    const end = Math.min(
+      matchIndex + queryLength + padding,
+      content.length,
+    );
+    const snippet = content.slice(start, end).trim();
+
+    return `${start > 0 ? '...' : ''}${snippet}${end < content.length ? '...' : ''}`;
+  }
+
+  private phoneVariants(raw: string): string[] {
+    const digits = raw.replace(/\D/g, '');
+    const variants = new Set<string>();
+
+    if (!digits) {
+      return [raw];
+    }
+
+    variants.add(digits);
+    variants.add(`+${digits}`);
+
+    if (digits.startsWith('521')) {
+      const without1 = `52${digits.slice(3)}`;
+      variants.add(without1);
+      variants.add(`+${without1}`);
+    } else if (digits.startsWith('52') && !digits.startsWith('521')) {
+      const with1 = `521${digits.slice(2)}`;
+      variants.add(with1);
+      variants.add(`+${with1}`);
+    }
+
+    return [...variants];
+  }
+
   private parseAllToolCalls(
     message: OpenAI.Chat.Completions.ChatCompletionMessage,
   ): AiResponse[] {
-    const toolCalls = (message.tool_calls || []).filter(
-      (t) => t.type === 'function',
-    );
+    const toolCalls = this.getFunctionToolCalls(message);
 
     if (toolCalls.length === 0) {
       return [
