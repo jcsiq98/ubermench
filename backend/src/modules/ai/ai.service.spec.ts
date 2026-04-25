@@ -240,3 +240,208 @@ describe('AiService retrieval loop', () => {
     ]);
   });
 });
+
+describe('AiService — canonical tool-call dedupe (Cap. 44 v3)', () => {
+  let service: AiService;
+  let contextService: { getHistory: jest.Mock; addMessage: jest.Mock };
+  let redis: { get: jest.Mock; set: jest.Mock; incr: jest.Mock };
+  let prisma: { conversationLog: { findMany: jest.Mock } };
+
+  beforeEach(() => {
+    mockCreate.mockReset();
+    (OpenAI as unknown as jest.Mock).mockClear();
+
+    contextService = {
+      getHistory: jest.fn().mockResolvedValue([]),
+      addMessage: jest.fn().mockResolvedValue(undefined),
+    };
+    redis = {
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue(undefined),
+      incr: jest.fn().mockResolvedValue(1),
+    };
+    prisma = {
+      conversationLog: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+
+    const config = {
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'test-key';
+        if (key === 'OPENAI_MODEL') return 'test-model';
+        return undefined;
+      }),
+    } as unknown as ConfigService;
+
+    service = new AiService(
+      config,
+      contextService as unknown as AiContextService,
+      redis as any,
+      prisma as any,
+    );
+  });
+
+  it('collapses two identical registrar_gasto calls into one', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: {
+                  name: 'registrar_gasto',
+                  arguments: JSON.stringify({
+                    amount: 500,
+                    description: 'material',
+                  }),
+                },
+              },
+              {
+                id: 'call_2',
+                type: 'function',
+                function: {
+                  name: 'registrar_gasto',
+                  arguments: JSON.stringify({
+                    amount: 500,
+                    description: 'material',
+                  }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const result = await service.processMessage(
+      '+526500000000',
+      'gasté 500 en material',
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].intent).toBe(AiIntent.REGISTRAR_GASTO);
+    expect(result[0].data).toMatchObject({
+      amount: 500,
+      description: 'material',
+    });
+  });
+
+  it('keeps two distinct registrar_gasto calls intact', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: {
+                  name: 'registrar_gasto',
+                  arguments: JSON.stringify({
+                    amount: 500,
+                    description: 'material',
+                  }),
+                },
+              },
+              {
+                id: 'call_2',
+                type: 'function',
+                function: {
+                  name: 'registrar_gasto',
+                  arguments: JSON.stringify({
+                    amount: 200,
+                    description: 'gasolina',
+                  }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const result = await service.processMessage(
+      '+526500000000',
+      'gasté 500 en material y 200 en gasolina',
+    );
+    expect(result).toHaveLength(2);
+    expect(result[0].data.amount).toBe(500);
+    expect(result[1].data.amount).toBe(200);
+  });
+
+  it('treats whitespace and case differences as duplicates', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: {
+                  name: 'registrar_gasto',
+                  arguments: JSON.stringify({
+                    amount: 500,
+                    description: 'Material  ',
+                  }),
+                },
+              },
+              {
+                id: 'call_2',
+                type: 'function',
+                function: {
+                  name: 'registrar_gasto',
+                  arguments: JSON.stringify({
+                    amount: 500,
+                    description: 'material',
+                  }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const result = await service.processMessage(
+      '+526500000000',
+      'gasté 500 en material',
+    );
+    expect(result).toHaveLength(1);
+  });
+});
+
+describe('AiService — recovery prompt (Cap. 44 v3)', () => {
+  const prompt = AiService.buildRecoveryPrompt();
+
+  it('lists the 3 recovery tools by name', () => {
+    expect(prompt).toContain('registrar_gasto');
+    expect(prompt).toContain('registrar_ingreso');
+    expect(prompt).toContain('necesita_aclaracion');
+  });
+
+  it('disambiguates "me cobraron" → registrar_gasto (Cap. 36, re-stated)', () => {
+    expect(prompt).toMatch(/me cobraron[\s\S]*registrar_gasto/);
+    expect(prompt).toMatch(/PAG[ÓO]/);
+  });
+
+  it('disambiguates "cobré" / "me pagaron" → registrar_ingreso', () => {
+    expect(prompt).toMatch(/cobré[\s\S]*registrar_ingreso/);
+    expect(prompt).toContain('me pagaron');
+  });
+
+  it('forbids free text and fake confirmations', () => {
+    expect(prompt).toContain('NO respondas con texto libre');
+    expect(prompt).toContain('NO confirmes con "registrado" sin llamar la tool');
+  });
+
+  it('requires exactly one tool call', () => {
+    expect(prompt).toContain('EXACTAMENTE UNA');
+  });
+});

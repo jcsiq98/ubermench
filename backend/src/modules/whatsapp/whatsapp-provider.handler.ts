@@ -7,9 +7,9 @@ import { WhatsAppOnboardingHandler } from './whatsapp-onboarding.handler';
 import { BookingsGateway } from '../_marketplace/bookings/bookings.gateway';
 import { MessagesService } from '../_marketplace/messages/messages.service';
 import { RatingsService } from '../_marketplace/ratings/ratings.service';
-import { AiService } from '../ai/ai.service';
+import { AiService, RawToolCall } from '../ai/ai.service';
 import { AiContextService } from '../ai/ai-context.service';
-import { AiIntent, WorkspaceConfigData } from '../ai/ai.types';
+import { AiIntent, AiResponse, WorkspaceConfigData } from '../ai/ai.types';
 import { IncomeService } from '../income/income.service';
 import { ExpenseService } from '../expense/expense.service';
 import { RecurringExpenseService } from '../expense/recurring-expense.service';
@@ -603,7 +603,34 @@ export class WhatsAppProviderHandler {
         workspaceContext,
       );
 
-      for (const aiResponse of aiResponses) {
+      // ─── Financial firewall (Cap. 44 v3) ──────────────────────
+      // Intercepts fake confirmations and invented financial figures
+      // BEFORE the normal intent switch sends the LLM text to the user.
+      const firewalled = await this.applyFinancialFirewall(
+        phone,
+        text,
+        aiResponses,
+        providerProfileId,
+        tz,
+      );
+      if (firewalled === null) {
+        if (providerProfileId) {
+          this.providerModelService
+            .invalidate(providerProfileId)
+            .catch(() => {});
+          this.maybeExtractLearnedFacts(
+            phone,
+            providerProfileId,
+            workspaceContext,
+          ).catch((err: unknown) => {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            this.logger.warn(`Learned facts extraction failed: ${errMsg}`);
+          });
+        }
+        return;
+      }
+
+      for (const aiResponse of firewalled) {
         switch (aiResponse.intent) {
           case AiIntent.REGISTRAR_INGRESO:
             await this.handleRegistrarIngreso(phone, aiResponse.data, providerProfileId, tz);
@@ -713,7 +740,7 @@ export class WhatsAppProviderHandler {
           AiIntent.CREAR_LINK_COBRO,
           AiIntent.ACTIVAR_COBROS,
         ];
-        const hasMutation = aiResponses.some((r) =>
+        const hasMutation = firewalled.some((r) =>
           dataMutatingIntents.includes(r.intent),
         );
         if (hasMutation) {
@@ -3600,5 +3627,355 @@ export class WhatsAppProviderHandler {
       );
     }
   }
-}
 
+  // ─── Financial firewall helpers (Cap. 44 v3) ──────────────────────
+  // These guard against two LLM failure modes that have hit production:
+  //  (a) fake confirmations: the LLM says "gasto registrado" but never
+  //      called registrar_gasto, so nothing is in the DB.
+  //  (b) invented financial figures: the LLM answers "totalízame" with
+  //      a number from its memory of the conversation instead of calling
+  //      ver_resumen against the DB.
+  // The firewall is post-LLM and runs BEFORE the intent switch.
+
+  /**
+   * Detects LLM text that looks like a financial action confirmation.
+   * Uses a two-signal design (verb participle + financial noun OR money
+   * amount nearby) to avoid false positives like a generic "Anotado!"
+   * confirming an appointment instead of a financial mutation.
+   */
+  private looksLikeFinancialConfirmation(text: string): boolean {
+    if (!text) return false;
+    const normalized = text.toLowerCase();
+    const finNoun = '(gasto|ingreso|cobro|pago)';
+    const verb = '(registrad[oa]s?|anotad[oa]s?|guardad[oa]s?)';
+    const patterns: RegExp[] = [
+      new RegExp(`${verb}\\s+(tu|el|un|los?)\\s+${finNoun}`),
+      new RegExp(`${finNoun}s?\\s+${verb}`),
+      /✅\s*\$\s*\d/,
+      new RegExp(`✅[^\\n]{0,40}${finNoun}`),
+      new RegExp(`\\$\\s*\\d[\\d,\\.]*[^\\n]{0,30}${verb}`),
+      new RegExp(`${verb}[^\\n]{0,30}\\$\\s*\\d`),
+    ];
+    return patterns.some((p) => p.test(normalized));
+  }
+
+  /**
+   * Detects whether the user's original message describes a financial
+   * action. Used together with looksLikeFinancialConfirmation so we
+   * only retry recovery when both signals agree — avoids triggering
+   * the firewall on a benign "ok, anotado" exchange.
+   */
+  private userMessageHasFinancialVerb(userMessage: string): boolean {
+    if (!userMessage) return false;
+    const normalized = this.normalizeForKeywords(userMessage);
+    const verbs = [
+      'gaste',
+      'gasto en',
+      'pague',
+      'compre',
+      'invertir',
+      'cobre',
+      'me cobraron',
+      'me pagaron',
+      'recibi',
+      'me dieron',
+      'me deposit',
+    ];
+    return verbs.some((v) => normalized.includes(v));
+  }
+
+  /**
+   * Detects a monetary value (e.g. "$3,200", "5000 pesos", "3 mil")
+   * inside an LLM response. Used to flag suspect "invented figure"
+   * answers to read queries.
+   */
+  private looksLikeMonetaryAnswer(text: string): boolean {
+    if (!text) return false;
+    const patterns: RegExp[] = [
+      /\$\s*\d[\d,.]*/,
+      /\b\d[\d,.]*\s*(pesos?|mxn|usd)\b/i,
+      /\b\d+\s*mil\b/i,
+    ];
+    return patterns.some((p) => p.test(text));
+  }
+
+  /**
+   * Classifies a financial *read* query. Uses an extensible enum (not
+   * a boolean) so future read shapes — by category, by client, by date
+   * range — can slot in without a second refactor. Unsupported is
+   * checked before summary so "cuál fue mi gasto mayor" doesn't get
+   * tangentially answered with a generic resumen.
+   */
+  private classifyFinancialRead(
+    userMessage: string,
+  ): 'summary' | 'unsupportedAggregate' | 'notFinancialRead' {
+    if (!userMessage) return 'notFinancialRead';
+    const normalized = this.normalizeForKeywords(userMessage);
+
+    const unsupportedHints = [
+      'gasto mayor',
+      'mayor gasto',
+      'gasto mas grande',
+      'mas grande gasto',
+      'gasto mas alto',
+      'gasto minimo',
+      'gasto menor',
+      'menor gasto',
+      'ingreso mayor',
+      'mayor ingreso',
+      'ingreso mas grande',
+      'ingreso mas alto',
+      'ingreso minimo',
+      'ingreso menor',
+      'cobro mayor',
+      'mayor cobro',
+      'cobro mas grande',
+      'promedio de gasto',
+      'gasto promedio',
+      'promedio de ingreso',
+      'ingreso promedio',
+      'cuantos gastos',
+      'cuantos ingresos',
+      'cuantos cobros',
+      'cuantas veces',
+      'gastos por categoria',
+      'gastos por cliente',
+      'ingresos por categoria',
+      'ingresos por cliente',
+    ];
+    if (unsupportedHints.some((h) => normalized.includes(h))) {
+      return 'unsupportedAggregate';
+    }
+    if (/\btop\s+\d+\s+(gasto|ingreso|cobro)s?\b/.test(normalized)) {
+      return 'unsupportedAggregate';
+    }
+
+    const summaryHints = [
+      'totaliza',
+      'totalizame',
+      'total hasta',
+      'total de',
+      'el acumulado',
+      'acumulado',
+      'cuanto llevo',
+      'cuanto he gastado',
+      'cuanto he ganado',
+      'cuanto he cobrado',
+      'cuanto he generado',
+      'como voy',
+      'resumen',
+      'balance',
+      'estado de cuenta',
+      'estado financiero',
+      'cuanto va',
+      'sumame',
+      'suma los',
+      'sumalos',
+    ];
+    if (summaryHints.some((h) => normalized.includes(h))) {
+      return 'summary';
+    }
+
+    return 'notFinancialRead';
+  }
+
+  /**
+   * Honest "feature gap" answer. Better to admit it than to reroute
+   * to ver_resumen, which would tangentially answer the wrong question
+   * and erode trust.
+   */
+  private featureGapMessage(): string {
+    return (
+      'Ese detalle todavía no lo puedo sacar, maestro. Por ahora puedo ' +
+      'darte el resumen general si me dices "resumen". Estamos trabajando ' +
+      'para soportar consultas más específicas.'
+    );
+  }
+
+  /**
+   * Maps the recovery tool's `razon` enum to a clarifying question.
+   * Centralized so the copy stays consistent and easy to tweak.
+   */
+  private clarifyMessageForReason(
+    razon: 'falta_monto' | 'falta_tipo' | 'mensaje_ambiguo',
+  ): string {
+    switch (razon) {
+      case 'falta_monto':
+        return '¿De cuánto fue, maestro?';
+      case 'falta_tipo':
+        return '¿Eso fue un gasto o un cobro?';
+      case 'mensaje_ambiguo':
+      default:
+        return 'No me quedó claro, ¿me lo repites?';
+    }
+  }
+
+  /**
+   * Dedicated parser for the recovery turn. Intentionally separate from
+   * parseAllToolCalls because that helper relies on TOOL_TO_INTENT,
+   * which does not (and must not) include `necesita_aclaracion`.
+   */
+  private parseRecoveryToolCall(toolCalls: RawToolCall[]):
+    | { kind: 'expense'; data: Record<string, any> }
+    | { kind: 'income'; data: Record<string, any> }
+    | {
+        kind: 'clarify';
+        razon: 'falta_monto' | 'falta_tipo' | 'mensaje_ambiguo';
+      }
+    | { kind: 'no_tool_called' } {
+    if (!toolCalls || toolCalls.length === 0) {
+      return { kind: 'no_tool_called' };
+    }
+
+    const call = toolCalls[0];
+    let args: Record<string, unknown> = {};
+    try {
+      args = call.arguments
+        ? (JSON.parse(call.arguments) as Record<string, unknown>)
+        : {};
+    } catch {
+      args = {};
+    }
+
+    if (call.name === 'registrar_gasto') {
+      return { kind: 'expense', data: args as Record<string, any> };
+    }
+    if (call.name === 'registrar_ingreso') {
+      return { kind: 'income', data: args as Record<string, any> };
+    }
+    if (call.name === 'necesita_aclaracion') {
+      const razon = args.razon;
+      if (
+        razon === 'falta_monto' ||
+        razon === 'falta_tipo' ||
+        razon === 'mensaje_ambiguo'
+      ) {
+        return { kind: 'clarify', razon };
+      }
+      return { kind: 'clarify', razon: 'mensaje_ambiguo' };
+    }
+    return { kind: 'no_tool_called' };
+  }
+
+  /**
+   * Returns the (possibly modified) AiResponse list to continue with,
+   * or `null` if the firewall handled the message itself and the caller
+   * should stop processing.
+   *
+   * Two checks, in order:
+   *   1. Fake confirmation: single CONVERSACION_GENERAL whose text
+   *      claims a financial mutation while the user message clearly
+   *      described one. We retry against a tiny safe tool subset.
+   *   2. Invented financial figure: single CONVERSACION_GENERAL with
+   *      a $ amount in response to a financial read query. Reroute to
+   *      ver_resumen for "summary" intent, or send the honest
+   *      feature-gap message for "unsupportedAggregate".
+   */
+  private async applyFinancialFirewall(
+    phone: string,
+    userMessage: string,
+    aiResponses: AiResponse[],
+    providerProfileId: string | undefined,
+    tz: string,
+  ): Promise<AiResponse[] | null> {
+    if (!aiResponses || aiResponses.length !== 1) return aiResponses;
+    const sole = aiResponses[0];
+    if (sole.intent !== AiIntent.CONVERSACION_GENERAL) return aiResponses;
+
+    const llmText = sole.message || '';
+
+    // ── (1) Fake-confirmation check ────────────────────────────
+    if (
+      this.looksLikeFinancialConfirmation(llmText) &&
+      this.userMessageHasFinancialVerb(userMessage)
+    ) {
+      this.logger.warn(
+        `[firewall] fake_confirmation_detected phone=${phone} text=${llmText.slice(0, 80)}`,
+      );
+      const recovery = await this.aiService.recoverFromFakeConfirmation(
+        phone,
+        userMessage,
+      );
+      const parsed = this.parseRecoveryToolCall(recovery.toolCalls);
+
+      if (parsed.kind === 'expense') {
+        this.logger.log(
+          `[firewall] fake_confirmation_recovered_as_expense phone=${phone}`,
+        );
+        await this.handleRegistrarGasto(
+          phone,
+          parsed.data,
+          providerProfileId,
+          tz,
+        );
+        return null;
+      }
+      if (parsed.kind === 'income') {
+        this.logger.log(
+          `[firewall] fake_confirmation_recovered_as_income phone=${phone}`,
+        );
+        await this.handleRegistrarIngreso(
+          phone,
+          parsed.data,
+          providerProfileId,
+          tz,
+        );
+        return null;
+      }
+      if (parsed.kind === 'clarify') {
+        this.logger.log(
+          `[firewall] fake_confirmation_unrecovered_needs_clarification phone=${phone} razon=${parsed.razon}`,
+        );
+        await this.sendAndRecord(
+          phone,
+          this.clarifyMessageForReason(parsed.razon),
+          AiIntent.CONVERSACION_GENERAL,
+        );
+        return null;
+      }
+
+      this.logger.warn(
+        `[firewall] fake_confirmation_unrecovered_no_tool_called phone=${phone}`,
+      );
+      await this.sendAndRecord(
+        phone,
+        this.clarifyMessageForReason('mensaje_ambiguo'),
+        AiIntent.CONVERSACION_GENERAL,
+      );
+      return null;
+    }
+
+    // ── (2) Invented-figure check ──────────────────────────────
+    if (this.looksLikeMonetaryAnswer(llmText)) {
+      const klass = this.classifyFinancialRead(userMessage);
+      if (klass === 'summary') {
+        this.logger.warn(
+          `[firewall] summary_rerouted phone=${phone} suspect=${llmText.slice(0, 80)}`,
+        );
+        if (providerProfileId) {
+          await this.handleVerResumen(phone, {}, providerProfileId, tz);
+        } else {
+          await this.sendAndRecord(
+            phone,
+            'Para ver tu resumen necesito tu perfil configurado. Escribe "menu".',
+            AiIntent.CONVERSACION_GENERAL,
+          );
+        }
+        return null;
+      }
+      if (klass === 'unsupportedAggregate') {
+        this.logger.warn(
+          `[firewall] feature_gap phone=${phone} query=${userMessage.slice(0, 80)}`,
+        );
+        await this.sendAndRecord(
+          phone,
+          this.featureGapMessage(),
+          AiIntent.CONVERSACION_GENERAL,
+        );
+        return null;
+      }
+    }
+
+    return aiResponses;
+  }
+}

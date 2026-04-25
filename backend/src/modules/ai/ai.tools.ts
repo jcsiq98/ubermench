@@ -818,3 +818,59 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     },
   },
 ];
+
+// ─── Recovery-only tools (Cap. 44 v3) ───────────────────────
+// These tools live OUTSIDE AI_TOOLS on purpose. They are only used by the
+// "fake confirmation" firewall in whatsapp-provider.handler.ts when the LLM
+// emits a financial confirmation without an actual tool call. Adding them
+// to AI_TOOLS would let the LLM call `necesita_aclaracion` in normal turns,
+// which is not what we want — it should only be a safe fallback during a
+// forced retry with a restricted subset.
+
+export const NECESITA_ACLARACION_TOOL_NAME = 'necesita_aclaracion';
+
+export const NECESITA_ACLARACION_TOOL: ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: NECESITA_ACLARACION_TOOL_NAME,
+    description:
+      'Usar cuando el mensaje del usuario menciona una acción financiera (gasto o cobro) pero no contiene los datos suficientes para registrarla con seguridad.',
+    parameters: {
+      type: 'object',
+      properties: {
+        razon: {
+          type: 'string',
+          enum: ['falta_monto', 'falta_tipo', 'mensaje_ambiguo'],
+          description:
+            'Por qué no se puede registrar: falta_monto (no hay cantidad clara), falta_tipo (no se sabe si es gasto o ingreso), mensaje_ambiguo (cualquier otra duda).',
+        },
+      },
+      required: ['razon'],
+    },
+  },
+};
+
+/**
+ * Tool subset used ONLY by the fake-confirmation recovery in the WhatsApp
+ * provider handler. Returns a fresh array so callers can pass it directly
+ * to OpenAI without aliasing the source. Intentionally tiny: forcing
+ * tool_choice:'required' against the 28-tool global set would risk picking
+ * a destructive tool (borrar_ultimo_gasto, cancelar_cita) on a recovery
+ * path; with this subset, the worst case is `necesita_aclaracion`.
+ */
+export function getFinancialRecoveryToolSubset(): ChatCompletionTool[] {
+  const registrarIngreso = AI_TOOLS.find(
+    (t) => t.type === 'function' && t.function.name === 'registrar_ingreso',
+  );
+  const registrarGasto = AI_TOOLS.find(
+    (t) => t.type === 'function' && t.function.name === 'registrar_gasto',
+  );
+
+  if (!registrarIngreso || !registrarGasto) {
+    throw new Error(
+      'getFinancialRecoveryToolSubset: registrar_ingreso/registrar_gasto missing from AI_TOOLS',
+    );
+  }
+
+  return [registrarGasto, registrarIngreso, NECESITA_ACLARACION_TOOL];
+}

@@ -18,6 +18,7 @@ import {
   AI_TOOLS,
   HISTORY_SEARCH_TOOL_NAME,
   TOOL_TO_INTENT,
+  getFinancialRecoveryToolSubset,
 } from './ai.tools';
 import {
   toLocalTime,
@@ -76,6 +77,9 @@ Anti-patrones (NUNCA hacer):
 - Listar 3+ emojis en un mensaje.
 - Dar explicaciones no solicitadas de cómo funcionas.
 - Cerrar con frases motivacionales genéricas ("¡Éxito!", "¡Sigue así! 💪").
+
+## Regla operacional crítica
+Si emites una confirmación de acción ("registrado", "anotado", "✅", "$X guardado", "listo"), DEBE existir una tool call asociada en ESTE mismo turno. Sin tool call ejecutada, no hay confirmación.
 
 ## Reglas
 1. Siempre responde en español mexicano.
@@ -141,7 +145,7 @@ function buildWorkspaceSection(ctx?: WorkspaceContextDto): string {
     const patternLines = buildPatternLines(model);
     if (patternLines.length > 0) {
       sections.push(
-        '## Patrones de negocio (calculados de sus datos)\n' +
+        '## Patrones de negocio (resumen parcial — NO son totales auditables. Para totales, sumas, máximos o cifras específicas USA la tool ver_resumen)\n' +
           patternLines.join('\n'),
       );
     }
@@ -285,6 +289,15 @@ const FALLBACK_RESPONSE: AiResponse = {
   data: {},
 };
 
+/**
+ * Lightweight projection of an OpenAI tool call so consumers don't need
+ * to import OpenAI types. Used by the fake-confirmation recovery path.
+ */
+export interface RawToolCall {
+  name: string;
+  arguments: string;
+}
+
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
@@ -409,7 +422,7 @@ export class AiService {
         return [FALLBACK_RESPONSE];
       }
 
-      const parsed = this.parseAllToolCalls(choice);
+      const parsed = this.parseAllToolCalls(choice, providerPhone);
 
       await this.contextService.addMessage(providerPhone, 'user', userMessage, parsed[0].intent);
 
@@ -453,6 +466,98 @@ export class AiService {
       max_tokens: 500,
       temperature: 0.3,
     });
+  }
+
+  /**
+   * System prompt for the recovery turn. Exposed as a static method so
+   * it can be asserted on directly in tests — this retry does NOT pass
+   * through the global system prompt, so it cannot inherit any rule
+   * defined there. In particular, the Cap. 36 disambiguation
+   * "me cobraron" → registrar_gasto must be re-stated here.
+   */
+  static buildRecoveryPrompt(): string {
+    return [
+      'Estás en un modo de recuperación. El usuario mandó un mensaje que parece describir un movimiento de dinero (gasto pagado o cobro recibido), pero no se registró todavía.',
+      'Llama EXACTAMENTE UNA de estas tools:',
+      '- registrar_gasto: si el usuario describe que pagó, gastó, compró, o le cobraron dinero (es decir, salió dinero de su bolsa).',
+      '- registrar_ingreso: si el usuario describe que cobró, le pagaron, recibió, o le depositaron dinero (es decir, entró dinero a su bolsa).',
+      '- necesita_aclaracion: si falta el monto, no se sabe si es gasto o ingreso, o el mensaje es ambiguo.',
+      '',
+      'Reglas críticas de disambiguación (no inferir al revés):',
+      '- "me cobraron", "me cobró", "me cobraron por material/servicio/renta" = registrar_gasto, porque el usuario PAGÓ dinero.',
+      '- "cobré", "ya cobré", "me pagaron", "me depositaron" = registrar_ingreso, porque el usuario RECIBIÓ dinero.',
+      '- "pagué", "gasté", "compré" = registrar_gasto.',
+      '',
+      'NO respondas con texto libre. NO confirmes con "registrado" sin llamar la tool.',
+    ].join('\n');
+  }
+
+  /**
+   * Re-prompt OpenAI with a tightly restricted tool subset to recover
+   * from a "fake confirmation" — the LLM emitted "Gasto registrado"
+   * as text without actually calling registrar_gasto. We force
+   * tool_choice:'required' but only against
+   * {registrar_gasto, registrar_ingreso, necesita_aclaracion} so the
+   * LLM cannot pick a destructive tool by accident (Cap. 44 v3).
+   *
+   * Returns raw tool calls; the WhatsApp handler is responsible for
+   * parsing them with its own dedicated parser
+   * (parseRecoveryToolCall) — we do NOT route through
+   * parseAllToolCalls because that would pull the global
+   * TOOL_TO_INTENT mapping which does not include necesita_aclaracion.
+   */
+  async recoverFromFakeConfirmation(
+    providerPhone: string,
+    userMessage: string,
+  ): Promise<{ toolCalls: RawToolCall[]; text: string }> {
+    if (!this.client) {
+      return { toolCalls: [], text: '' };
+    }
+
+    const recoveryTools = getFinancialRecoveryToolSubset();
+    const systemMessage = AiService.buildRecoveryPrompt();
+
+    try {
+      const completion = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          { role: 'system', content: systemMessage },
+          { role: 'user', content: userMessage },
+        ],
+        tools: recoveryTools,
+        tool_choice: 'required',
+        parallel_tool_calls: false,
+        max_tokens: 200,
+        temperature: 0.1,
+      });
+
+      const message = completion.choices[0]?.message;
+      const rawToolCalls = (message?.tool_calls || []).filter(
+        (t) => t.type === 'function',
+      );
+
+      const toolCalls: RawToolCall[] = rawToolCalls.map((t) => ({
+        name: t.function.name,
+        arguments: t.function.arguments,
+      }));
+
+      this.logger.log(
+        `Recovery attempt for ${providerPhone}: ${toolCalls.length} tool(s) — ${
+          toolCalls.map((t) => t.name).join(', ') || 'none'
+        }`,
+      );
+
+      return {
+        toolCalls,
+        text: message?.content || '',
+      };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `recoverFromFakeConfirmation failed for ${providerPhone}: ${errMsg}`,
+      );
+      return { toolCalls: [], text: '' };
+    }
   }
 
   private async resolveRetrievalLoop(
@@ -665,6 +770,7 @@ export class AiService {
 
   private parseAllToolCalls(
     message: OpenAI.Chat.Completions.ChatCompletionMessage,
+    providerPhone: string,
   ): AiResponse[] {
     const toolCalls = this.getFunctionToolCalls(message);
 
@@ -678,7 +784,14 @@ export class AiService {
       ];
     }
 
-    const responses: AiResponse[] = [];
+    type ParsedCall = {
+      toolName: string;
+      mapping: (typeof TOOL_TO_INTENT)[string];
+      args: Record<string, any>;
+      canonicalKey: string;
+    };
+
+    const parsedCalls: ParsedCall[] = [];
 
     for (const toolCall of toolCalls) {
       const toolName = toolCall.function.name;
@@ -698,12 +811,21 @@ export class AiService {
         );
       }
 
-      responses.push({
-        intent: mapping.intent,
-        message: message.content || '',
-        data: { ...mapping.defaultData, ...args },
+      parsedCalls.push({
+        toolName,
+        mapping,
+        args,
+        canonicalKey: this.canonicalToolKey(toolName, args),
       });
     }
+
+    const dedupedCalls = this.dedupeToolCalls(parsedCalls, providerPhone);
+
+    const responses: AiResponse[] = dedupedCalls.map((c) => ({
+      intent: c.mapping.intent,
+      message: message.content || '',
+      data: { ...c.mapping.defaultData, ...c.args },
+    }));
 
     return responses.length > 0
       ? responses
@@ -714,6 +836,81 @@ export class AiService {
             data: {},
           },
         ];
+  }
+
+  /**
+   * Build a canonical key for a tool call so we can dedupe identical
+   * parallel emissions in the same turn (Cap. 44 v3). Key shape:
+   *   toolName + amount + description normalizada + date + category
+   * Falls back to a sorted projection of any other args so we don't
+   * silently collapse two calls that differ only in non-financial fields.
+   */
+  private canonicalToolKey(
+    toolName: string,
+    args: Record<string, any>,
+  ): string {
+    const normalize = (v: unknown): string => {
+      if (v === null || v === undefined) return '';
+      const s =
+        typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+          ? String(v)
+          : JSON.stringify(v);
+      return s.trim().toLowerCase().replace(/\s+/g, ' ');
+    };
+
+    const known = ['amount', 'description', 'date', 'category'];
+    const knownPart = known.map((k) => `${k}=${normalize(args[k])}`).join('|');
+
+    const extraKeys = Object.keys(args)
+      .filter((k) => !known.includes(k))
+      .sort();
+    const extraPart = extraKeys.map((k) => `${k}=${normalize(args[k])}`).join('|');
+
+    return `toolName=${toolName}|${knownPart}${extraPart ? `|${extraPart}` : ''}`;
+  }
+
+  /**
+   * Drop duplicate tool calls that share a canonical key. Logs each
+   * dedupe event so we can see in production whether the LLM is
+   * actually emitting duplicates often, and whether legitimate
+   * "two identical gastos" cases are being collapsed.
+   */
+  private dedupeToolCalls<T extends { toolName: string; canonicalKey: string }>(
+    parsedCalls: T[],
+    providerPhone: string,
+  ): T[] {
+    if (parsedCalls.length <= 1) return parsedCalls;
+
+    const seen = new Map<string, { firstIndex: number; count: number }>();
+    const kept: T[] = [];
+
+    parsedCalls.forEach((call, idx) => {
+      const existing = seen.get(call.canonicalKey);
+      if (existing) {
+        existing.count += 1;
+        return;
+      }
+      seen.set(call.canonicalKey, { firstIndex: idx, count: 1 });
+      kept.push(call);
+    });
+
+    for (const [canonicalKey, info] of seen.entries()) {
+      if (info.count > 1) {
+        const duplicateCount = info.count - 1;
+        const call = parsedCalls[info.firstIndex];
+        this.logger.log(
+          JSON.stringify({
+            event: 'tool_call_deduped',
+            providerPhone,
+            toolName: call.toolName,
+            canonicalKey,
+            duplicateCount,
+          }),
+        );
+      }
+    }
+
+    return kept;
   }
 
   /**
