@@ -2,6 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentMethod, Prisma } from '@prisma/client';
 import { getWeekStartUtc, getMonthStartUtc, getLocalDayRange, DEFAULT_TIMEZONE } from '../../common/utils/timezone.utils';
+import {
+  FINANCIAL_EVENT,
+  emitFinancialEvent,
+} from '../../common/utils/financial-audit';
 
 export interface CreateIncomeDto {
   providerId: string;
@@ -10,6 +14,12 @@ export interface CreateIncomeDto {
   paymentMethod?: PaymentMethod;
   clientName?: string;
   date?: Date;
+  /**
+   * Hash of the user message that triggered this write (Cap. 45 — M0).
+   * Optional so legacy callers don't break, but every WhatsApp-driven
+   * call should pass it so the integrity endpoint can join the chain.
+   */
+  sourceTextHash?: string;
 }
 
 export interface IncomeSummary {
@@ -26,22 +36,51 @@ export class IncomeService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateIncomeDto) {
-    const income = await this.prisma.income.create({
-      data: {
-        providerId: dto.providerId,
-        amount: new Prisma.Decimal(dto.amount),
-        description: dto.description,
-        paymentMethod: dto.paymentMethod || PaymentMethod.CASH,
-        clientName: dto.clientName,
-        date: dto.date || new Date(),
-      },
+    emitFinancialEvent(this.logger, {
+      event: FINANCIAL_EVENT.WRITE_ATTEMPTED,
+      kind: 'income',
+      providerId: dto.providerId,
+      amount: dto.amount,
+      sourceTextHash: dto.sourceTextHash,
     });
 
-    this.logger.log(
-      `Income created: $${dto.amount} for provider ${dto.providerId}`,
-    );
+    try {
+      const income = await this.prisma.income.create({
+        data: {
+          providerId: dto.providerId,
+          amount: new Prisma.Decimal(dto.amount),
+          description: dto.description,
+          paymentMethod: dto.paymentMethod || PaymentMethod.CASH,
+          clientName: dto.clientName,
+          date: dto.date || new Date(),
+        },
+      });
 
-    return income;
+      emitFinancialEvent(this.logger, {
+        event: FINANCIAL_EVENT.WRITE_COMMITTED,
+        kind: 'income',
+        providerId: dto.providerId,
+        amount: dto.amount,
+        recordId: income.id,
+        sourceTextHash: dto.sourceTextHash,
+      });
+
+      this.logger.log(
+        `Income created: $${dto.amount} for provider ${dto.providerId}`,
+      );
+
+      return income;
+    } catch (err) {
+      emitFinancialEvent(this.logger, {
+        event: FINANCIAL_EVENT.WRITE_FAILED,
+        kind: 'income',
+        providerId: dto.providerId,
+        amount: dto.amount,
+        sourceTextHash: dto.sourceTextHash,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
   }
 
   async getWeekSummary(providerId: string, tz: string = DEFAULT_TIMEZONE): Promise<IncomeSummary> {

@@ -249,6 +249,147 @@ export class AppController {
     });
   }
 
+  // ─── Financial integrity (Cap. 45 — M0) ─────────────────
+  //
+  // Verifies the structural invariant "if Chalán confirmed it, it exists
+  // in the DB". For every assistant message tagged
+  // financial_confirmation_sent in the window, looks up the recordId in
+  // income/expense tables. Anything missing = orphaned confirmation =
+  // the user was lied to and we need to know.
+  //
+  //   GET /api/internal/financial-integrity?phone=+52...&days=7
+  //   GET /api/internal/financial-integrity?days=30   (all providers)
+
+  @Get('api/internal/financial-integrity')
+  @Public()
+  async getFinancialIntegrity(
+    @Headers('x-verify-token') token: string,
+    @Query('phone') phoneParam?: string,
+    @Query('days') daysParam?: string,
+  ) {
+    const verifyToken = this.config.get<string>('WHATSAPP_VERIFY_TOKEN');
+    if (!token || token !== verifyToken) {
+      throw new ForbiddenException('Invalid verify token');
+    }
+
+    const days = Math.min(Math.max(parseInt(daysParam || '7', 10) || 7, 1), 90);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const phoneFilter = phoneParam
+      ? { phone: { in: this.phoneVariants(phoneParam) } }
+      : {};
+
+    const confirmations = await this.prisma.conversationLog.findMany({
+      where: {
+        ...phoneFilter,
+        role: 'assistant',
+        createdAt: { gte: since },
+        metadata: {
+          path: ['audit', 'event'],
+          equals: 'financial_confirmation_sent',
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
+
+    const expenseIds = new Set<string>();
+    const incomeIds = new Set<string>();
+
+    type AuditMeta = {
+      recordId?: unknown;
+      kind?: unknown;
+      amount?: unknown;
+      sourceTextHash?: unknown;
+    };
+    const extractAudit = (
+      metadata: unknown,
+    ): { recordId: string; kind: string; audit: AuditMeta } | null => {
+      if (!metadata || typeof metadata !== 'object') return null;
+      const audit = (metadata as { audit?: unknown }).audit;
+      if (!audit || typeof audit !== 'object') return null;
+      const a = audit as AuditMeta;
+      if (typeof a.recordId !== 'string' || typeof a.kind !== 'string') {
+        return null;
+      }
+      return { recordId: a.recordId, kind: a.kind, audit: a };
+    };
+
+    for (const log of confirmations) {
+      const a = extractAudit(log.metadata);
+      if (!a) continue;
+      if (a.kind === 'expense') expenseIds.add(a.recordId);
+      else if (a.kind === 'income') incomeIds.add(a.recordId);
+    }
+
+    const [foundExpenses, foundIncomes] = await Promise.all([
+      expenseIds.size
+        ? this.prisma.expense.findMany({
+            where: { id: { in: [...expenseIds] } },
+            select: { id: true },
+          })
+        : Promise.resolve([] as { id: string }[]),
+      incomeIds.size
+        ? this.prisma.income.findMany({
+            where: { id: { in: [...incomeIds] } },
+            select: { id: true },
+          })
+        : Promise.resolve([] as { id: string }[]),
+    ]);
+
+    const foundExpenseIds = new Set(foundExpenses.map((e) => e.id));
+    const foundIncomeIds = new Set(foundIncomes.map((i) => i.id));
+
+    const orphaned: Array<{
+      phone: string;
+      kind: string;
+      amount?: number;
+      recordId: string;
+      sourceTextHash?: string;
+      content: string;
+      at: Date;
+    }> = [];
+    let totalConfirmations = 0;
+
+    for (const log of confirmations) {
+      const a = extractAudit(log.metadata);
+      if (!a) continue;
+      totalConfirmations += 1;
+      const found =
+        a.kind === 'expense'
+          ? foundExpenseIds.has(a.recordId)
+          : a.kind === 'income'
+            ? foundIncomeIds.has(a.recordId)
+            : false;
+      if (!found) {
+        orphaned.push({
+          phone: log.phone,
+          kind: a.kind,
+          amount:
+            typeof a.audit.amount === 'number' ? a.audit.amount : undefined,
+          recordId: a.recordId,
+          sourceTextHash:
+            typeof a.audit.sourceTextHash === 'string'
+              ? a.audit.sourceTextHash
+              : undefined,
+          content: log.content.slice(0, 120),
+          at: log.createdAt,
+        });
+      }
+    }
+
+    return {
+      window: { days, since: since.toISOString() },
+      ...(phoneParam ? { phone: phoneParam } : { scope: 'all_providers' }),
+      totals: {
+        confirmationsScanned: totalConfirmations,
+        confirmationsWithoutRecord: orphaned.length,
+        integrityOk: orphaned.length === 0,
+      },
+      orphaned: orphaned.slice(0, 100),
+    };
+  }
+
   // ─── Private helpers ──────────────────────────────────────
 
   private phoneVariants(raw: string): string[] {

@@ -35,6 +35,13 @@ import {
   getTimezoneLabel,
 } from '../../common/utils/timezone.utils';
 import { sanitizeForWhatsApp } from '../../common/utils/whatsapp-format.utils';
+import {
+  FINANCIAL_EVENT,
+  emitFinancialEvent,
+  buildFinancialMetadata,
+  sourceTextHash,
+  type FinancialAuditPayload,
+} from '../../common/utils/financial-audit';
 
 const JUNK_CLIENT_NAMES = new Set([
   'ninguno', 'ninguna', 'no', 'n/a', 'na', 'nada',
@@ -595,6 +602,11 @@ export class WhatsAppProviderHandler {
       }
     }
 
+    // Audit join key (Cap. 45 — M0): every financial event triggered by
+    // this turn (write_attempted/committed/confirmation_sent) carries the
+    // same hash so the integrity endpoint can reconstruct the chain.
+    const srcHash = sourceTextHash(text);
+
     try {
       const aiResponses = await this.aiService.processMessage(
         phone,
@@ -612,6 +624,7 @@ export class WhatsAppProviderHandler {
         aiResponses,
         providerProfileId,
         tz,
+        srcHash,
       );
       if (firewalled === null) {
         if (providerProfileId) {
@@ -633,11 +646,11 @@ export class WhatsAppProviderHandler {
       for (const aiResponse of firewalled) {
         switch (aiResponse.intent) {
           case AiIntent.REGISTRAR_INGRESO:
-            await this.handleRegistrarIngreso(phone, aiResponse.data, providerProfileId, tz);
+            await this.handleRegistrarIngreso(phone, aiResponse.data, providerProfileId, tz, srcHash);
             break;
 
           case AiIntent.REGISTRAR_GASTO:
-            await this.handleRegistrarGasto(phone, aiResponse.data, providerProfileId, tz);
+            await this.handleRegistrarGasto(phone, aiResponse.data, providerProfileId, tz, srcHash);
             break;
 
           case AiIntent.GESTIONAR_GASTO:
@@ -769,10 +782,37 @@ export class WhatsAppProviderHandler {
     phone: string,
     message: string,
     intent?: string,
+    metadata?: Record<string, unknown>,
   ): Promise<void> {
     const clean = sanitizeForWhatsApp(message);
     await this.whatsapp.sendTextMessage(phone, clean);
-    await this.aiContextService.addMessage(phone, 'assistant', clean, intent);
+    await this.aiContextService.addMessage(
+      phone,
+      'assistant',
+      clean,
+      intent,
+      metadata,
+    );
+  }
+
+  /**
+   * Send a financial confirmation and emit the `financial_confirmation_sent`
+   * audit event (Cap. 45 — M0). The same payload is persisted in
+   * ConversationLog.metadata so the integrity endpoint can join the chain.
+   */
+  private async sendFinancialConfirmation(
+    phone: string,
+    message: string,
+    intent: string,
+    audit: FinancialAuditPayload,
+  ): Promise<void> {
+    emitFinancialEvent(this.logger, audit);
+    await this.sendAndRecord(
+      phone,
+      message,
+      intent,
+      buildFinancialMetadata(audit),
+    );
   }
 
   // ─── Workspace: configurar perfil ───────────────────────
@@ -810,6 +850,7 @@ export class WhatsAppProviderHandler {
     data: Record<string, any> | undefined,
     providerProfileId?: string,
     tz: string = DEFAULT_TIMEZONE,
+    srcHash?: string,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(
@@ -838,13 +879,14 @@ export class WhatsAppProviderHandler {
       : null;
 
     try {
-      await this.incomeService.create({
+      const created = await this.incomeService.create({
         providerId: providerProfileId,
         amount,
         description: data?.description,
         paymentMethod,
         clientName: data?.clientName,
         date: parsedDate ?? undefined,
+        sourceTextHash: srcHash,
       });
 
       let confirmation = this.incomeService.formatIncomeConfirmation(
@@ -863,7 +905,20 @@ export class WhatsAppProviderHandler {
         // non-critical enrichment
       }
 
-      await this.sendAndRecord(phone, confirmation);
+      await this.sendFinancialConfirmation(
+        phone,
+        confirmation,
+        AiIntent.REGISTRAR_INGRESO,
+        {
+          event: FINANCIAL_EVENT.CONFIRMATION_SENT,
+          kind: 'income',
+          providerId: providerProfileId,
+          providerPhone: phone,
+          amount,
+          recordId: created.id,
+          sourceTextHash: srcHash,
+        },
+      );
     } catch (error: any) {
       this.logger.error(`Error creating income: ${error.message}`);
       await this.sendAndRecord(
@@ -1093,6 +1148,7 @@ export class WhatsAppProviderHandler {
     data: Record<string, any> | undefined,
     providerProfileId?: string,
     tz: string = DEFAULT_TIMEZONE,
+    srcHash?: string,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(
@@ -1116,12 +1172,13 @@ export class WhatsAppProviderHandler {
       : null;
 
     try {
-      await this.expenseService.create({
+      const created = await this.expenseService.create({
         providerId: providerProfileId,
         amount,
         category: data?.category,
         description: data?.description,
         date: parsedDate ?? undefined,
+        sourceTextHash: srcHash,
       });
 
       const confirmation = this.expenseService.formatExpenseConfirmation(
@@ -1130,7 +1187,20 @@ export class WhatsAppProviderHandler {
         data?.description,
       );
 
-      await this.sendAndRecord(phone, confirmation);
+      await this.sendFinancialConfirmation(
+        phone,
+        confirmation,
+        AiIntent.REGISTRAR_GASTO,
+        {
+          event: FINANCIAL_EVENT.CONFIRMATION_SENT,
+          kind: 'expense',
+          providerId: providerProfileId,
+          providerPhone: phone,
+          amount,
+          recordId: created.id,
+          sourceTextHash: srcHash,
+        },
+      );
     } catch (error: any) {
       this.logger.error(`Error creating expense: ${error.message}`);
       await this.sendAndRecord(
@@ -3877,6 +3947,7 @@ export class WhatsAppProviderHandler {
     aiResponses: AiResponse[],
     providerProfileId: string | undefined,
     tz: string,
+    srcHash?: string,
   ): Promise<AiResponse[] | null> {
     if (!aiResponses || aiResponses.length !== 1) return aiResponses;
     const sole = aiResponses[0];
@@ -3907,6 +3978,7 @@ export class WhatsAppProviderHandler {
           parsed.data,
           providerProfileId,
           tz,
+          srcHash,
         );
         return null;
       }
@@ -3919,6 +3991,7 @@ export class WhatsAppProviderHandler {
           parsed.data,
           providerProfileId,
           tz,
+          srcHash,
         );
         return null;
       }
