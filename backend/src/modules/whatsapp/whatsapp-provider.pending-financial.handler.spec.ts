@@ -458,6 +458,347 @@ describe('Cap. 47 / M1 — failure modes', () => {
   });
 });
 
+describe('Cap. 47 / M1 — tryHandlePendingFinancial (commit 3, pre-AI resolve)', () => {
+  const PROVIDER_ID = 'provider-uuid-1';
+
+  function plantedTypeState(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      amount: 200,
+      description: 'lavandería',
+      missing: 'type' as const,
+      sourceTextHash: 'H1_original',
+      originalUserText: 'lavandería 200',
+      createdAt: Date.now(),
+      ...overrides,
+    };
+  }
+
+  function plantedAmountState(
+    possibleType: 'expense' | 'income',
+    overrides: Partial<Record<string, unknown>> = {},
+  ) {
+    return {
+      description: possibleType === 'expense' ? 'compré material' : 'me pagaron por la chamba',
+      missing: 'amount' as const,
+      possibleType,
+      sourceTextHash: 'H2_original',
+      originalUserText: possibleType === 'expense' ? 'compré material' : 'me pagaron por la chamba',
+      createdAt: Date.now(),
+      ...overrides,
+    };
+  }
+
+  function seedPending(redis: RedisMock, phone: string, state: unknown) {
+    redis.store.set(`${PENDING_FIN_PREFIX}${phone}`, JSON.stringify(state));
+  }
+
+  describe('happy paths — type missing', () => {
+    it('Vero gasto: pending type + reply "gasto" → handleRegistrarGasto with original srcHash', async () => {
+      const redis = makeRedisMock();
+      const handler = makeHandler(redis);
+      seedPending(redis, PHONE, plantedTypeState());
+
+      const gastoSpy = jest
+        .spyOn(handler, 'handleRegistrarGasto')
+        .mockResolvedValue(undefined);
+      const ingresoSpy = jest
+        .spyOn(handler, 'handleRegistrarIngreso')
+        .mockResolvedValue(undefined);
+
+      const result = await handler.tryHandlePendingFinancial(
+        PHONE,
+        'gasto',
+        PROVIDER_ID,
+      );
+
+      expect(result).toBe(true);
+      expect(gastoSpy).toHaveBeenCalledTimes(1);
+      expect(gastoSpy).toHaveBeenCalledWith(
+        PHONE,
+        { amount: 200, description: 'lavandería' },
+        PROVIDER_ID,
+        'America/Mexico_City', // DEFAULT_TIMEZONE
+        'H1_original',
+      );
+      expect(ingresoSpy).not.toHaveBeenCalled();
+
+      // Pending cleared BEFORE write was dispatched.
+      expect(redis.store.has(`${PENDING_FIN_PREFIX}${PHONE}`)).toBe(false);
+      const delIdx = redis.calls.findIndex((c) => c.method === 'del');
+      expect(delIdx).toBeGreaterThanOrEqual(0);
+      // Spy was invoked AFTER del happened.
+      expect(gastoSpy.mock.invocationCallOrder[0]).toBeGreaterThan(0);
+    });
+
+    it('reply "ingreso" → handleRegistrarIngreso', async () => {
+      const redis = makeRedisMock();
+      const handler = makeHandler(redis);
+      seedPending(redis, PHONE, plantedTypeState());
+
+      const gastoSpy = jest
+        .spyOn(handler, 'handleRegistrarGasto')
+        .mockResolvedValue(undefined);
+      const ingresoSpy = jest
+        .spyOn(handler, 'handleRegistrarIngreso')
+        .mockResolvedValue(undefined);
+
+      const result = await handler.tryHandlePendingFinancial(
+        PHONE,
+        'ingreso',
+        PROVIDER_ID,
+      );
+
+      expect(result).toBe(true);
+      expect(ingresoSpy).toHaveBeenCalledWith(
+        PHONE,
+        { amount: 200, description: 'lavandería' },
+        PROVIDER_ID,
+        'America/Mexico_City',
+        'H1_original',
+      );
+      expect(gastoSpy).not.toHaveBeenCalled();
+    });
+
+    it('reply "cobré" resolves to income too', async () => {
+      const redis = makeRedisMock();
+      const handler = makeHandler(redis);
+      seedPending(redis, PHONE, plantedTypeState());
+
+      const ingresoSpy = jest
+        .spyOn(handler, 'handleRegistrarIngreso')
+        .mockResolvedValue(undefined);
+
+      const result = await handler.tryHandlePendingFinancial(
+        PHONE,
+        'cobré',
+        PROVIDER_ID,
+      );
+
+      expect(result).toBe(true);
+      expect(ingresoSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('happy paths — amount missing', () => {
+    it('amount + possibleType=expense + reply "$200" → handleRegistrarGasto', async () => {
+      const redis = makeRedisMock();
+      const handler = makeHandler(redis);
+      seedPending(redis, PHONE, plantedAmountState('expense'));
+
+      const gastoSpy = jest
+        .spyOn(handler, 'handleRegistrarGasto')
+        .mockResolvedValue(undefined);
+
+      const result = await handler.tryHandlePendingFinancial(
+        PHONE,
+        '$200',
+        PROVIDER_ID,
+      );
+
+      expect(result).toBe(true);
+      expect(gastoSpy).toHaveBeenCalledWith(
+        PHONE,
+        { amount: 200, description: 'compré material' },
+        PROVIDER_ID,
+        'America/Mexico_City',
+        'H2_original',
+      );
+    });
+
+    it('amount + possibleType=income + reply "1500" → handleRegistrarIngreso', async () => {
+      const redis = makeRedisMock();
+      const handler = makeHandler(redis);
+      seedPending(redis, PHONE, plantedAmountState('income'));
+
+      const ingresoSpy = jest
+        .spyOn(handler, 'handleRegistrarIngreso')
+        .mockResolvedValue(undefined);
+
+      const result = await handler.tryHandlePendingFinancial(
+        PHONE,
+        '1500',
+        PROVIDER_ID,
+      );
+
+      expect(result).toBe(true);
+      expect(ingresoSpy).toHaveBeenCalledWith(
+        PHONE,
+        { amount: 1500, description: 'me pagaron por la chamba' },
+        PROVIDER_ID,
+        'America/Mexico_City',
+        'H2_original',
+      );
+    });
+  });
+
+  describe('unrelated reply discards pending and returns false', () => {
+    it('"agéndame mañana" with type pending → flow normal', async () => {
+      const redis = makeRedisMock();
+      const handler = makeHandler(redis);
+      seedPending(redis, PHONE, plantedTypeState());
+
+      const gastoSpy = jest
+        .spyOn(handler, 'handleRegistrarGasto')
+        .mockResolvedValue(undefined);
+      const ingresoSpy = jest
+        .spyOn(handler, 'handleRegistrarIngreso')
+        .mockResolvedValue(undefined);
+
+      const result = await handler.tryHandlePendingFinancial(
+        PHONE,
+        'agéndame mañana',
+        PROVIDER_ID,
+      );
+
+      expect(result).toBe(false);
+      expect(gastoSpy).not.toHaveBeenCalled();
+      expect(ingresoSpy).not.toHaveBeenCalled();
+      expect(redis.store.has(`${PENDING_FIN_PREFIX}${PHONE}`)).toBe(false);
+    });
+
+    it('"recuérdame ir al gym" with amount pending → flow normal', async () => {
+      const redis = makeRedisMock();
+      const handler = makeHandler(redis);
+      seedPending(redis, PHONE, plantedAmountState('expense'));
+
+      const result = await handler.tryHandlePendingFinancial(
+        PHONE,
+        'recuérdame ir al gym',
+        PROVIDER_ID,
+      );
+
+      expect(result).toBe(false);
+      expect(redis.store.has(`${PENDING_FIN_PREFIX}${PHONE}`)).toBe(false);
+    });
+  });
+
+  describe('no pending / expired returns false without side effects', () => {
+    it('returns false immediately when no pending exists', async () => {
+      const redis = makeRedisMock();
+      const handler = makeHandler(redis);
+
+      const gastoSpy = jest
+        .spyOn(handler, 'handleRegistrarGasto')
+        .mockResolvedValue(undefined);
+
+      const result = await handler.tryHandlePendingFinancial(
+        PHONE,
+        'gasto',
+        PROVIDER_ID,
+      );
+
+      expect(result).toBe(false);
+      expect(gastoSpy).not.toHaveBeenCalled();
+      // No del was called either — there was nothing to clear.
+      expect(redis.calls.some((c) => c.method === 'del')).toBe(false);
+    });
+  });
+
+  describe('redis.get failure does not break the turn', () => {
+    it('returns false and logs warn when Redis is down', async () => {
+      const redis = makeRedisMock();
+      redis.getShouldThrow = true;
+      const handler = makeHandler(redis);
+
+      const gastoSpy = jest
+        .spyOn(handler, 'handleRegistrarGasto')
+        .mockResolvedValue(undefined);
+
+      const result = await handler.tryHandlePendingFinancial(
+        PHONE,
+        'gasto',
+        PROVIDER_ID,
+      );
+
+      expect(result).toBe(false);
+      expect(gastoSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('handler throw — pending already cleared', () => {
+    it('clears pending before invoking handler so a thrown error does not leave a retry trap', async () => {
+      const redis = makeRedisMock();
+      const handler = makeHandler(redis);
+      seedPending(redis, PHONE, plantedTypeState());
+
+      const gastoSpy = jest
+        .spyOn(handler, 'handleRegistrarGasto')
+        .mockRejectedValue(new Error('db down'));
+
+      await expect(
+        handler.tryHandlePendingFinancial(PHONE, 'gasto', PROVIDER_ID),
+      ).rejects.toThrow('db down');
+
+      // Pending must be already gone — that's the invariant the
+      // cleanup-before-write ordering exists to guarantee.
+      expect(redis.store.has(`${PENDING_FIN_PREFIX}${PHONE}`)).toBe(false);
+      expect(gastoSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('invalid state — option B: clear pending, do not preserve trap', () => {
+    it('missing=amount without possibleType → clears pending, returns false, logs warn', async () => {
+      const redis = makeRedisMock();
+      const handler = makeHandler(redis);
+
+      // Hand-crafted corrupt state: missing=amount but no possibleType.
+      // Cannot be produced by shouldPlantPending in normal operation.
+      seedPending(redis, PHONE, {
+        description: 'misterio',
+        missing: 'amount',
+        sourceTextHash: 'H3_corrupt',
+        originalUserText: 'misterio',
+        createdAt: Date.now(),
+        // possibleType deliberately absent
+      });
+
+      const gastoSpy = jest
+        .spyOn(handler, 'handleRegistrarGasto')
+        .mockResolvedValue(undefined);
+      const ingresoSpy = jest
+        .spyOn(handler, 'handleRegistrarIngreso')
+        .mockResolvedValue(undefined);
+
+      const result = await handler.tryHandlePendingFinancial(
+        PHONE,
+        '$300',
+        PROVIDER_ID,
+      );
+
+      expect(result).toBe(false);
+      expect(gastoSpy).not.toHaveBeenCalled();
+      expect(ingresoSpy).not.toHaveBeenCalled();
+
+      // Pending was cleared by the pre-write clear (option B): no
+      // trap for the next turn.
+      expect(redis.store.has(`${PENDING_FIN_PREFIX}${PHONE}`)).toBe(false);
+    });
+  });
+
+  describe('hash invariant', () => {
+    it('always uses pending.sourceTextHash, never recomputes from current text', async () => {
+      const redis = makeRedisMock();
+      const handler = makeHandler(redis);
+      seedPending(
+        redis,
+        PHONE,
+        plantedTypeState({ sourceTextHash: 'ORIGINAL_TURN_HASH' }),
+      );
+
+      const gastoSpy = jest
+        .spyOn(handler, 'handleRegistrarGasto')
+        .mockResolvedValue(undefined);
+
+      await handler.tryHandlePendingFinancial(PHONE, 'gasto', PROVIDER_ID);
+
+      const callArgs = gastoSpy.mock.calls[0];
+      // 5th arg is srcHash. Must be the planted one, not anything
+      // derived from "gasto".
+      expect(callArgs[4]).toBe('ORIGINAL_TURN_HASH');
+    });
+  });
+});
+
 describe('Cap. 47 / M1 — Redis helpers (get/set/clear pending financial)', () => {
   it('round-trips state through set + get', async () => {
     const redis = makeRedisMock();

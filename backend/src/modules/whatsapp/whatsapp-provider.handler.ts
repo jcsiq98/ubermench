@@ -52,6 +52,7 @@ import {
   type MissingFinancialField,
   looksLikeFinancialClarificationQuestion,
   shouldPlantPending,
+  classifyPendingResolution,
 } from './whatsapp-provider.pending-financial';
 
 const JUNK_CLIENT_NAMES = new Set([
@@ -657,6 +658,23 @@ export class WhatsAppProviderHandler {
         text,
         providerProfileId,
         providerName,
+      );
+      if (handled) return;
+    }
+
+    // Cap. 47 — M1 commit 3: pre-AI resolver. If we planted pending
+    // financial state in a previous turn ("¿gasto o ingreso?",
+    // "¿de cuánto fue?") and this message is a direct answer, write
+    // to the DB deterministically and skip the LLM entirely. Closes
+    // the Vero bug ("lavandería 200" → "gasto" → confirmation without
+    // a record in DB). Resolution preserves the original sourceTextHash
+    // so the M0 audit chain (Cap. 45) joins cleanly with the original
+    // ambiguous turn.
+    if (providerProfileId) {
+      const handled = await this.tryHandlePendingFinancial(
+        phone,
+        text,
+        providerProfileId,
       );
       if (handled) return;
     }
@@ -4505,5 +4523,142 @@ export class WhatsAppProviderHandler {
       detected.kind,
       srcHash,
     );
+  }
+
+  // ─── Cap. 47 — pending financial resolve (M1 commit 3) ─────────
+  // Pre-AI hook. When pending state was planted in a previous turn,
+  // the next user message is checked against a small closed taxonomy
+  // by classifyPendingResolution. Direct answers ("gasto", "ingreso",
+  // "$200") bypass the LLM and call handleRegistrarGasto/Ingreso
+  // directly. The original sourceTextHash is preserved so the Cap. 45
+  // audit chain joins on the ambiguous turn, not on the answer turn.
+  //
+  // Cleanup ordering is intentional: pending is cleared BEFORE the
+  // write handler is invoked. Each plant produces exactly one resolve
+  // attempt. If the write throws, pending is already gone — no retry
+  // loops, no double-write risk, the outer try/catch in
+  // handleAiConversation surfaces the error.
+  //
+  // Timezone: M1 deliberately passes DEFAULT_TIMEZONE because the
+  // resolved data has no `date` field, and tz is only used in the
+  // write handlers when parsing dates. If a future change adds tz-
+  // dependent logic on the date-less write path, this hook needs to
+  // load the workspace timezone before dispatching.
+
+  /**
+   * Returns true when the turn was handled (write occurred OR pending
+   * was discarded as unrelated). Returns false when there's no pending,
+   * the pending is corrupt (in which case it is also cleared), or the
+   * incoming Redis read fails — in all those cases the caller should
+   * fall through to the normal LLM path.
+   */
+  private async tryHandlePendingFinancial(
+    phone: string,
+    text: string,
+    providerProfileId: string,
+  ): Promise<boolean> {
+    let pending: PendingFinancialState | null;
+    try {
+      pending = await this.getPendingFinancial(phone);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `[pending-fin] redis_get_failure_resolve phone=${phone} err=${errMsg}`,
+      );
+      return false;
+    }
+    if (!pending) return false;
+
+    const result = classifyPendingResolution(text, pending);
+
+    if (result.kind === 'unrelated') {
+      await this.clearPendingFinancial(phone);
+      this.logger.log(
+        `[pending-fin] discarded phone=${phone} reason=unrelated_reply ` +
+          `missing=${pending.missing}`,
+      );
+      return false;
+    }
+
+    // Cleanup BEFORE write — prevents retry loops on handler errors
+    // and guarantees a 1:1 plant→resolve cardinality.
+    await this.clearPendingFinancial(phone);
+
+    if (result.kind === 'expense') {
+      this.logger.log(
+        `[pending-fin] resolved phone=${phone} kind=expense ` +
+          `srcHash=${pending.sourceTextHash} originalMissing=${pending.missing}`,
+      );
+      await this.handleRegistrarGasto(
+        phone,
+        { amount: pending.amount, description: pending.description },
+        providerProfileId,
+        DEFAULT_TIMEZONE,
+        pending.sourceTextHash,
+      );
+      return true;
+    }
+
+    if (result.kind === 'income') {
+      this.logger.log(
+        `[pending-fin] resolved phone=${phone} kind=income ` +
+          `srcHash=${pending.sourceTextHash} originalMissing=${pending.missing}`,
+      );
+      await this.handleRegistrarIngreso(
+        phone,
+        { amount: pending.amount, description: pending.description },
+        providerProfileId,
+        DEFAULT_TIMEZONE,
+        pending.sourceTextHash,
+      );
+      return true;
+    }
+
+    if (result.kind === 'amount') {
+      // Pending was planted with missing='amount', so possibleType is
+      // guaranteed by shouldPlantPending. Defensive check below catches
+      // a corrupt state (Redis-level tampering, pre-M1 leftover, etc.).
+      if (pending.possibleType === 'expense') {
+        this.logger.log(
+          `[pending-fin] resolved phone=${phone} kind=expense (from amount) ` +
+            `srcHash=${pending.sourceTextHash}`,
+        );
+        await this.handleRegistrarGasto(
+          phone,
+          { amount: result.amount, description: pending.description },
+          providerProfileId,
+          DEFAULT_TIMEZONE,
+          pending.sourceTextHash,
+        );
+        return true;
+      }
+      if (pending.possibleType === 'income') {
+        this.logger.log(
+          `[pending-fin] resolved phone=${phone} kind=income (from amount) ` +
+            `srcHash=${pending.sourceTextHash}`,
+        );
+        await this.handleRegistrarIngreso(
+          phone,
+          { amount: result.amount, description: pending.description },
+          providerProfileId,
+          DEFAULT_TIMEZONE,
+          pending.sourceTextHash,
+        );
+        return true;
+      }
+      // Corrupt state: missing='amount' without possibleType. Per the
+      // commit-3 design (option B), we clear pending and fall through
+      // to the LLM rather than preserve a trap for the next turn.
+      // Note: cleanup already happened above (line "Cleanup BEFORE
+      // write"), so the corrupt entry is already gone. Just log and
+      // bail.
+      this.logger.warn(
+        `[pending-fin] resolved_invalid_state phone=${phone} ` +
+          `missing=amount but possibleType is undefined; pending cleared`,
+      );
+      return false;
+    }
+
+    return false;
   }
 }
