@@ -4489,9 +4489,18 @@ export class WhatsAppProviderHandler {
         sourceTextHash: srcHash,
         createdAt: Date.now(),
       });
-      this.logger.log(
-        `[pending-fin] planted phone=${phone} missing=${decision.state.missing} srcHash=${srcHash}`,
-      );
+      emitFinancialEvent(this.logger, {
+        event: FINANCIAL_EVENT.PENDING_PLANTED,
+        providerPhone: phone,
+        sourceTextHash: srcHash,
+        pendingMissing: decision.state.missing,
+        ...(decision.state.possibleType
+          ? { kind: decision.state.possibleType }
+          : {}),
+        ...(decision.state.amount !== undefined
+          ? { amount: decision.state.amount }
+          : {}),
+      });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
@@ -4570,13 +4579,18 @@ export class WhatsAppProviderHandler {
     if (!pending) return false;
 
     const result = classifyPendingResolution(text, pending);
+    const resolutionMs = Date.now() - pending.createdAt;
 
     if (result.kind === 'unrelated') {
       await this.clearPendingFinancial(phone);
-      this.logger.log(
-        `[pending-fin] discarded phone=${phone} reason=unrelated_reply ` +
-          `missing=${pending.missing}`,
-      );
+      emitFinancialEvent(this.logger, {
+        event: FINANCIAL_EVENT.PENDING_DISCARDED,
+        providerPhone: phone,
+        sourceTextHash: pending.sourceTextHash,
+        pendingMissing: pending.missing,
+        reason: 'unrelated_reply',
+        resolutionMs,
+      });
       return false;
     }
 
@@ -4585,10 +4599,15 @@ export class WhatsAppProviderHandler {
     await this.clearPendingFinancial(phone);
 
     if (result.kind === 'expense') {
-      this.logger.log(
-        `[pending-fin] resolved phone=${phone} kind=expense ` +
-          `srcHash=${pending.sourceTextHash} originalMissing=${pending.missing}`,
-      );
+      emitFinancialEvent(this.logger, {
+        event: FINANCIAL_EVENT.PENDING_RESOLVED,
+        providerPhone: phone,
+        kind: 'expense',
+        sourceTextHash: pending.sourceTextHash,
+        pendingMissing: pending.missing,
+        amount: pending.amount,
+        resolutionMs,
+      });
       await this.handleRegistrarGasto(
         phone,
         { amount: pending.amount, description: pending.description },
@@ -4600,10 +4619,15 @@ export class WhatsAppProviderHandler {
     }
 
     if (result.kind === 'income') {
-      this.logger.log(
-        `[pending-fin] resolved phone=${phone} kind=income ` +
-          `srcHash=${pending.sourceTextHash} originalMissing=${pending.missing}`,
-      );
+      emitFinancialEvent(this.logger, {
+        event: FINANCIAL_EVENT.PENDING_RESOLVED,
+        providerPhone: phone,
+        kind: 'income',
+        sourceTextHash: pending.sourceTextHash,
+        pendingMissing: pending.missing,
+        amount: pending.amount,
+        resolutionMs,
+      });
       await this.handleRegistrarIngreso(
         phone,
         { amount: pending.amount, description: pending.description },
@@ -4619,10 +4643,15 @@ export class WhatsAppProviderHandler {
       // guaranteed by shouldPlantPending. Defensive check below catches
       // a corrupt state (Redis-level tampering, pre-M1 leftover, etc.).
       if (pending.possibleType === 'expense') {
-        this.logger.log(
-          `[pending-fin] resolved phone=${phone} kind=expense (from amount) ` +
-            `srcHash=${pending.sourceTextHash}`,
-        );
+        emitFinancialEvent(this.logger, {
+          event: FINANCIAL_EVENT.PENDING_RESOLVED,
+          providerPhone: phone,
+          kind: 'expense',
+          sourceTextHash: pending.sourceTextHash,
+          pendingMissing: pending.missing,
+          amount: result.amount,
+          resolutionMs,
+        });
         await this.handleRegistrarGasto(
           phone,
           { amount: result.amount, description: pending.description },
@@ -4633,10 +4662,15 @@ export class WhatsAppProviderHandler {
         return true;
       }
       if (pending.possibleType === 'income') {
-        this.logger.log(
-          `[pending-fin] resolved phone=${phone} kind=income (from amount) ` +
-            `srcHash=${pending.sourceTextHash}`,
-        );
+        emitFinancialEvent(this.logger, {
+          event: FINANCIAL_EVENT.PENDING_RESOLVED,
+          providerPhone: phone,
+          kind: 'income',
+          sourceTextHash: pending.sourceTextHash,
+          pendingMissing: pending.missing,
+          amount: result.amount,
+          resolutionMs,
+        });
         await this.handleRegistrarIngreso(
           phone,
           { amount: result.amount, description: pending.description },

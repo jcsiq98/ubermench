@@ -96,3 +96,106 @@ describe('financial-audit (Cap. 45 — M0)', () => {
     });
   });
 });
+
+describe('financial-audit (Cap. 47 — M1 pending lifecycle events)', () => {
+  describe('FINANCIAL_EVENT — new event types', () => {
+    it('exposes the three pending lifecycle event names', () => {
+      expect(FINANCIAL_EVENT.PENDING_PLANTED).toBe('financial_pending_planted');
+      expect(FINANCIAL_EVENT.PENDING_RESOLVED).toBe(
+        'financial_pending_resolved',
+      );
+      expect(FINANCIAL_EVENT.PENDING_DISCARDED).toBe(
+        'financial_pending_discarded',
+      );
+    });
+  });
+
+  describe('emitFinancialEvent — pending events', () => {
+    it('serializes PENDING_PLANTED with pendingMissing and no kind', () => {
+      const logger = new Logger('test');
+      const spy = jest.spyOn(logger, 'log').mockImplementation();
+      emitFinancialEvent(logger, {
+        event: FINANCIAL_EVENT.PENDING_PLANTED,
+        providerPhone: '+5215555550000',
+        sourceTextHash: 'h1',
+        pendingMissing: 'type',
+      });
+      expect(spy).toHaveBeenCalledTimes(1);
+      const arg = spy.mock.calls[0][0] as string;
+      const parsed = JSON.parse(arg) as Record<string, unknown>;
+      expect(parsed.event).toBe('financial_pending_planted');
+      expect(parsed.providerPhone).toBe('+5215555550000');
+      expect(parsed.sourceTextHash).toBe('h1');
+      expect(parsed.pendingMissing).toBe('type');
+      expect(parsed.kind).toBeUndefined();
+    });
+
+    it('serializes PENDING_RESOLVED with kind, pendingMissing, and resolutionMs', () => {
+      const logger = new Logger('test');
+      const spy = jest.spyOn(logger, 'log').mockImplementation();
+      emitFinancialEvent(logger, {
+        event: FINANCIAL_EVENT.PENDING_RESOLVED,
+        providerPhone: '+5215555550000',
+        kind: 'expense',
+        sourceTextHash: 'h1',
+        pendingMissing: 'type',
+        resolutionMs: 4321,
+      });
+      const arg = spy.mock.calls[0][0] as string;
+      const parsed = JSON.parse(arg) as Record<string, unknown>;
+      expect(parsed.event).toBe('financial_pending_resolved');
+      expect(parsed.kind).toBe('expense');
+      expect(parsed.resolutionMs).toBe(4321);
+      expect(parsed.pendingMissing).toBe('type');
+    });
+
+    it('serializes PENDING_DISCARDED with reason and pendingMissing', () => {
+      const logger = new Logger('test');
+      const spy = jest.spyOn(logger, 'log').mockImplementation();
+      emitFinancialEvent(logger, {
+        event: FINANCIAL_EVENT.PENDING_DISCARDED,
+        providerPhone: '+5215555550000',
+        sourceTextHash: 'h1',
+        pendingMissing: 'amount',
+        reason: 'unrelated_reply',
+      });
+      const arg = spy.mock.calls[0][0] as string;
+      const parsed = JSON.parse(arg) as Record<string, unknown>;
+      expect(parsed.event).toBe('financial_pending_discarded');
+      expect(parsed.reason).toBe('unrelated_reply');
+      expect(parsed.pendingMissing).toBe('amount');
+    });
+  });
+
+  describe('buildFinancialMetadata — new optional fields', () => {
+    it('includes pendingMissing and resolutionMs when provided', () => {
+      const meta = buildFinancialMetadata({
+        event: FINANCIAL_EVENT.PENDING_RESOLVED,
+        kind: 'income',
+        sourceTextHash: 'hash123',
+        pendingMissing: 'type',
+        resolutionMs: 7000,
+      });
+      expect(meta).toEqual({
+        audit: {
+          event: 'financial_pending_resolved',
+          kind: 'income',
+          sourceTextHash: 'hash123',
+          pendingMissing: 'type',
+          resolutionMs: 7000,
+        },
+      });
+    });
+
+    it('omits kind when payload omits it (M1 plant-time case)', () => {
+      const meta = buildFinancialMetadata({
+        event: FINANCIAL_EVENT.PENDING_PLANTED,
+        sourceTextHash: 'hash123',
+        pendingMissing: 'type',
+      });
+      const audit = (meta as { audit: Record<string, unknown> }).audit;
+      expect(audit).not.toHaveProperty('kind');
+      expect(audit.pendingMissing).toBe('type');
+    });
+  });
+});

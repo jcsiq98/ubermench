@@ -799,6 +799,210 @@ describe('Cap. 47 / M1 — tryHandlePendingFinancial (commit 3, pre-AI resolve)'
   });
 });
 
+describe('Cap. 47 / M1 — audit events (commit 5)', () => {
+  // emitFinancialEvent calls `logger.log(JSON.stringify(payload))` —
+  // events are observable by spying on the handler's logger.log and
+  // filtering for the JSON-shaped strings. This pattern is robust to
+  // CJS/ESM import semantics (it does not rely on patching the
+  // imported function reference inside the handler module).
+
+  function findEventCalls(
+    logSpy: jest.SpyInstance,
+  ): Array<Record<string, unknown>> {
+    return logSpy.mock.calls
+      .map((c) => c[0])
+      .filter(
+        (c): c is string =>
+          typeof c === 'string' && c.startsWith('{"event":"financial_pending_'),
+      )
+      .map((s) => JSON.parse(s) as Record<string, unknown>);
+  }
+
+  function findEvent(
+    logSpy: jest.SpyInstance,
+    eventName: string,
+  ): Record<string, unknown> | undefined {
+    return findEventCalls(logSpy).find((e) => e.event === eventName);
+  }
+
+  it('emits PENDING_PLANTED on successful plant (Vero shape)', async () => {
+    const redis = makeRedisMock();
+    const handler = makeHandler(redis);
+    const logSpy = jest
+      .spyOn((handler as any).logger, 'log')
+      .mockImplementation();
+
+    await handler.tryPlantPendingFinancial(
+      PHONE,
+      'lavandería 200',
+      [generalResponse('¿Es un gasto o un ingreso?')],
+      SRC_HASH,
+    );
+
+    const planted = findEvent(logSpy, 'financial_pending_planted');
+    expect(planted).toBeDefined();
+    expect(planted).toEqual(
+      expect.objectContaining({
+        event: 'financial_pending_planted',
+        providerPhone: PHONE,
+        sourceTextHash: SRC_HASH,
+        pendingMissing: 'type',
+        amount: 200,
+      }),
+    );
+    // No kind at plant time when missing=type and no verb in user msg.
+    expect(planted!.kind).toBeUndefined();
+  });
+
+  it('emits PENDING_PLANTED with kind when possibleType is inferable', async () => {
+    const redis = makeRedisMock();
+    const handler = makeHandler(redis);
+    const logSpy = jest
+      .spyOn((handler as any).logger, 'log')
+      .mockImplementation();
+
+    await handler.tryPlantPendingFinancial(
+      PHONE,
+      'compré tubo',
+      [generalResponse('¿De cuánto fue?')],
+      SRC_HASH,
+    );
+
+    const planted = findEvent(logSpy, 'financial_pending_planted');
+    expect(planted).toEqual(
+      expect.objectContaining({
+        pendingMissing: 'amount',
+        kind: 'expense',
+      }),
+    );
+  });
+
+  it('emits PENDING_RESOLVED with kind, pendingMissing, and resolutionMs', async () => {
+    const redis = makeRedisMock();
+    const handler = makeHandler(redis);
+    redis.store.set(
+      `${PENDING_FIN_PREFIX}${PHONE}`,
+      JSON.stringify({
+        amount: 200,
+        description: 'lavandería',
+        missing: 'type',
+        sourceTextHash: 'H1_original',
+        originalUserText: 'lavandería 200',
+        createdAt: Date.now() - 5000, // planted 5s ago
+      }),
+    );
+
+    const logSpy = jest
+      .spyOn((handler as any).logger, 'log')
+      .mockImplementation();
+    jest.spyOn(handler, 'handleRegistrarGasto').mockResolvedValue(undefined);
+
+    await handler.tryHandlePendingFinancial(
+      PHONE,
+      'gasto',
+      'provider-uuid-1',
+    );
+
+    const resolved = findEvent(logSpy, 'financial_pending_resolved');
+    expect(resolved).toBeDefined();
+    expect(resolved).toEqual(
+      expect.objectContaining({
+        event: 'financial_pending_resolved',
+        providerPhone: PHONE,
+        kind: 'expense',
+        sourceTextHash: 'H1_original',
+        pendingMissing: 'type',
+        amount: 200,
+      }),
+    );
+    expect(typeof resolved!.resolutionMs).toBe('number');
+    expect(resolved!.resolutionMs as number).toBeGreaterThanOrEqual(5000);
+  });
+
+  it('emits PENDING_DISCARDED on unrelated reply', async () => {
+    const redis = makeRedisMock();
+    const handler = makeHandler(redis);
+    redis.store.set(
+      `${PENDING_FIN_PREFIX}${PHONE}`,
+      JSON.stringify({
+        amount: 200,
+        description: 'lavandería',
+        missing: 'type',
+        sourceTextHash: 'H1_original',
+        originalUserText: 'lavandería 200',
+        createdAt: Date.now(),
+      }),
+    );
+
+    const logSpy = jest
+      .spyOn((handler as any).logger, 'log')
+      .mockImplementation();
+
+    await handler.tryHandlePendingFinancial(
+      PHONE,
+      'agéndame mañana',
+      'provider-uuid-1',
+    );
+
+    const discarded = findEvent(logSpy, 'financial_pending_discarded');
+    expect(discarded).toBeDefined();
+    expect(discarded).toEqual(
+      expect.objectContaining({
+        event: 'financial_pending_discarded',
+        providerPhone: PHONE,
+        sourceTextHash: 'H1_original',
+        pendingMissing: 'type',
+        reason: 'unrelated_reply',
+      }),
+    );
+  });
+
+  it('does NOT emit a formal event when shouldPlantPending refuses', async () => {
+    const redis = makeRedisMock();
+    const handler = makeHandler(redis);
+    const logSpy = jest
+      .spyOn((handler as any).logger, 'log')
+      .mockImplementation();
+
+    // No amount → plant skip with reason=missing_type_needs_amount.
+    await handler.tryPlantPendingFinancial(
+      PHONE,
+      'lavandería',
+      [generalResponse('¿Es un gasto o un ingreso?')],
+      SRC_HASH,
+    );
+
+    expect(findEventCalls(logSpy)).toHaveLength(0);
+  });
+
+  it('does NOT emit a formal event on no-overwrite skip (existing pending)', async () => {
+    const redis = makeRedisMock();
+    const handler = makeHandler(redis);
+
+    // First plant → emits PENDING_PLANTED. Spy after that to isolate
+    // the second-attempt assertion.
+    await handler.tryPlantPendingFinancial(
+      PHONE,
+      'lavandería 200',
+      [generalResponse('¿Es un gasto o un ingreso?')],
+      'first_hash',
+    );
+
+    const logSpy = jest
+      .spyOn((handler as any).logger, 'log')
+      .mockImplementation();
+
+    await handler.tryPlantPendingFinancial(
+      PHONE,
+      'gasolina 800',
+      [generalResponse('¿Es un gasto o un ingreso?')],
+      'second_hash',
+    );
+
+    expect(findEventCalls(logSpy)).toHaveLength(0);
+  });
+});
+
 describe('Cap. 47 / M1 — Redis helpers (get/set/clear pending financial)', () => {
   it('round-trips state through set + get', async () => {
     const redis = makeRedisMock();

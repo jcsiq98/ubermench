@@ -28,6 +28,16 @@ export const FINANCIAL_EVENT = {
   WRITE_COMMITTED: 'financial_write_committed',
   WRITE_FAILED: 'financial_write_failed',
   CONFIRMATION_SENT: 'financial_confirmation_sent',
+  // ── Cap. 47 / M1 — pending clarification lifecycle events ──
+  // Logger-only by design. Not persisted in ConversationLog.metadata
+  // (Cap. 45 reserved that channel for CONFIRMATION_SENT, which is
+  // the only event needed to verify the structural promise "if Chalán
+  // confirmed, it exists in the DB"). These three are observability
+  // of the pending state machine flow — useful for grep/Railway, not
+  // for the integrity endpoint.
+  PENDING_PLANTED: 'financial_pending_planted',
+  PENDING_RESOLVED: 'financial_pending_resolved',
+  PENDING_DISCARDED: 'financial_pending_discarded',
 } as const;
 
 export type FinancialEvent =
@@ -39,11 +49,28 @@ export interface FinancialAuditPayload {
   event: FinancialEvent;
   providerId?: string;
   providerPhone?: string;
-  kind: FinancialKind;
+  /**
+   * Optional in M1: pending lifecycle events at plant or discard time
+   * may not yet know the kind (when `pendingMissing === 'type'`, the
+   * whole point is that we don't know expense vs. income yet). All
+   * pre-Cap.47 call sites pass kind explicitly, so this widening is
+   * backward compatible.
+   */
+  kind?: FinancialKind;
   amount?: number;
   recordId?: string;
   sourceTextHash?: string;
   reason?: string;
+  // ── Cap. 47 / M1 fields ────────────────────────────────────
+  /** Which field the pending entry was waiting for. */
+  pendingMissing?: 'type' | 'amount';
+  /**
+   * Wall-clock milliseconds elapsed between plant and the lifecycle
+   * event (resolved/discarded). Useful to spot pendings that never
+   * resolve within a reasonable window — high values signal the
+   * detector fired on a turn the user didn't intend as a question.
+   */
+  resolutionMs?: number;
 }
 
 /**
@@ -88,13 +115,19 @@ export function buildFinancialMetadata(
   return {
     audit: {
       event: payload.event,
-      kind: payload.kind,
+      ...(payload.kind ? { kind: payload.kind } : {}),
       ...(payload.recordId ? { recordId: payload.recordId } : {}),
       ...(payload.amount !== undefined ? { amount: payload.amount } : {}),
       ...(payload.sourceTextHash
         ? { sourceTextHash: payload.sourceTextHash }
         : {}),
       ...(payload.reason ? { reason: payload.reason } : {}),
+      ...(payload.pendingMissing
+        ? { pendingMissing: payload.pendingMissing }
+        : {}),
+      ...(payload.resolutionMs !== undefined
+        ? { resolutionMs: payload.resolutionMs }
+        : {}),
     },
   };
 }
