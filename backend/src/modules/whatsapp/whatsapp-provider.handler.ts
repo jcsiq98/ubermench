@@ -15,6 +15,7 @@ import { ExpenseService } from '../expense/expense.service';
 import { RecurringExpenseService } from '../expense/recurring-expense.service';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { WorkspaceService } from '../workspace/workspace.service';
+import { TimezoneMigrationService } from '../workspace/timezone-migration.service';
 import { ProviderModelService } from '../provider-model/provider-model.service';
 import { BookingStatus, PaymentMethod } from '@prisma/client';
 import { QueueService } from '../../common/queues/queue.service';
@@ -33,6 +34,8 @@ import {
   DEFAULT_TIMEZONE,
   resolveTimezone,
   getTimezoneLabel,
+  isMexicanPhone,
+  isTimezoneSkipPhrase,
 } from '../../common/utils/timezone.utils';
 import { sanitizeForWhatsApp } from '../../common/utils/whatsapp-format.utils';
 import {
@@ -75,6 +78,23 @@ interface ProviderSession {
 const SESSION_PREFIX = 'wa_provider_session:';
 const SESSION_TTL = 86400; // 24 hours
 
+// Cap. 46 — Timezone Confidence System runtime gate.
+const PENDING_TZ_PREFIX = 'wa_pending_timezone:';
+const PENDING_TZ_TTL = 600; // 10 minutes
+const MAX_PENDING_TZ_ATTEMPTS = 1; // first miss retries; second miss skips
+
+interface PendingTimezoneState {
+  rawText: string;
+  attempts: number;
+  createdAt: number;
+}
+
+const TIMEZONE_GATE_INTENTS = new Set<AiIntent>([
+  AiIntent.AGENDAR_CITA,
+  AiIntent.MODIFICAR_CITA,
+  AiIntent.CREAR_RECORDATORIO,
+]);
+
 @Injectable()
 export class WhatsAppProviderHandler {
   private readonly logger = new Logger(WhatsAppProviderHandler.name);
@@ -96,6 +116,7 @@ export class WhatsAppProviderHandler {
     private recurringExpenseService: RecurringExpenseService,
     private appointmentsService: AppointmentsService,
     private workspaceService: WorkspaceService,
+    private timezoneMigrationService: TimezoneMigrationService,
     private providerModelService: ProviderModelService,
     private queueService: QueueService,
     private remindersService: RemindersService,
@@ -127,6 +148,35 @@ export class WhatsAppProviderHandler {
 
   private async clearSession(phone: string): Promise<void> {
     await this.redis.del(`${SESSION_PREFIX}${phone}`);
+  }
+
+  // ─── Cap. 46 — pending timezone (runtime gate state) ─────
+
+  private async getPendingTimezone(
+    phone: string,
+  ): Promise<PendingTimezoneState | null> {
+    const raw = await this.redis.get(`${PENDING_TZ_PREFIX}${phone}`);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as PendingTimezoneState;
+    } catch {
+      return null;
+    }
+  }
+
+  private async setPendingTimezone(
+    phone: string,
+    state: PendingTimezoneState,
+  ): Promise<void> {
+    await this.redis.set(
+      `${PENDING_TZ_PREFIX}${phone}`,
+      JSON.stringify(state),
+      PENDING_TZ_TTL,
+    );
+  }
+
+  private async clearPendingTimezone(phone: string): Promise<void> {
+    await this.redis.del(`${PENDING_TZ_PREFIX}${phone}`);
   }
 
   // ─── Find provider by phone ──────────────────────────────
@@ -560,6 +610,20 @@ export class WhatsAppProviderHandler {
     const provider = await this.findProviderByPhone(phone);
     const providerProfileId = provider?.providerProfile?.id;
 
+    // Cap. 46 — pre-AI: if we asked the user for their timezone in a
+    // previous turn and have a pending raw text in Redis, this incoming
+    // message is the answer. Resolve / retry / skip and bail before the
+    // LLM sees the city name out of context.
+    if (providerProfileId) {
+      const handled = await this.tryHandlePendingTimezone(
+        phone,
+        text,
+        providerProfileId,
+        providerName,
+      );
+      if (handled) return;
+    }
+
     // Load workspace context + financial data for personalized AI responses
     let workspaceContext;
     let tz = DEFAULT_TIMEZONE;
@@ -640,6 +704,19 @@ export class WhatsAppProviderHandler {
             this.logger.warn(`Learned facts extraction failed: ${errMsg}`);
           });
         }
+        return;
+      }
+
+      // Cap. 46 — post-AI gate: if any tool call is a date/time intent
+      // and the workspace is sitting on the unconfirmed default with a
+      // non-Mexican phone, ask for the timezone before executing the
+      // intent. The original raw text is parked in Redis and replayed
+      // once the user answers.
+      if (
+        providerProfileId &&
+        this.shouldGateForRiskyDefault(phone, workspaceContext, firewalled)
+      ) {
+        await this.openTimezoneGate(phone, text);
         return;
       }
 
@@ -727,7 +804,13 @@ export class WhatsAppProviderHandler {
             break;
 
           case AiIntent.CONFIGURAR_ZONA_HORARIA:
-            tz = await this.handleConfigurarZonaHoraria(phone, aiResponse.data, providerProfileId);
+            tz = await this.handleConfigurarZonaHoraria(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+              workspaceContext?.timezoneConfirmed ?? false,
+            );
             break;
 
           default:
@@ -993,6 +1076,8 @@ export class WhatsAppProviderHandler {
     phone: string,
     data: Record<string, any> | undefined,
     providerProfileId?: string,
+    oldTz: string = DEFAULT_TIMEZONE,
+    oldConfirmed: boolean = false,
   ): Promise<string> {
     if (!providerProfileId) {
       await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
@@ -1005,7 +1090,7 @@ export class WhatsAppProviderHandler {
         phone,
         '🤔 ¿En qué ciudad o zona horaria estás?\n\nEjemplo: *"Estoy en Miami"* o *"Mi zona es Tijuana"*',
       );
-      return DEFAULT_TIMEZONE;
+      return oldTz;
     }
 
     const resolved = resolveTimezone(input);
@@ -1014,7 +1099,7 @@ export class WhatsAppProviderHandler {
         phone,
         `🤔 No reconozco "${input}" como zona horaria. Prueba con el nombre de tu ciudad.\n\nEjemplos: *Miami*, *Tijuana*, *CDMX*, *Chihuahua*`,
       );
-      return DEFAULT_TIMEZONE;
+      return oldTz;
     }
 
     try {
@@ -1025,20 +1110,197 @@ export class WhatsAppProviderHandler {
       );
       if (!result.success) {
         await this.sendAndRecord(phone, `❌ ${result.message}`);
-        return DEFAULT_TIMEZONE;
+        return oldTz;
       }
 
+      // Cap. 46 — wall-clock migration only on the safe path:
+      // workspace was on the seed default and never confirmed, and the
+      // timezone actually changes. Confirmed→confirmed swaps are
+      // intentionally NOT migrated automatically (V0).
+      const migrationSummary = await this.migrateFutureIfFromDefault(
+        providerProfileId,
+        oldTz,
+        resolved,
+        oldConfirmed,
+        phone,
+      );
+
       const label = getTimezoneLabel(resolved);
+      const baseMsg = `🕐 *Zona horaria configurada:* ${label}\n\nTodas tus citas, recordatorios y briefings ahora usan esta hora.`;
       await this.sendAndRecord(
         phone,
-        `🕐 *Zona horaria configurada:* ${label}\n\nTodas tus citas, recordatorios y briefings ahora usan esta hora.`,
+        migrationSummary ? `${baseMsg}\n\n${migrationSummary}` : baseMsg,
         AiIntent.CONFIGURAR_ZONA_HORARIA,
       );
       return resolved;
     } catch (error: any) {
       this.logger.error(`Error setting timezone: ${error.message}`);
       await this.sendAndRecord(phone, '❌ No se pudo configurar la zona horaria. Intenta de nuevo.');
-      return DEFAULT_TIMEZONE;
+      return oldTz;
+    }
+  }
+
+  // ─── Cap. 46 — Timezone Confidence System gate ──────────
+
+  /**
+   * Returns true when the post-AI gate should fire: workspace is sitting
+   * on the seed default, never confirmed, the phone is not Mexican, and
+   * at least one of the LLM's tool calls is a date/time intent that
+   * would create or move a scheduled item.
+   */
+  private shouldGateForRiskyDefault(
+    phone: string,
+    workspaceContext:
+      | { timezone?: string; timezoneConfirmed?: boolean }
+      | undefined,
+    responses: AiResponse[],
+  ): boolean {
+    if (!workspaceContext) return false;
+    if (isMexicanPhone(phone)) return false;
+    if (workspaceContext.timezone && workspaceContext.timezone !== DEFAULT_TIMEZONE) {
+      return false;
+    }
+    if (workspaceContext.timezoneConfirmed) return false;
+    return responses.some((r) => TIMEZONE_GATE_INTENTS.has(r.intent));
+  }
+
+  private async openTimezoneGate(phone: string, rawText: string): Promise<void> {
+    await this.setPendingTimezone(phone, {
+      rawText,
+      attempts: 0,
+      createdAt: Date.now(),
+    });
+    await this.sendAndRecord(
+      phone,
+      `🤔 Antes de agendar, dime: ¿en qué *ciudad o país* trabajas normalmente? ` +
+        `Es para que la hora quede correcta.\n\n` +
+        `_(O escribe *luego* y seguimos con hora de México por ahora.)_`,
+    );
+  }
+
+  /**
+   * Pre-AI handler — runs before the LLM on every turn. If a pending
+   * timezone question is open, this incoming message is treated as the
+   * answer. Resolves, retries once, or marks the prompt as skipped.
+   * Returns true when it took ownership of the turn (caller bails).
+   */
+  private async tryHandlePendingTimezone(
+    phone: string,
+    text: string,
+    providerProfileId: string,
+    providerName: string,
+  ): Promise<boolean> {
+    const pending = await this.getPendingTimezone(phone);
+    if (!pending) return false;
+
+    const trimmed = text.trim();
+
+    if (isTimezoneSkipPhrase(trimmed) || pending.attempts >= MAX_PENDING_TZ_ATTEMPTS) {
+      await this.workspaceService.markTimezonePromptSkipped(providerProfileId);
+      await this.clearPendingTimezone(phone);
+      await this.sendAndRecord(
+        phone,
+        `Va. Por ahora dejo *Ciudad de México* como referencia. ` +
+          `Cuando quieras cambiarla, dime *"estoy en X"*.`,
+      );
+      return true;
+    }
+
+    const resolved = resolveTimezone(trimmed);
+    if (!resolved) {
+      pending.attempts += 1;
+      await this.setPendingTimezone(phone, pending);
+      await this.sendAndRecord(
+        phone,
+        `Esa no la conozco. Dime tu ciudad — *Amsterdam*, *Miami*, *Madrid*, *Bogotá*, lo que sea.\n\n` +
+          `_(O escribe *luego* si prefieres dejarlo para después.)_`,
+      );
+      return true;
+    }
+
+    // Read old state BEFORE setting, so we know whether to migrate.
+    const wsCtx = await this.workspaceService
+      .getWorkspaceContext(providerProfileId)
+      .catch(() => null);
+    const oldTz = wsCtx?.timezone ?? DEFAULT_TIMEZONE;
+    const oldConfirmed = wsCtx?.timezoneConfirmed ?? false;
+
+    const result = await this.workspaceService.setTimezone(
+      providerProfileId,
+      resolved,
+      'phone_risk_prompt',
+    );
+    if (!result.success) {
+      pending.attempts += 1;
+      await this.setPendingTimezone(phone, pending);
+      await this.sendAndRecord(phone, `${result.message}\n\nIntenta con otra ciudad.`);
+      return true;
+    }
+
+    await this.clearPendingTimezone(phone);
+
+    const migrationSummary = await this.migrateFutureIfFromDefault(
+      providerProfileId,
+      oldTz,
+      resolved,
+      oldConfirmed,
+      phone,
+    );
+
+    const label = getTimezoneLabel(resolved);
+    const baseMsg = `🕐 Listo. Tu zona quedó como *${label}*.`;
+    await this.sendAndRecord(
+      phone,
+      migrationSummary ? `${baseMsg}\n\n${migrationSummary}` : baseMsg,
+    );
+
+    // Replay the original raw text exactly once. The pending key is
+    // already cleared and timezoneConfirmed is now true, so neither the
+    // pre-AI handler nor the post-AI gate will fire on this re-call —
+    // there is no infinite loop.
+    await this.handleAiConversation(phone, pending.rawText, providerName);
+    return true;
+  }
+
+  /**
+   * Run wall-clock migration if and only if the previous workspace
+   * state was the seed default and never confirmed (Cap. 46 V0). Returns
+   * a short user-facing summary, or null when no migration ran.
+   */
+  private async migrateFutureIfFromDefault(
+    providerProfileId: string,
+    oldTz: string,
+    newTz: string,
+    oldConfirmed: boolean,
+    providerPhone: string,
+  ): Promise<string | null> {
+    if (oldConfirmed) return null;
+    if (oldTz !== DEFAULT_TIMEZONE) return null;
+    if (oldTz === newTz) return null;
+
+    try {
+      const result = await this.timezoneMigrationService.migrateFutureWallClock(
+        providerProfileId,
+        oldTz,
+        newTz,
+        providerPhone,
+      );
+      if (result.appointmentsMigrated === 0 && result.remindersMigrated === 0) {
+        return null;
+      }
+      const parts: string[] = [];
+      if (result.appointmentsMigrated > 0) {
+        parts.push(`${result.appointmentsMigrated} cita${result.appointmentsMigrated === 1 ? '' : 's'}`);
+      }
+      if (result.remindersMigrated > 0) {
+        parts.push(`${result.remindersMigrated} recordatorio${result.remindersMigrated === 1 ? '' : 's'}`);
+      }
+      return `Reajusté ${parts.join(' y ')} para que mantengan la hora local.`;
+    } catch (err: any) {
+      this.logger.error(
+        `Wall-clock migration failed for ${providerProfileId}: ${err.message}`,
+      );
+      return null;
     }
   }
 

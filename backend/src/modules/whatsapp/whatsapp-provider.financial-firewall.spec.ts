@@ -29,6 +29,7 @@ function makeHandler(): any {
     noop,
     noop,
     noop,
+    noop,
   );
 }
 

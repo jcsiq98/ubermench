@@ -9,6 +9,8 @@ import { sanitizeForWhatsApp } from '../../common/utils/whatsapp-format.utils';
 import {
   resolveTimezone,
   getTimezoneLabel,
+  isMexicanPhone,
+  isTimezoneSkipPhrase,
 } from '../../common/utils/timezone.utils';
 
 export enum OnboardingStep {
@@ -29,11 +31,6 @@ interface OnboardingSession {
 }
 
 const MAX_TIMEZONE_ATTEMPTS = 2;
-const SKIP_TIMEZONE_KEYWORDS = [
-  'luego', 'despues', 'después', 'mas tarde', 'más tarde',
-  'saltar', 'skip', 'no se', 'no sé', 'no lo se', 'no lo sé',
-  'paso', 'pasa', 'omitir', 'olvidalo', 'olvídalo', 'ninguna',
-];
 
 const SESSION_PREFIX = 'wa_onboarding:';
 const SESSION_TTL = 86400;
@@ -461,31 +458,14 @@ Responde SOLO con JSON.`,
     );
   }
 
+  // Skip phrase + Mexican phone detection moved to timezone.utils.ts so
+  // the M4 runtime gate can share the exact same predicates.
   private isSkipPhrase(text: string): boolean {
-    const normalized = text
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[.,;:!?"'`()¿¡]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (!normalized) return false;
-    return SKIP_TIMEZONE_KEYWORDS.some((kw) => {
-      const kwNorm = kw
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '');
-      return normalized === kwNorm || normalized.startsWith(kwNorm + ' ');
-    });
+    return isTimezoneSkipPhrase(text);
   }
 
-  /**
-   * +52 covers Mexico exclusively (no overlap with other country codes).
-   * The check tolerates whitespace and the Mexican mobile prefix `1`
-   * (so both `+52` and `+521` start with digits 52).
-   */
   private isMexicanPhone(phone: string): boolean {
-    const digits = phone.replace(/\D/g, '');
-    return digits.startsWith('52');
+    return isMexicanPhone(phone);
   }
 
   /**

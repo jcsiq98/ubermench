@@ -376,3 +376,43 @@ export function resolveTimezone(input: string): string | null {
 }
 
 export const DEFAULT_TIMEZONE = DEFAULT_TZ;
+
+// ─── Cap. 46 — Timezone Confidence System helpers ───────────────────
+
+/**
+ * +52 covers Mexico exclusively (no other country code starts with
+ * those digits). Tolerates whitespace, parens and the Mexican mobile
+ * prefix `1` (so both `+52` and `+521` start with digits 52).
+ */
+export function isMexicanPhone(phone: string): boolean {
+  return phone.replace(/\D/g, '').startsWith('52');
+}
+
+const SKIP_TIMEZONE_KEYWORDS: ReadonlyArray<string> = [
+  'luego', 'despues', 'después', 'mas tarde', 'más tarde',
+  'saltar', 'skip', 'no se', 'no sé', 'no lo se', 'no lo sé',
+  'paso', 'pasa', 'omitir', 'olvidalo', 'olvídalo', 'ninguna',
+];
+
+/**
+ * Detect whether a user reply to the timezone question is a "leave it
+ * for later" signal, so we don't keep retrying.
+ *
+ * Matches whole words (or whole phrase + trailing space) on accent-
+ * normalized lowercase text. Plain "no" is NOT in the keyword set on
+ * purpose — it would swallow legitimate replies that start with "no".
+ */
+export function isTimezoneSkipPhrase(text: string): boolean {
+  const normalized = text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[.,;:!?"'`()¿¡]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return false;
+  return SKIP_TIMEZONE_KEYWORDS.some((kw) => {
+    const kwNorm = kw.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return normalized === kwNorm || normalized.startsWith(kwNorm + ' ');
+  });
+}
