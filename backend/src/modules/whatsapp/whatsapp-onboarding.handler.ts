@@ -4,11 +4,17 @@ import { RedisService } from '../../config/redis.service';
 import { WhatsAppService } from './whatsapp.service';
 import { AiService } from '../ai/ai.service';
 import { AiContextService } from '../ai/ai-context.service';
+import { WorkspaceService } from '../workspace/workspace.service';
 import { sanitizeForWhatsApp } from '../../common/utils/whatsapp-format.utils';
+import {
+  resolveTimezone,
+  getTimezoneLabel,
+} from '../../common/utils/timezone.utils';
 
 export enum OnboardingStep {
   NAME = 'NAME',
   TRADE = 'TRADE',
+  TIMEZONE = 'TIMEZONE',
   DONE = 'DONE',
 }
 
@@ -16,7 +22,18 @@ interface OnboardingSession {
   step: OnboardingStep;
   name?: string;
   trade?: string;
+  // Cap. 46 — Timezone Confidence System (only set on the TIMEZONE step
+  // for non-Mexican phones).
+  providerProfileId?: string;
+  timezoneAttempts?: number;
 }
+
+const MAX_TIMEZONE_ATTEMPTS = 2;
+const SKIP_TIMEZONE_KEYWORDS = [
+  'luego', 'despues', 'después', 'mas tarde', 'más tarde',
+  'saltar', 'skip', 'no se', 'no sé', 'no lo se', 'no lo sé',
+  'paso', 'pasa', 'omitir', 'olvidalo', 'olvídalo', 'ninguna',
+];
 
 const SESSION_PREFIX = 'wa_onboarding:';
 const SESSION_TTL = 86400;
@@ -31,6 +48,7 @@ export class WhatsAppOnboardingHandler {
     private redis: RedisService,
     private aiService: AiService,
     private aiContextService: AiContextService,
+    private workspaceService: WorkspaceService,
   ) {}
 
   private async sendAndLog(
@@ -104,6 +122,8 @@ export class WhatsAppOnboardingHandler {
         return this.handleNameResponse(senderPhone, text, session);
       case OnboardingStep.TRADE:
         return this.handleTradeResponse(senderPhone, text, session);
+      case OnboardingStep.TIMEZONE:
+        return this.handleTimezoneResponse(senderPhone, text, session);
       case OnboardingStep.DONE:
         await this.sendAndLog(senderPhone, `Ya estás registrado. Escríbeme lo que necesites.`);
         return;
@@ -232,7 +252,7 @@ Responde con JSON.`,
     try {
       const dbPhone = this.normalizePhoneForDb(phone);
 
-      await this.prisma.user.create({
+      const created = await this.prisma.user.create({
         data: {
           phone: dbPhone,
           name: session.name,
@@ -246,6 +266,7 @@ Responde con JSON.`,
             },
           },
         },
+        include: { providerProfile: true },
       });
 
       await this.prisma.providerApplication.upsert({
@@ -268,15 +289,34 @@ Responde con JSON.`,
         },
       });
 
+      this.logger.log(
+        `✅ Provider registered: ${session.name} (${dbPhone}) — ${session.trade}`,
+      );
+
+      // Cap. 46 — for non-Mexican numbers we ask timezone before
+      // closing the session. Mexican numbers keep the original flow:
+      // default America/Mexico_City + the runtime gate (M4) is a
+      // no-op for them.
+      if (!this.isMexicanPhone(phone) && created.providerProfile?.id) {
+        session.step = OnboardingStep.TIMEZONE;
+        session.providerProfileId = created.providerProfile.id;
+        session.timezoneAttempts = 0;
+        await this.setSession(phone, session);
+
+        await this.sendAndLog(
+          phone,
+          `Una más, *${session.name}*: ¿en qué *ciudad o país* trabajas normalmente? ` +
+            `Es para que tus citas y recordatorios queden a la hora correcta.\n\n` +
+            `_(Si quieres dejarlo para después, escribe *luego*.)_`,
+        );
+        return;
+      }
+
       await this.clearSession(phone);
 
       await this.sendAndLog(
         phone,
         `Listo, *${session.name}*. Ya tienes tu Chalán.\n\nDime qué necesitas — por texto o por audio.`,
-      );
-
-      this.logger.log(
-        `✅ Provider registered: ${session.name} (${dbPhone}) — ${session.trade}`,
       );
     } catch (error: any) {
       this.logger.error(
@@ -286,6 +326,155 @@ Responde con JSON.`,
       await this.sendAndLog(phone, `Hubo un error. Intenta de nuevo enviando cualquier mensaje.`);
       await this.clearSession(phone);
     }
+  }
+
+  /**
+   * Cap. 46 — timezone step. Only reached for non-Mexican phones.
+   * Reads the user's reply, asks the LLM to extract a city/country,
+   * validates it via resolveTimezone, and either sets the timezone or
+   * marks the prompt as skipped after a couple of attempts.
+   */
+  private async handleTimezoneResponse(
+    phone: string,
+    text: string,
+    session: OnboardingSession,
+  ): Promise<void> {
+    const trimmed = text.trim();
+    const providerProfileId = session.providerProfileId;
+    const name = session.name || '';
+
+    if (!providerProfileId) {
+      this.logger.warn(
+        `TIMEZONE step reached without providerProfileId for ${phone} — closing session`,
+      );
+      await this.clearSession(phone);
+      await this.sendAndLog(
+        phone,
+        `Listo, ${name}. Escríbeme lo que necesites.`,
+      );
+      return;
+    }
+
+    if (this.isSkipPhrase(trimmed)) {
+      await this.workspaceService.markTimezonePromptSkipped(providerProfileId);
+      await this.clearSession(phone);
+      await this.sendAndLog(
+        phone,
+        `Va. Por ahora dejo *Ciudad de México* como referencia. ` +
+          `Cuando quieras cambiarla, dime *"estoy en X"* o *"mi zona es X"*.`,
+      );
+      this.logger.log(
+        `Timezone prompt skipped during onboarding for ${phone}`,
+      );
+      return;
+    }
+
+    const extracted = await this.aiService.extractFromText(
+      trimmed,
+      `El usuario está respondiendo a "¿En qué ciudad o país trabajas?".
+Extrae la ciudad o país que mencionó, en 1-3 palabras, sin artículos.
+Ejemplos:
+- "Estoy en Holanda" -> {"location": "Holanda"}
+- "Vivo en Miami desde hace años" -> {"location": "Miami"}
+- "Ámsterdam, ahí mero" -> {"location": "Ámsterdam"}
+- "México DF" -> {"location": "CDMX"}
+Si NO puedes identificar un lugar, responde {"location": null}.
+Responde SOLO con JSON.`,
+    );
+
+    const location: string | null = extracted?.location ?? null;
+    const resolved = location ? resolveTimezone(location) : null;
+
+    if (resolved) {
+      await this.workspaceService.getWorkspace(providerProfileId);
+      const result = await this.workspaceService.setTimezone(
+        providerProfileId,
+        resolved,
+        'user_explicit',
+      );
+
+      if (!result.success) {
+        await this.askTimezoneAgain(phone, session, result.message);
+        return;
+      }
+
+      await this.clearSession(phone);
+      const label = getTimezoneLabel(resolved);
+      await this.sendAndLog(
+        phone,
+        `Listo, *${name}*. Tu zona quedó como *${label}*. ` +
+          `Tus citas y recordatorios usarán esta hora.\n\n` +
+          `Dime qué necesitas — por texto o por audio.`,
+      );
+      this.logger.log(
+        `Onboarding timezone set: ${resolved} for ${phone} (provider=${providerProfileId})`,
+      );
+      return;
+    }
+
+    await this.askTimezoneAgain(phone, session);
+  }
+
+  private async askTimezoneAgain(
+    phone: string,
+    session: OnboardingSession,
+    extraReason?: string,
+  ): Promise<void> {
+    const attempts = (session.timezoneAttempts ?? 0) + 1;
+
+    if (attempts >= MAX_TIMEZONE_ATTEMPTS && session.providerProfileId) {
+      await this.workspaceService.markTimezonePromptSkipped(
+        session.providerProfileId,
+      );
+      await this.clearSession(phone);
+      await this.sendAndLog(
+        phone,
+        `Mejor seguimos. Por ahora dejo *Ciudad de México* como referencia. ` +
+          `Cuando quieras cambiarla, dime *"estoy en X"* o *"mi zona es X"*.`,
+      );
+      this.logger.log(
+        `Timezone prompt exhausted after ${attempts} attempts for ${phone}`,
+      );
+      return;
+    }
+
+    session.timezoneAttempts = attempts;
+    await this.setSession(phone, session);
+
+    const prefix = extraReason ? `${extraReason}\n\n` : '';
+    await this.sendAndLog(
+      phone,
+      `${prefix}No me cuadró esa zona. Dímela como ciudad o país: ` +
+        `*Amsterdam*, *Miami*, *Madrid*, *Bogotá*, *Buenos Aires*, lo que sea.\n\n` +
+        `_(O escribe *luego* si prefieres dejarlo para después.)_`,
+    );
+  }
+
+  private isSkipPhrase(text: string): boolean {
+    const normalized = text
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[.,;:!?"'`()¿¡]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) return false;
+    return SKIP_TIMEZONE_KEYWORDS.some((kw) => {
+      const kwNorm = kw
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      return normalized === kwNorm || normalized.startsWith(kwNorm + ' ');
+    });
+  }
+
+  /**
+   * +52 covers Mexico exclusively (no overlap with other country codes).
+   * The check tolerates whitespace and the Mexican mobile prefix `1`
+   * (so both `+52` and `+521` start with digits 52).
+   */
+  private isMexicanPhone(phone: string): boolean {
+    const digits = phone.replace(/\D/g, '');
+    return digits.startsWith('52');
   }
 
   /**
