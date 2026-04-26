@@ -45,6 +45,14 @@ import {
   sourceTextHash,
   type FinancialAuditPayload,
 } from '../../common/utils/financial-audit';
+import {
+  PENDING_FIN_PREFIX,
+  PENDING_FIN_TTL,
+  type PendingFinancialState,
+  type MissingFinancialField,
+  looksLikeFinancialClarificationQuestion,
+  shouldPlantPending,
+} from './whatsapp-provider.pending-financial';
 
 const JUNK_CLIENT_NAMES = new Set([
   'ninguno', 'ninguna', 'no', 'n/a', 'na', 'nada',
@@ -177,6 +185,35 @@ export class WhatsAppProviderHandler {
 
   private async clearPendingTimezone(phone: string): Promise<void> {
     await this.redis.del(`${PENDING_TZ_PREFIX}${phone}`);
+  }
+
+  // ─── Cap. 47 — pending financial clarification (M1 state) ─
+
+  private async getPendingFinancial(
+    phone: string,
+  ): Promise<PendingFinancialState | null> {
+    const raw = await this.redis.get(`${PENDING_FIN_PREFIX}${phone}`);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as PendingFinancialState;
+    } catch {
+      return null;
+    }
+  }
+
+  private async setPendingFinancial(
+    phone: string,
+    state: PendingFinancialState,
+  ): Promise<void> {
+    await this.redis.set(
+      `${PENDING_FIN_PREFIX}${phone}`,
+      JSON.stringify(state),
+      PENDING_FIN_TTL,
+    );
+  }
+
+  private async clearPendingFinancial(phone: string): Promise<void> {
+    await this.redis.del(`${PENDING_FIN_PREFIX}${phone}`);
   }
 
   // ─── Find provider by phone ──────────────────────────────
@@ -718,6 +755,19 @@ export class WhatsAppProviderHandler {
       ) {
         await this.openTimezoneGate(phone, text);
         return;
+      }
+
+      // Cap. 47 — M1: plant pending financial state when the assistant
+      // just emitted a clarification question backed by deterministic
+      // data in the user message. The pre-AI hook in the next turn
+      // (commit 3) reads pending and bypasses the LLM on a direct answer.
+      if (providerProfileId) {
+        await this.tryPlantPendingFinancial(
+          phone,
+          text,
+          firewalled,
+          srcHash,
+        );
       }
 
       for (const aiResponse of firewalled) {
@@ -4293,6 +4343,23 @@ export class WhatsAppProviderHandler {
         this.logger.log(
           `[firewall] fake_confirmation_unrecovered_needs_clarification phone=${phone} razon=${parsed.razon}`,
         );
+        // Cap. 47 — M1: plant pending here too. The recovery already
+        // determined razon; map it directly to the missing field
+        // without re-running the question detector. mensaje_ambiguo is
+        // intentionally not mapped — we don't know what's missing.
+        if (
+          providerProfileId &&
+          (parsed.razon === 'falta_tipo' || parsed.razon === 'falta_monto')
+        ) {
+          const kind: MissingFinancialField =
+            parsed.razon === 'falta_tipo' ? 'type' : 'amount';
+          await this.plantPendingFinancialDirect(
+            phone,
+            userMessage,
+            kind,
+            srcHash || sourceTextHash(userMessage),
+          );
+        }
         await this.sendAndRecord(
           phone,
           this.clarifyMessageForReason(parsed.razon),
@@ -4344,5 +4411,99 @@ export class WhatsAppProviderHandler {
     }
 
     return aiResponses;
+  }
+
+  // ─── Cap. 47 — pending financial planting (M1) ─────────────────
+  // Two entry points share the same persistence helper:
+  //   - tryPlantPendingFinancial: post-firewall path. Inspects the
+  //     assistant's outgoing CONVERSACION_GENERAL message and infers
+  //     `kind` from the question shape.
+  //   - plantPendingFinancialDirect: firewall recovery clarify branch
+  //     path. The recovery already mapped razon → kind, so we skip
+  //     the question detector.
+  // Redis failures are non-fatal: the LLM response was sent (or is
+  // about to be sent) regardless. Worst case the next turn falls
+  // through to the LLM general path — the same behavior as before
+  // M1 landed. Failure mode is "today" not "broken".
+
+  /**
+   * Persist pending state when `kind` is already determined by the
+   * caller. Includes the no-overwrite guard: if a pending entry already
+   * exists for this phone, we preserve the earlier one (which carries
+   * the original `sourceTextHash`) instead of silently dropping it.
+   *
+   * `redis.get` failure is logged but does NOT block the write — the
+   * guard is best-effort. `redis.set` failure is logged and swallowed.
+   */
+  private async plantPendingFinancialDirect(
+    phone: string,
+    userText: string,
+    kind: MissingFinancialField,
+    srcHash: string,
+  ): Promise<void> {
+    const decision = shouldPlantPending(kind, userText);
+    if (!decision.plant) {
+      this.logger.log(
+        `[pending-fin] skip phone=${phone} kind=${kind} reason=${decision.reason}`,
+      );
+      return;
+    }
+
+    try {
+      const existing = await this.getPendingFinancial(phone);
+      if (existing) {
+        this.logger.log(
+          `[pending-fin] existing_pending_skip phone=${phone} ` +
+            `existing_missing=${existing.missing} new_missing=${decision.state.missing}`,
+        );
+        return;
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `[pending-fin] redis_get_failure phone=${phone} err=${errMsg}`,
+      );
+    }
+
+    try {
+      await this.setPendingFinancial(phone, {
+        ...decision.state,
+        sourceTextHash: srcHash,
+        createdAt: Date.now(),
+      });
+      this.logger.log(
+        `[pending-fin] planted phone=${phone} missing=${decision.state.missing} srcHash=${srcHash}`,
+      );
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `[pending-fin] redis_set_failure phone=${phone} err=${errMsg}`,
+      );
+    }
+  }
+
+  /**
+   * Post-firewall hook: if the only response is a CONVERSACION_GENERAL
+   * whose message looks like a financial clarification question, plant
+   * pending state derived from the user message. Quick gating short-
+   * circuits the common no-op case (most turns don't qualify).
+   */
+  private async tryPlantPendingFinancial(
+    phone: string,
+    userText: string,
+    responses: AiResponse[],
+    srcHash: string,
+  ): Promise<void> {
+    if (responses.length !== 1) return;
+    const sole = responses[0];
+    if (sole.intent !== AiIntent.CONVERSACION_GENERAL) return;
+    const detected = looksLikeFinancialClarificationQuestion(sole.message || '');
+    if (!detected) return;
+    await this.plantPendingFinancialDirect(
+      phone,
+      userText,
+      detected.kind,
+      srcHash,
+    );
   }
 }
