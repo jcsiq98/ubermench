@@ -3,3 +3,6 @@ node_modules
 .env
 
 /generated/prisma
+
+# Run logs from one-off scripts in scripts/
+scripts/*.log
