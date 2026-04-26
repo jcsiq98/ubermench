@@ -10,6 +10,12 @@ const FOLLOWUP_DELAY_MS = 30 * 60 * 1000;
 export interface WallClockMigrationResult {
   appointmentsMigrated: number;
   remindersMigrated: number;
+  /** Ids whose DB scheduledAt update threw — agenda for these rows is
+   *  unchanged and the caller MUST surface the failure to the user. */
+  failedAppointments: string[];
+  /** Ids whose DB remindAt update threw — agenda for these rows is
+   *  unchanged and the caller MUST surface the failure to the user. */
+  failedReminders: string[];
 }
 
 /**
@@ -42,13 +48,19 @@ export class TimezoneMigrationService {
     newTz: string,
     providerPhone: string,
   ): Promise<WallClockMigrationResult> {
-    if (oldTz === newTz) {
-      return { appointmentsMigrated: 0, remindersMigrated: 0 };
-    }
+    const empty: WallClockMigrationResult = {
+      appointmentsMigrated: 0,
+      remindersMigrated: 0,
+      failedAppointments: [],
+      failedReminders: [],
+    };
+    if (oldTz === newTz) return empty;
 
     const now = new Date();
     let appointmentsMigrated = 0;
     let remindersMigrated = 0;
+    const failedAppointments: string[] = [];
+    const failedReminders: string[] = [];
 
     const appointments = await this.prisma.appointment.findMany({
       where: {
@@ -62,12 +74,28 @@ export class TimezoneMigrationService {
       const newScheduledAt = this.reanchor(a.scheduledAt, oldTz, newTz);
       if (newScheduledAt.getTime() === a.scheduledAt.getTime()) continue;
 
+      // The DB update is the source-of-truth half. If it fails the
+      // user's agenda still reads the old (wrong) UTC, so we surface it
+      // through the result. The queue rescheduling that follows is
+      // operational machinery the user does not see directly — its
+      // failures are logged but not surfaced (the cron safety nets
+      // — Cap. 38 — pick up stale jobs).
       try {
         await this.prisma.appointment.update({
           where: { id: a.id },
           data: { scheduledAt: newScheduledAt },
         });
+      } catch (err: any) {
+        this.logger.error(
+          `DB update failed for appointment ${a.id}: ${err.message}`,
+        );
+        failedAppointments.push(a.id);
+        continue;
+      }
 
+      appointmentsMigrated++;
+
+      try {
         await this.rescheduleAppointmentJobs(
           {
             id: a.id,
@@ -78,11 +106,10 @@ export class TimezoneMigrationService {
           },
           newTz,
         );
-
-        appointmentsMigrated++;
       } catch (err: any) {
-        this.logger.error(
-          `Failed to re-anchor appointment ${a.id}: ${err.message}`,
+        this.logger.warn(
+          `Queue reschedule failed for appointment ${a.id} ` +
+            `(DB is correct, cron safety net will recover): ${err.message}`,
         );
       }
     }
@@ -104,7 +131,17 @@ export class TimezoneMigrationService {
           where: { id: r.id },
           data: { remindAt: newRemindAt },
         });
+      } catch (err: any) {
+        this.logger.error(
+          `DB update failed for reminder ${r.id}: ${err.message}`,
+        );
+        failedReminders.push(r.id);
+        continue;
+      }
 
+      remindersMigrated++;
+
+      try {
         await this.queueService.removeJob(
           QUEUE_NAMES.PERSONAL_REMINDER,
           `personal-reminder-${r.id}`,
@@ -123,23 +160,33 @@ export class TimezoneMigrationService {
             { delay, jobId: `personal-reminder-${r.id}` },
           );
         }
-
-        remindersMigrated++;
       } catch (err: any) {
-        this.logger.error(
-          `Failed to re-anchor reminder ${r.id}: ${err.message}`,
+        this.logger.warn(
+          `Queue reschedule failed for reminder ${r.id} ` +
+            `(DB is correct): ${err.message}`,
         );
       }
     }
 
-    if (appointmentsMigrated > 0 || remindersMigrated > 0) {
+    const failureCount = failedAppointments.length + failedReminders.length;
+    if (
+      appointmentsMigrated > 0 ||
+      remindersMigrated > 0 ||
+      failureCount > 0
+    ) {
       this.logger.log(
         `Wall-clock migration ${oldTz} -> ${newTz} for ${providerId}: ` +
-          `${appointmentsMigrated} appointment(s), ${remindersMigrated} reminder(s) re-anchored`,
+          `${appointmentsMigrated} appointment(s), ${remindersMigrated} reminder(s) re-anchored; ` +
+          `${failedAppointments.length} appointment(s), ${failedReminders.length} reminder(s) FAILED`,
       );
     }
 
-    return { appointmentsMigrated, remindersMigrated };
+    return {
+      appointmentsMigrated,
+      remindersMigrated,
+      failedAppointments,
+      failedReminders,
+    };
   }
 
   private async rescheduleAppointmentJobs(

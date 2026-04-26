@@ -1285,22 +1285,50 @@ export class WhatsAppProviderHandler {
         newTz,
         providerPhone,
       );
-      if (result.appointmentsMigrated === 0 && result.remindersMigrated === 0) {
-        return null;
+
+      const successCount = result.appointmentsMigrated + result.remindersMigrated;
+      const failureCount =
+        result.failedAppointments.length + result.failedReminders.length;
+
+      if (successCount === 0 && failureCount === 0) return null;
+
+      const lines: string[] = [];
+      if (successCount > 0) {
+        const parts: string[] = [];
+        if (result.appointmentsMigrated > 0) {
+          parts.push(
+            `${result.appointmentsMigrated} cita${result.appointmentsMigrated === 1 ? '' : 's'}`,
+          );
+        }
+        if (result.remindersMigrated > 0) {
+          parts.push(
+            `${result.remindersMigrated} recordatorio${result.remindersMigrated === 1 ? '' : 's'}`,
+          );
+        }
+        lines.push(`Reajusté ${parts.join(' y ')} para que mantengan la hora local.`);
       }
-      const parts: string[] = [];
-      if (result.appointmentsMigrated > 0) {
-        parts.push(`${result.appointmentsMigrated} cita${result.appointmentsMigrated === 1 ? '' : 's'}`);
+      if (failureCount > 0) {
+        const parts: string[] = [];
+        if (result.failedAppointments.length > 0) {
+          parts.push(
+            `${result.failedAppointments.length} cita${result.failedAppointments.length === 1 ? '' : 's'}`,
+          );
+        }
+        if (result.failedReminders.length > 0) {
+          parts.push(
+            `${result.failedReminders.length} recordatorio${result.failedReminders.length === 1 ? '' : 's'}`,
+          );
+        }
+        lines.push(
+          `⚠️ No pude reajustar ${parts.join(' y ')} — los reviso de mi lado, no hagas nada.`,
+        );
       }
-      if (result.remindersMigrated > 0) {
-        parts.push(`${result.remindersMigrated} recordatorio${result.remindersMigrated === 1 ? '' : 's'}`);
-      }
-      return `Reajusté ${parts.join(' y ')} para que mantengan la hora local.`;
+      return lines.join('\n\n');
     } catch (err: any) {
       this.logger.error(
         `Wall-clock migration failed for ${providerProfileId}: ${err.message}`,
       );
-      return null;
+      return `⚠️ No pude reajustar tus citas existentes — las reviso de mi lado.`;
     }
   }
 
