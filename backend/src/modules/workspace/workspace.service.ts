@@ -9,6 +9,7 @@ import {
   WorkspaceSchedule,
   WorkspaceAutoReply,
   StructuredFact,
+  TimezoneSource,
 } from '../ai/ai.types';
 import { isValidTimezone, DEFAULT_TIMEZONE } from '../../common/utils/timezone.utils';
 
@@ -35,6 +36,8 @@ export class WorkspaceService {
       },
       notes: workspace.notes,
       timezone: workspace.timezone || DEFAULT_TIMEZONE,
+      timezoneConfirmed: workspace.timezoneConfirmed ?? false,
+      timezoneSource: (workspace.timezoneSource as TimezoneSource | null) ?? null,
       learnedFacts: this.parseLearnedFacts(workspace.learnedFacts),
     };
   }
@@ -258,21 +261,62 @@ export class WorkspaceService {
     );
   }
 
+  /**
+   * Sources that imply the value can be trusted by the rest of the
+   * system. Anything outside this set leaves `timezoneConfirmed` false.
+   * Cap. 46 — Timezone Confidence System.
+   */
+  private static readonly TRUSTED_TIMEZONE_SOURCES: ReadonlySet<TimezoneSource> =
+    new Set<TimezoneSource>([
+      'existing_non_default',
+      'phone_risk_prompt',
+      'user_mention',
+      'user_explicit',
+      'admin',
+    ]);
+
   async setTimezone(
     providerId: string,
     timezone: string,
+    source: TimezoneSource = 'admin',
   ): Promise<{ success: boolean; message: string }> {
     if (!isValidTimezone(timezone)) {
       return { success: false, message: `"${timezone}" no es una zona horaria válida.` };
     }
 
+    const confirmed = WorkspaceService.TRUSTED_TIMEZONE_SOURCES.has(source);
+
     await this.prisma.workspaceProfile.update({
       where: { providerId },
-      data: { timezone },
+      data: {
+        timezone,
+        timezoneConfirmed: confirmed,
+        timezoneSource: source,
+      },
     });
     await this.invalidateCache(providerId);
-    this.logger.log(`Timezone set to ${timezone} for provider ${providerId}`);
+    this.logger.log(
+      `Timezone set to ${timezone} for provider ${providerId} (source=${source}, confirmed=${confirmed})`,
+    );
     return { success: true, message: `Zona horaria configurada: ${timezone}` };
+  }
+
+  /**
+   * Record that we asked the provider for a timezone but did not get a
+   * resolvable answer (or they postponed). Leaves the timezone value
+   * unchanged but stamps the source so the runtime gate (M4) does not
+   * keep asking on every date/time intent.
+   */
+  async markTimezonePromptSkipped(providerId: string): Promise<void> {
+    await this.prisma.workspaceProfile.update({
+      where: { providerId },
+      data: {
+        timezoneSource: 'phone_risk_prompt_skipped',
+        timezoneConfirmed: false,
+      },
+    });
+    await this.invalidateCache(providerId);
+    this.logger.log(`Timezone prompt skipped for provider ${providerId}`);
   }
 
   async getTimezone(providerId: string): Promise<string> {

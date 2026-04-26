@@ -165,12 +165,42 @@ export interface StructuredFact {
   lastSeen: string;  // ISO date YYYY-MM-DD
 }
 
+/**
+ * Source that last set the workspace timezone. Used by the Timezone
+ * Confidence System (Cap. 46) to decide whether the value can be
+ * trusted, asked again, or migrated wall-clock-style on change.
+ *
+ * - `default`               — sitting on the seed value, never asked.
+ * - `existing_non_default`  — backfill: row had a non-default timezone
+ *   before the confidence flag existed, so we treat it as confirmed.
+ * - `phone_risk_prompt`     — runtime gate asked and got a resolvable
+ *   answer (M4).
+ * - `phone_risk_prompt_skipped` — runtime gate asked, user did not
+ *   answer or the answer did not resolve (M4).
+ * - `user_mention`          — the LLM called configurar_zona_horaria
+ *   off an in-conversation mention ("estoy en Holanda").
+ * - `user_explicit`         — onboarding flow asked the question
+ *   directly (M3).
+ * - `admin`                 — set out-of-band by an admin / repair
+ *   script.
+ */
+export type TimezoneSource =
+  | 'default'
+  | 'existing_non_default'
+  | 'phone_risk_prompt'
+  | 'phone_risk_prompt_skipped'
+  | 'user_mention'
+  | 'user_explicit'
+  | 'admin';
+
 export interface WorkspaceContextDto {
   services: WorkspaceService[];
   schedule: WorkspaceSchedule;
   autoReply: WorkspaceAutoReply;
   notes?: string | null;
   timezone?: string;
+  timezoneConfirmed?: boolean;
+  timezoneSource?: TimezoneSource | null;
   learnedFacts?: StructuredFact[];
   recentExpenses?: RecentExpenseContext[];
   activeRecurringExpenses?: ActiveRecurringContext[];

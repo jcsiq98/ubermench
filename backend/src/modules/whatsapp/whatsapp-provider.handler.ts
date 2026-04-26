@@ -1018,7 +1018,11 @@ export class WhatsAppProviderHandler {
     }
 
     try {
-      const result = await this.workspaceService.setTimezone(providerProfileId, resolved);
+      const result = await this.workspaceService.setTimezone(
+        providerProfileId,
+        resolved,
+        'user_mention',
+      );
       if (!result.success) {
         await this.sendAndRecord(phone, `❌ ${result.message}`);
         return DEFAULT_TIMEZONE;

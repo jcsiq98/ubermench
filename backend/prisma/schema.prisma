@@ -115,6 +115,10 @@ model WorkspaceProfile {
   notes         String?
   learnedFacts  Json     @default("[]") @map("learned_facts")
   timezone      String   @default("America/Mexico_City")
+  // Confidence System (Cap. 46) — distinguish "default by inertia" from
+  // "default because the provider really works in CDMX". See HISTORIA_DECISIONES.
+  timezoneConfirmed Boolean @default(false) @map("timezone_confirmed")
+  timezoneSource    String? @map("timezone_source")
 
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
