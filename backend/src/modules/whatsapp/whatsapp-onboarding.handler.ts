@@ -94,21 +94,32 @@ export class WhatsAppOnboardingHandler {
     const session = await this.getSession(senderPhone);
     const dbPhone = this.normalizePhoneForDb(senderPhone);
 
-    const existing = await this.prisma.user.findUnique({
-      where: { phone: dbPhone },
-      include: { providerProfile: true },
-    });
+    // Active onboarding step takes priority over the "you already have an
+    // account" early return. Cap. 46: TRADE creates the User +
+    // ProviderProfile and hands off to the TIMEZONE step; without this
+    // ordering the next user message would hit the early return because
+    // the profile now exists, and we would never finish the timezone
+    // question.
+    const isActiveOnboardingStep =
+      !!session && session.step !== OnboardingStep.DONE;
 
-    if (existing?.providerProfile) {
-      await this.sendAndLog(
-        senderPhone,
-        `👋 ¡Hola ${existing.name || ''}! Ya tienes tu cuenta activa.\n\n` +
-          `Puedes escribirme lo que necesites. Por ejemplo:\n` +
-          `• "Cobré 800 de una fuga"\n` +
-          `• "Mañana tengo trabajo a las 10"\n` +
-          `• "¿Cuánto llevo esta semana?"`,
-      );
-      return;
+    if (!isActiveOnboardingStep) {
+      const existing = await this.prisma.user.findUnique({
+        where: { phone: dbPhone },
+        include: { providerProfile: true },
+      });
+
+      if (existing?.providerProfile) {
+        await this.sendAndLog(
+          senderPhone,
+          `👋 ¡Hola ${existing.name || ''}! Ya tienes tu cuenta activa.\n\n` +
+            `Puedes escribirme lo que necesites. Por ejemplo:\n` +
+            `• "Cobré 800 de una fuga"\n` +
+            `• "Mañana tengo trabajo a las 10"\n` +
+            `• "¿Cuánto llevo esta semana?"`,
+        );
+        return;
+      }
     }
 
     await this.aiContextService.addMessage(senderPhone, 'user', text, 'onboarding');

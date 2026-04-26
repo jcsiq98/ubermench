@@ -1,5 +1,8 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
-import { WhatsAppOnboardingHandler } from './whatsapp-onboarding.handler';
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return */
+import {
+  WhatsAppOnboardingHandler,
+  OnboardingStep,
+} from './whatsapp-onboarding.handler';
 
 // Pure-helper tests for the Cap. 46 phone gate + skip phrase detector.
 // Both helpers are deterministic and have no I/O, so we instantiate the
@@ -80,5 +83,199 @@ describe('WhatsAppOnboardingHandler — isSkipPhrase', () => {
 
   it.each(notSkip)('does not flag "%s" as skip', (text) => {
     expect(handler.isSkipPhrase(text)).toBe(false);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────
+// End-to-end flow test (Cap. 46 — Roberto regression)
+//
+// Reproduces the exact path GPT-5.5 flagged: TRADE creates the User +
+// ProviderProfile, the next message must reach handleTimezoneResponse
+// even though existing.providerProfile is now truthy. Failing version
+// short-circuits with "Ya tienes tu cuenta activa".
+// ───────────────────────────────────────────────────────────────────
+
+interface RedisState {
+  store: Map<string, string>;
+}
+
+function makeRedis(state: RedisState) {
+  return {
+    get: jest.fn(async (key: string) => state.store.get(key) ?? null),
+    set: jest.fn(async (key: string, value: string) => {
+      state.store.set(key, value);
+    }),
+    del: jest.fn(async (key: string) => {
+      state.store.delete(key);
+    }),
+  };
+}
+
+function makeFullHandler(opts: {
+  initialSession?: { step: OnboardingStep; name?: string; trade?: string };
+  extractFromTextImpl?: (text: string, prompt: string) => Promise<any>;
+}) {
+  const phone = '+15755716627'; // Roberto-style: +1 country code
+  const redisState: RedisState = { store: new Map() };
+  if (opts.initialSession) {
+    redisState.store.set(
+      `wa_onboarding:${phone}`,
+      JSON.stringify(opts.initialSession),
+    );
+  }
+
+  const redis = makeRedis(redisState);
+
+  const sendTextMessage = jest.fn(async () => undefined);
+  const whatsapp = { sendTextMessage };
+
+  const userCreate = jest.fn(async () => ({
+    id: 'user-1',
+    phone: phone.replace(/\D/g, ''),
+    name: 'Roberto',
+    providerProfile: { id: 'pp-123' },
+  }));
+  const userFindUnique = jest.fn(async () => null);
+  const applicationUpsert = jest.fn(async () => undefined);
+  const prisma = {
+    user: { create: userCreate, findUnique: userFindUnique },
+    providerApplication: { upsert: applicationUpsert },
+  };
+
+  const aiService = {
+    extractFromText: jest.fn(
+      opts.extractFromTextImpl ?? (async () => ({ location: null })),
+    ),
+  };
+  const aiContextService = {
+    addMessage: jest.fn(async () => undefined),
+  };
+
+  const setTimezone = jest.fn(async () => ({
+    success: true,
+    message: 'Zona horaria configurada: Europe/Amsterdam',
+  }));
+  const getWorkspace = jest.fn(async () => ({ providerId: 'pp-123' }));
+  const markTimezonePromptSkipped = jest.fn(async () => undefined);
+  const workspaceService = {
+    getWorkspace,
+    setTimezone,
+    markTimezonePromptSkipped,
+  };
+
+  const handler = new (WhatsAppOnboardingHandler as any)(
+    whatsapp,
+    prisma,
+    redis,
+    aiService,
+    aiContextService,
+    workspaceService,
+  );
+
+  return {
+    handler,
+    phone,
+    redisState,
+    redis,
+    sendTextMessage,
+    userCreate,
+    userFindUnique,
+    applicationUpsert,
+    aiService,
+    aiContextService,
+    workspaceService,
+    setTimezone,
+    getWorkspace,
+    markTimezonePromptSkipped,
+  };
+}
+
+describe('WhatsAppOnboardingHandler — end-to-end TRADE → TIMEZONE (Roberto regression)', () => {
+  it('does not short-circuit on "Ya tienes tu cuenta activa" between TRADE and TIMEZONE', async () => {
+    const env = makeFullHandler({
+      initialSession: { step: OnboardingStep.TRADE, name: 'Roberto' },
+      extractFromTextImpl: async (text: string, prompt: string) => {
+        if (prompt.includes('"¿A qué te dedicas?"')) {
+          return { trade: 'plomero' };
+        }
+        if (prompt.includes('"¿En qué ciudad o país trabajas?"')) {
+          return { location: 'Holanda' };
+        }
+        return null;
+      },
+    });
+
+    // 1. Provider answers their trade. TRADE handler creates the
+    //    User + ProviderProfile and advances the session to TIMEZONE.
+    await env.handler.handleMessage(env.phone, 'Roberto', 'plomero');
+
+    expect(env.userCreate).toHaveBeenCalledTimes(1);
+    expect(env.applicationUpsert).toHaveBeenCalledTimes(1);
+
+    const sessionAfterTrade = JSON.parse(
+      env.redisState.store.get(`wa_onboarding:${env.phone}`)!,
+    );
+    expect(sessionAfterTrade.step).toBe(OnboardingStep.TIMEZONE);
+    expect(sessionAfterTrade.providerProfileId).toBe('pp-123');
+
+    expect(env.setTimezone).not.toHaveBeenCalled();
+
+    const tradeQuestion = env.sendTextMessage.mock.calls
+      .map((c) => c[1] as string)
+      .join('\n');
+    expect(tradeQuestion).toMatch(/ciudad o país/i);
+
+    // 2. Provider answers "Holanda". This is the message that, before
+    //    the fix, was eaten by the "Ya tienes tu cuenta activa" early
+    //    return because ProviderProfile now exists.
+    env.sendTextMessage.mockClear();
+    await env.handler.handleMessage(env.phone, 'Roberto', 'Holanda');
+
+    // The early-return user lookup must NOT run while a session is
+    // active — that was the root cause of the blocker.
+    expect(env.userFindUnique).not.toHaveBeenCalled();
+
+    // The "Ya tienes tu cuenta activa" message must NOT be sent.
+    const allMessagesAfterHolanda = env.sendTextMessage.mock.calls
+      .map((c) => c[1] as string)
+      .join('\n');
+    expect(allMessagesAfterHolanda).not.toMatch(/Ya tienes tu cuenta activa/i);
+
+    // setTimezone called with the resolved tz and the explicit source.
+    expect(env.setTimezone).toHaveBeenCalledTimes(1);
+    expect(env.setTimezone).toHaveBeenCalledWith(
+      'pp-123',
+      'Europe/Amsterdam',
+      'user_explicit',
+    );
+
+    // Workspace row ensured to exist before the update (lazy create).
+    expect(env.getWorkspace).toHaveBeenCalledWith('pp-123');
+
+    // Final welcome message mentions the configured zone.
+    expect(allMessagesAfterHolanda).toMatch(/Tu zona quedó como/i);
+
+    // Session cleared.
+    expect(env.redisState.store.has(`wa_onboarding:${env.phone}`)).toBe(false);
+
+    // markTimezonePromptSkipped MUST NOT fire on the happy path.
+    expect(env.markTimezonePromptSkipped).not.toHaveBeenCalled();
+  });
+
+  it('falls back to "Ya tienes tu cuenta activa" only when there is no active session', async () => {
+    const env = makeFullHandler({});
+    env.userFindUnique.mockResolvedValueOnce({
+      id: 'user-1',
+      name: 'Roberto',
+      providerProfile: { id: 'pp-123' },
+    } as any);
+
+    await env.handler.handleMessage(env.phone, 'Roberto', 'cobré 800');
+
+    const messages = env.sendTextMessage.mock.calls
+      .map((c) => c[1] as string)
+      .join('\n');
+    expect(messages).toMatch(/Ya tienes tu cuenta activa/i);
+    expect(env.userFindUnique).toHaveBeenCalledTimes(1);
   });
 });
