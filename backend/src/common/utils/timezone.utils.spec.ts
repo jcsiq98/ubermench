@@ -2,6 +2,7 @@ import {
   resolveTimezone,
   isValidTimezone,
   DEFAULT_TIMEZONE,
+  parseScheduledDate,
 } from './timezone.utils';
 
 describe('resolveTimezone', () => {
@@ -85,5 +86,46 @@ describe('isValidTimezone', () => {
 describe('DEFAULT_TIMEZONE', () => {
   it('is America/Mexico_City', () => {
     expect(DEFAULT_TIMEZONE).toBe('America/Mexico_City');
+  });
+});
+
+describe('parseScheduledDate', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-08T04:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('parses Oscar-style reminder with Spanish date and pm time', () => {
+    const parsed = parseScheduledDate(
+      'mañana viernes 8 de mayo',
+      '1pm',
+      'America/New_York',
+    );
+
+    expect(parsed?.toISOString()).toBe('2026-05-08T17:00:00.000Z');
+  });
+
+  it('extracts colloquial time from the date text when the model bundles it', () => {
+    const parsed = parseScheduledDate(
+      'mañana a la 1',
+      undefined,
+      'America/New_York',
+    );
+
+    expect(parsed?.toISOString()).toBe('2026-05-09T17:00:00.000Z');
+  });
+
+  it('does not mistake the day number in "8 de mayo" for an hour', () => {
+    const parsed = parseScheduledDate(
+      'viernes 8 de mayo',
+      undefined,
+      'America/New_York',
+    );
+
+    expect(parsed?.toISOString()).toBe('2026-05-08T13:00:00.000Z');
   });
 });

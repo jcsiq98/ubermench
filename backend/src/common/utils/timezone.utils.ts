@@ -202,15 +202,10 @@ export function parseScheduledDate(
 
   const now = toLocalTime(new Date(), tz);
 
-  let hours = 9;
-  let minutes = 0;
-  if (timeStr) {
-    const parts = timeStr.split(':').map(Number);
-    if (!isNaN(parts[0])) {
-      hours = parts[0];
-      minutes = parts[1] || 0;
-    }
-  }
+  const combinedText = `${dateStr || ''} ${timeStr || ''}`.trim();
+  const parsedTime = parseWallClockTime(timeStr || combinedText, Boolean(timeStr));
+  const hours = parsedTime?.hours ?? 9;
+  const minutes = parsedTime?.minutes ?? 0;
 
   if (!dateStr && timeStr) {
     const date = new Date(now);
@@ -225,14 +220,18 @@ export function parseScheduledDate(
     let localDate: Date;
     const lower = (dateStr || '').toLowerCase().trim();
 
-    if (lower === 'hoy' || lower === 'today') {
-      localDate = new Date(now);
-    } else if (lower === 'mañana' || lower === 'manana' || lower === 'tomorrow') {
-      localDate = new Date(now);
-      localDate.setDate(localDate.getDate() + 1);
+    const spanishDate = parseSpanishMonthDate(lower, now);
+
+    if (spanishDate) {
+      localDate = spanishDate;
     } else if (lower.includes('pasado mañana') || lower.includes('pasado manana')) {
       localDate = new Date(now);
       localDate.setDate(localDate.getDate() + 2);
+    } else if (lower === 'hoy' || lower === 'today' || /\bhoy\b/.test(lower)) {
+      localDate = new Date(now);
+    } else if (lower === 'mañana' || lower === 'manana' || lower === 'tomorrow' || /\b(mañana|manana|tomorrow)\b/.test(lower)) {
+      localDate = new Date(now);
+      localDate.setDate(localDate.getDate() + 1);
     } else if (/^(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)/.test(lower)) {
       localDate = getNextDayOfWeek(lower, tz);
     } else {
@@ -253,6 +252,78 @@ export function parseScheduledDate(
   } catch {
     return null;
   }
+}
+
+function parseWallClockTime(
+  raw?: string,
+  allowBareNumber: boolean = false,
+): { hours: number; minutes: number } | null {
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+
+  const hasExplicitTimeSignal =
+    /\ba\s+la?s?\s+\d{1,2}\b/.test(lower)
+    || /\d{1,2}:\d{2}/.test(lower)
+    || /\d{1,2}\s*(a\.?\s*m\.?|p\.?\s*m\.?|am|pm)\b/.test(lower);
+  if (!hasExplicitTimeSignal && !(allowBareNumber && /^\s*\d{1,2}\s*$/.test(lower))) {
+    return null;
+  }
+
+  const match = lower.match(
+    /(?:a\s+la?s?\s+)?(\d{1,2})(?::(\d{2}))?\s*(a\.?\s*m\.?|p\.?\s*m\.?|am|pm)?/,
+  );
+  if (!match) return null;
+
+  let hours = Number(match[1]);
+  const minutes = match[2] ? Number(match[2]) : 0;
+  const suffix = match[3]?.replace(/\s|\./g, '');
+
+  if (!Number.isFinite(hours) || hours < 0 || hours > 23) return null;
+  if (!Number.isFinite(minutes) || minutes < 0 || minutes > 59) return null;
+
+  if (suffix === 'pm' && hours < 12) {
+    hours += 12;
+  } else if (suffix === 'am' && hours === 12) {
+    hours = 0;
+  } else if (!suffix && hours >= 1 && hours <= 7 && /\ba\s+la?s?\s+\d{1,2}\b/.test(lower)) {
+    // In Mexican scheduling speech, "a la 1/2/3..." usually means afternoon
+    // unless AM is explicit. This matches the tool prompt examples.
+    hours += 12;
+  }
+
+  return { hours, minutes };
+}
+
+function parseSpanishMonthDate(raw: string, now: Date): Date | null {
+  const months: Record<string, number> = {
+    enero: 0,
+    febrero: 1,
+    marzo: 2,
+    abril: 3,
+    mayo: 4,
+    junio: 5,
+    julio: 6,
+    agosto: 7,
+    septiembre: 8,
+    setiembre: 8,
+    octubre: 9,
+    noviembre: 10,
+    diciembre: 11,
+  };
+
+  const match = raw.match(
+    /(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)?\s*(\d{1,2})\s+de\s+([a-záéíóúñ]+)(?:\s+de\s+(\d{4}))?/,
+  );
+  if (!match) return null;
+
+  const day = Number(match[1]);
+  const month = months[match[2]];
+  const year = match[3] ? Number(match[3]) : now.getFullYear();
+
+  if (!month && month !== 0) return null;
+  if (!Number.isFinite(day) || day < 1 || day > 31) return null;
+
+  return new Date(year, month, day);
 }
 
 /**
