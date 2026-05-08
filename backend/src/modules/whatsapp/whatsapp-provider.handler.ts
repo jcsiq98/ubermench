@@ -110,6 +110,18 @@ interface PendingAppointmentCloseoutState {
   scheduledAt: string;
 }
 
+const PENDING_APPOINTMENT_FOLLOWUPS_PREFIX = 'wa_pending_appointment_followups:';
+const PENDING_APPOINTMENT_FOLLOWUPS_TTL = 12 * 60 * 60; // 12 hours
+
+interface PendingAppointmentFollowupState {
+  appointmentId: string;
+  providerProfileId: string;
+  clientName?: string | null;
+  description?: string | null;
+  scheduledAt: string;
+  askedAt: string;
+}
+
 const TIMEZONE_GATE_INTENTS = new Set<AiIntent>([
   AiIntent.AGENDAR_CITA,
   AiIntent.MODIFICAR_CITA,
@@ -265,6 +277,52 @@ export class WhatsAppProviderHandler {
   private async clearPendingAppointmentCloseout(phone: string): Promise<void> {
     const normalizedPhone = canonicalizePhoneE164(phone);
     await this.redis.del(`${PENDING_APPOINTMENT_CLOSEOUT_PREFIX}${normalizedPhone}`);
+  }
+
+  private async getPendingAppointmentFollowups(
+    phone: string,
+  ): Promise<PendingAppointmentFollowupState[]> {
+    const normalizedPhone = canonicalizePhoneE164(phone);
+    const raw = await this.redis.get(`${PENDING_APPOINTMENT_FOLLOWUPS_PREFIX}${normalizedPhone}`);
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed)
+        ? parsed.sort((a, b) => String(a.askedAt).localeCompare(String(b.askedAt)))
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async setPendingAppointmentFollowups(
+    phone: string,
+    items: PendingAppointmentFollowupState[],
+  ): Promise<void> {
+    const normalizedPhone = canonicalizePhoneE164(phone);
+    if (items.length === 0) {
+      await this.redis.del(`${PENDING_APPOINTMENT_FOLLOWUPS_PREFIX}${normalizedPhone}`);
+      return;
+    }
+
+    await this.redis.set(
+      `${PENDING_APPOINTMENT_FOLLOWUPS_PREFIX}${normalizedPhone}`,
+      JSON.stringify(items),
+      PENDING_APPOINTMENT_FOLLOWUPS_TTL,
+    );
+  }
+
+  private async removePendingAppointmentFollowups(
+    phone: string,
+    appointmentIds: string[],
+  ): Promise<void> {
+    if (appointmentIds.length === 0) return;
+    const remove = new Set(appointmentIds);
+    const pending = await this.getPendingAppointmentFollowups(phone);
+    await this.setPendingAppointmentFollowups(
+      phone,
+      pending.filter((item) => !remove.has(item.appointmentId)),
+    );
   }
 
   // ─── Find provider by phone ──────────────────────────────
@@ -439,14 +497,25 @@ export class WhatsAppProviderHandler {
       this.logger.warn(`Failed to update tracking fields: ${err.message}`),
     );
 
+    const providerProfileId = provider.providerProfile?.id;
+
     // Get or init session
     let session = await this.getSession(senderPhone);
     if (!session) {
       session = {
         state: ProviderState.IDLE,
-        providerProfileId: provider.providerProfile?.id,
+        providerProfileId,
         providerUserId: provider.id,
       };
+    }
+
+    if (buttonReply && providerProfileId) {
+      const handled = await this.tryHandleAppointmentFollowupButton(
+        senderPhone,
+        buttonReply,
+        providerProfileId,
+      );
+      if (handled) return;
     }
 
     // Normalize once for all keyword checks (strips accents + punctuation)
@@ -711,6 +780,17 @@ export class WhatsAppProviderHandler {
         phone,
         text,
         providerProfileId,
+        sourceTextHash(text),
+      );
+      if (handled) return;
+    }
+
+    if (providerProfileId) {
+      const handled = await this.tryHandlePendingAppointmentFollowupResponse(
+        phone,
+        text,
+        providerProfileId,
+        DEFAULT_TIMEZONE,
         sourceTextHash(text),
       );
       if (handled) return;
@@ -2556,6 +2636,28 @@ export class WhatsAppProviderHandler {
     }
   }
 
+  private async tryHandleAppointmentFollowupButton(
+    phone: string,
+    buttonReply: { id: string; title: string },
+    providerProfileId: string,
+  ): Promise<boolean> {
+    const done = buttonReply.id.match(/^appt_done_(.+)$/);
+    const noShow = buttonReply.id.match(/^appt_no_(.+)$/);
+    if (!done && !noShow) return false;
+
+    const appointmentId = (done || noShow)![1];
+    const status = done ? 'completed' : 'no_show';
+    await this.removePendingAppointmentFollowups(phone, [appointmentId]);
+    await this.handleConfirmarResultadoCita(
+      phone,
+      { appointmentId, status },
+      providerProfileId,
+      DEFAULT_TIMEZONE,
+      sourceTextHash(buttonReply.id),
+    );
+    return true;
+  }
+
   // ─── Appointments: confirmar resultado ────────────────
 
   private async handleConfirmarResultadoCita(
@@ -2581,8 +2683,19 @@ export class WhatsAppProviderHandler {
 
     let appointment: Awaited<ReturnType<typeof this.appointmentsService.findByContext>>[number] | null = null;
 
-    const dateHint = this.appointmentsService.parseScheduledDate(data?.date, data?.time, tz);
-    if (dateHint || data?.clientName) {
+    if (data?.appointmentId) {
+      appointment = await this.prisma.appointment.findFirst({
+        where: {
+          id: data.appointmentId,
+          providerId: providerProfileId,
+        },
+      }) as any;
+    }
+
+    const dateHint = appointment
+      ? null
+      : this.appointmentsService.parseScheduledDate(data?.date, data?.time, tz);
+    if (!appointment && (dateHint || data?.clientName)) {
       const matches = await this.appointmentsService.findByContext(
         providerProfileId,
         data?.clientName,
@@ -2607,10 +2720,23 @@ export class WhatsAppProviderHandler {
       return;
     }
 
+    if (
+      (status === 'completed' || status === 'no_show') &&
+      appointment.scheduledAt.getTime() > Date.now() + 5 * 60 * 1000
+    ) {
+      await this.sendAndRecord(
+        phone,
+        `Esa cita todavía no pasa. ¿Quieres cancelarla o cambiarla?`,
+        AiIntent.CONFIRMAR_RESULTADO_CITA,
+      );
+      return;
+    }
+
     try {
       await this.appointmentsService.markResult(appointment.id, status);
       await this.cancelAppointmentFollowup(appointment.id);
       await this.cancelAppointmentReminder(appointment.id);
+      await this.removePendingAppointmentFollowups(phone, [appointment.id]);
 
       const statusLabels: Record<string, string> = {
         completed: '✅ *Cita completada.* ¡Buen trabajo!',
@@ -4598,6 +4724,107 @@ export class WhatsAppProviderHandler {
       srcHash,
     );
     return true;
+  }
+
+  private async tryHandlePendingAppointmentFollowupResponse(
+    phone: string,
+    text: string,
+    providerProfileId: string,
+    tz: string,
+    srcHash: string,
+  ): Promise<boolean> {
+    const pending = (await this.getPendingAppointmentFollowups(phone))
+      .filter((item) => item.providerProfileId === providerProfileId);
+    if (pending.length === 0) return false;
+
+    const replies = this.parseAppointmentFollowupReplies(text);
+    if (replies.length === 0) return false;
+
+    if (replies.length === 1 && pending.length > 1) {
+      const byName = this.matchPendingFollowupByName(text, pending);
+      if (!byName) {
+        await this.sendAndRecord(
+          phone,
+          `¿Te refieres a ${pending.map((p) => p.clientName || 'la cita sin nombre').join(' o ')}?`,
+          AiIntent.CONFIRMAR_RESULTADO_CITA,
+        );
+        return true;
+      }
+      await this.applyAppointmentFollowupReply(phone, byName, replies[0], providerProfileId, tz, srcHash);
+      return true;
+    }
+
+    const count = Math.min(replies.length, pending.length);
+    for (let i = 0; i < count; i += 1) {
+      await this.applyAppointmentFollowupReply(
+        phone,
+        pending[i],
+        replies[i],
+        providerProfileId,
+        tz,
+        srcHash,
+      );
+    }
+    return true;
+  }
+
+  private async applyAppointmentFollowupReply(
+    phone: string,
+    followup: PendingAppointmentFollowupState,
+    reply: { status: 'completed' | 'no_show'; amount?: number },
+    providerProfileId: string,
+    tz: string,
+    srcHash: string,
+  ): Promise<void> {
+    await this.handleConfirmarResultadoCita(
+      phone,
+      {
+        appointmentId: followup.appointmentId,
+        status: reply.status,
+        amount: reply.amount,
+      },
+      providerProfileId,
+      tz,
+      srcHash,
+    );
+  }
+
+  private parseAppointmentFollowupReplies(
+    text: string,
+  ): Array<{ status: 'completed' | 'no_show'; amount?: number }> {
+    const replies: Array<{ status: 'completed' | 'no_show'; amount?: number }> = [];
+
+    text
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .forEach((line) => {
+        const normalized = this.normalizeForKeywords(line);
+        const amount = this.extractMoneyAmount(line) ?? undefined;
+        if (/\b(no se hizo|no fui|no llego|no llego|no vino|no)\b/.test(normalized)) {
+          replies.push({ status: 'no_show', amount });
+          return;
+        }
+        if (/\b(si|sí|se hizo|hecho|cobre|cobré|cobro|pago|pagó)\b/.test(line.toLowerCase()) || amount) {
+          replies.push({ status: 'completed', amount });
+        }
+      });
+
+    return replies;
+  }
+
+  private matchPendingFollowupByName(
+    text: string,
+    pending: PendingAppointmentFollowupState[],
+  ): PendingAppointmentFollowupState | null {
+    const normalized = this.normalizeForKeywords(text);
+    return pending.find((item) => {
+      if (!item.clientName) return false;
+      const words = this.normalizeForKeywords(item.clientName)
+        .split(/\s+/)
+        .filter((w) => w.length > 2 && !['senor', 'sra', 'sr', 'lic', 'dr'].includes(w));
+      return words.some((word) => normalized.includes(word));
+    }) || null;
   }
 
   private normalizePositiveAmount(value: unknown): number | null {

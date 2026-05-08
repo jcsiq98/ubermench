@@ -212,6 +212,7 @@ describe('Appointment closeout — MVP flow', () => {
     handler.sendAndRecord = jest.fn().mockResolvedValue(undefined);
     handler.setPendingAppointmentCloseout = jest.fn().mockResolvedValue(undefined);
     handler.clearPendingAppointmentCloseout = jest.fn().mockResolvedValue(undefined);
+    handler.removePendingAppointmentFollowups = jest.fn().mockResolvedValue(undefined);
     handler.handleRegistrarIngreso = jest.fn().mockResolvedValue(undefined);
     return { handler, appointment };
   }
@@ -266,6 +267,88 @@ describe('Appointment closeout — MVP flow', () => {
       'provider-1',
       'America/Mexico_City',
       'src-hash',
+    );
+  });
+});
+
+describe('Appointment followup queue — stacked replies', () => {
+  function makeFollowupHandler() {
+    const handler = makeHandler();
+    const pending = [
+      {
+        appointmentId: 'appt-carmen',
+        providerProfileId: 'provider-1',
+        clientName: 'Carmen Avila',
+        description: 'cambio de fusibles',
+        scheduledAt: '2026-05-08T20:00:00.000Z',
+        askedAt: '2026-05-08T20:30:00.000Z',
+      },
+      {
+        appointmentId: 'appt-jose',
+        providerProfileId: 'provider-1',
+        clientName: 'Jose Suarez',
+        description: 'revisión',
+        scheduledAt: '2026-05-08T21:00:00.000Z',
+        askedAt: '2026-05-08T21:30:00.000Z',
+      },
+    ];
+    handler.redis = {
+      get: jest.fn(async () => JSON.stringify(pending)),
+      set: jest.fn(async () => undefined),
+      del: jest.fn(async () => undefined),
+    };
+    handler.handleConfirmarResultadoCita = jest.fn(async () => undefined);
+    handler.sendAndRecord = jest.fn(async () => undefined);
+    return { handler, pending };
+  }
+
+  it('maps multiline answers to pending followups in ask order', async () => {
+    const { handler } = makeFollowupHandler();
+
+    const handled = await handler.tryHandlePendingAppointmentFollowupResponse(
+      '+5215555550000',
+      'si, 500 pesos\nsi, 400 pesos',
+      'provider-1',
+      'America/New_York',
+      'src-hash',
+    );
+
+    expect(handled).toBe(true);
+    expect(handler.handleConfirmarResultadoCita).toHaveBeenNthCalledWith(
+      1,
+      '+5215555550000',
+      { appointmentId: 'appt-carmen', status: 'completed', amount: 500 },
+      'provider-1',
+      'America/New_York',
+      'src-hash',
+    );
+    expect(handler.handleConfirmarResultadoCita).toHaveBeenNthCalledWith(
+      2,
+      '+5215555550000',
+      { appointmentId: 'appt-jose', status: 'completed', amount: 400 },
+      'provider-1',
+      'America/New_York',
+      'src-hash',
+    );
+  });
+
+  it('asks for clarification when one bare answer could target multiple followups', async () => {
+    const { handler } = makeFollowupHandler();
+
+    const handled = await handler.tryHandlePendingAppointmentFollowupResponse(
+      '+5215555550000',
+      'si, 500 pesos',
+      'provider-1',
+      'America/New_York',
+      'src-hash',
+    );
+
+    expect(handled).toBe(true);
+    expect(handler.handleConfirmarResultadoCita).not.toHaveBeenCalled();
+    expect(handler.sendAndRecord).toHaveBeenCalledWith(
+      '+5215555550000',
+      expect.stringContaining('Carmen Avila'),
+      'confirmar_resultado_cita',
     );
   });
 });

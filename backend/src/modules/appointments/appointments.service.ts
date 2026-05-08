@@ -343,13 +343,15 @@ export class AppointmentsService {
   }
 
   /**
-   * Safety net: mark appointments still PENDING/CONFIRMED 2+ hours after
+   * Safety net: mark appointments still PENDING/CONFIRMED 12+ hours after
    * their scheduled time as NO_SHOW. Runs every 30 minutes independently
    * of BullMQ so zombie appointments don't accumulate if Redis is down.
+   * The wider window gives the provider time to answer stacked follow-ups
+   * before the cron closes the wrong cycle.
    */
   @Cron(CronExpression.EVERY_30_MINUTES)
   async markStaleAppointments(): Promise<number> {
-    const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const cutoff = new Date(Date.now() - 12 * 60 * 60 * 1000);
 
     const result = await this.prisma.appointment.updateMany({
       where: {

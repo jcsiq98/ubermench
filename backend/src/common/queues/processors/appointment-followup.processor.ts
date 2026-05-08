@@ -5,8 +5,10 @@ import { QUEUE_NAMES } from '../queue.constants';
 import { WhatsAppService } from '../../../modules/whatsapp/whatsapp.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AiContextService } from '../../../modules/ai/ai-context.service';
+import { RedisService } from '../../../config/redis.service';
 import { AppointmentStatus } from '@prisma/client';
 import { formatTime, DEFAULT_TIMEZONE } from '../../utils/timezone.utils';
+import { canonicalizePhoneE164 } from '../../utils/phone.utils';
 
 export interface AppointmentFollowupJobData {
   appointmentId: string;
@@ -26,6 +28,7 @@ export class AppointmentFollowupProcessor extends WorkerHost {
     private readonly whatsappService: WhatsAppService,
     private readonly prisma: PrismaService,
     private readonly aiContextService: AiContextService,
+    private readonly redis: RedisService,
   ) {
     super();
   }
@@ -80,8 +83,51 @@ export class AppointmentFollowupProcessor extends WorkerHost {
       }
     }
 
-    await this.whatsappService.sendTextMessage(providerPhone, msg);
+    await this.whatsappService
+      .sendInteractiveButtons(providerPhone, msg, [
+        { id: `appt_done_${appointmentId}`, title: 'Sí se hizo' },
+        { id: `appt_no_${appointmentId}`, title: 'No se hizo' },
+      ])
+      .catch(async (err) => {
+        this.logger.warn(`Failed to send followup buttons, falling back to text: ${err.message}`);
+        await this.whatsappService.sendTextMessage(providerPhone, msg);
+      });
+
+    await this.addPendingFollowup(providerPhone, {
+      appointmentId,
+      providerProfileId: appointment.providerId,
+      clientName: appointment.clientName,
+      description: appointment.description,
+      scheduledAt: appointment.scheduledAt.toISOString(),
+      askedAt: new Date().toISOString(),
+    }).catch((err) =>
+      this.logger.warn(`Failed to store pending appointment followup: ${err.message}`),
+    );
+
     await this.aiContextService.addMessage(providerPhone, 'assistant', msg, 'followup_cita')
       .catch((err) => this.logger.warn(`Failed to log followup context: ${err.message}`));
+  }
+
+  private async addPendingFollowup(
+    providerPhone: string,
+    item: {
+      appointmentId: string;
+      providerProfileId: string;
+      clientName?: string | null;
+      description?: string | null;
+      scheduledAt: string;
+      askedAt: string;
+    },
+  ): Promise<void> {
+    const key = `wa_pending_appointment_followups:${canonicalizePhoneE164(providerPhone)}`;
+    const raw = await this.redis.get(key);
+    const existing = raw ? JSON.parse(raw) : [];
+    const items = Array.isArray(existing) ? existing : [];
+    const next = [
+      ...items.filter((x) => x?.appointmentId !== item.appointmentId),
+      item,
+    ].sort((a, b) => String(a.askedAt).localeCompare(String(b.askedAt)));
+
+    await this.redis.set(key, JSON.stringify(next), 12 * 60 * 60);
   }
 }
