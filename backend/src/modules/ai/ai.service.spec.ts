@@ -373,6 +373,55 @@ describe('AiService — canonical tool-call dedupe (Cap. 44 v3)', () => {
     expect(result[1].data.amount).toBe(200);
   });
 
+  it('keeps multiple agendar_cita calls with different times intact', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: {
+                  name: 'agendar_cita',
+                  arguments: JSON.stringify({
+                    date: 'mañana',
+                    time: '11:00',
+                    clientName: 'señor rocha',
+                  }),
+                },
+              },
+              {
+                id: 'call_2',
+                type: 'function',
+                function: {
+                  name: 'agendar_cita',
+                  arguments: JSON.stringify({
+                    date: 'mañana',
+                    time: '13:00',
+                    clientName: 'señora martinez',
+                  }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const result = await service.processMessage(
+      '+526500000000',
+      'agenda mañana a rocha a las 11 y martinez a la 1',
+    );
+
+    expect(result).toHaveLength(2);
+    expect(result[0].intent).toBe(AiIntent.AGENDAR_CITA);
+    expect(result[0].data.time).toBe('11:00');
+    expect(result[1].data.time).toBe('13:00');
+  });
+
   it('treats whitespace and case differences as duplicates', async () => {
     mockCreate.mockResolvedValueOnce({
       choices: [

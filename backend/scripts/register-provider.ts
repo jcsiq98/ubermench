@@ -12,6 +12,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import { canonicalizePhoneE164 } from '../src/common/utils/phone.utils';
 
 const prisma = new PrismaClient();
 
@@ -52,8 +53,7 @@ async function main() {
     process.exit(1);
   }
 
-  // Normalize phone: ensure it starts with +
-  const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
+  const normalizedPhone = canonicalizePhoneE164(phone);
   const serviceTypes = serviceTypesArg.split(',').map((s) => s.trim());
 
   // Validate service types

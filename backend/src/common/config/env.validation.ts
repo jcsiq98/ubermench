@@ -29,7 +29,7 @@ const ENV_SCHEMA: EnvVar[] = [
   { key: 'CLOUDINARY_API_KEY', required: false, sensitive: true },
   { key: 'CLOUDINARY_API_SECRET', required: false, sensitive: true },
   { key: 'OPENAI_API_KEY', required: false, sensitive: true },
-  { key: 'OPENAI_MODEL', required: false, fallback: 'gpt-4o-mini' },
+  { key: 'OPENAI_MODEL', required: false, fallback: 'gpt-4o' },
   { key: 'PORT', required: false, fallback: '3000' },
 ];
 

@@ -57,7 +57,7 @@ export class AppointmentFollowupProcessor extends WorkerHost {
     const timeStr = formatTime(new Date(scheduledAt), tz);
 
     const clientLabel = clientName || 'tu cliente';
-    let msg = `📋 Oye, ya pasó tu cita de las *${timeStr}* con *${clientLabel}*. ¿Se hizo?`;
+    let msg = `📋 Oye, ya pasó tu cita de las *${timeStr}* con *${clientLabel}*. ¿Se hizo? ¿Cuánto cobraste?`;
 
     const JUNK_NAMES = ['ninguno', 'ninguna', 'no', 'n/a', 'na', 'nada', 'sin nombre', 'desconocido', 'nadie'];
     const cleanName = clientName?.trim();

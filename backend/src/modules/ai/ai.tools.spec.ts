@@ -125,6 +125,20 @@ describe('Tool parameter schemas', () => {
     const tool = findTool('agendar_cita');
     const params = tool.function.parameters as any;
     expect(params.required).toEqual(['date']);
+    expect(tool.function.description).toContain('una vez por cada cita');
+  });
+
+  it('confirmar_resultado_cita can carry the collected charge amount', () => {
+    const tool = findTool('confirmar_resultado_cita');
+    const params = tool.function.parameters as any;
+    expect(params.properties.amount.type).toBe('number');
+    expect(params.properties.paymentMethod.enum).toEqual([
+      'CASH',
+      'TRANSFER',
+      'CARD',
+      'OTHER',
+    ]);
+    expect(tool.function.description).toContain('NO llamar registrar_ingreso');
   });
 
   it('cancelar_gasto_recurrente requires description', () => {

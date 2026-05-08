@@ -385,7 +385,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'agendar_cita',
       description:
-        'Agendar una cita/trabajo NUEVO con fecha y hora. Solo para citas de TRABAJO con clientes. NO usar para recordatorios personales ("recuérdame ir al gym", "recuérdame comprar", "recuérdame llamar") — para eso usar crear_recordatorio. NO usar para gastos fijos. NO usar si el usuario quiere cambiar/mover/reagendar una cita que ya existe — para eso usar modificar_cita.',
+        'Agendar UNA cita/trabajo NUEVO con fecha y hora. Si el usuario enumera varias citas/trabajos, llamar esta herramienta una vez por cada cita; no mezclar varias horas/clientes en una sola llamada. Solo para citas de TRABAJO con clientes. NO usar para recordatorios personales ("recuérdame ir al gym", "recuérdame comprar", "recuérdame llamar") — para eso usar crear_recordatorio. NO usar para gastos fijos. NO usar si el usuario quiere cambiar/mover/reagendar una cita que ya existe — para eso usar modificar_cita.',
       parameters: {
         type: 'object',
         properties: {
@@ -506,7 +506,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'confirmar_resultado_cita',
       description:
-        'Registrar el resultado de una cita de trabajo: si se completó, si el cliente no llegó, o si se canceló. Usar cuando el usuario responde a "¿Se hizo tu cita?" o menciona que una cita se completó o no. NO usar para recordatorios personales — para eso usar completar_recordatorio.',
+        'Registrar el resultado de una cita de trabajo: si se completó, si el cliente no llegó, o si se canceló. Usar cuando el usuario responde a "¿Se hizo tu cita?" o menciona que una cita se completó o no. Si en la misma respuesta dice cuánto cobró, incluir amount aquí y NO llamar registrar_ingreso por separado. NO usar para recordatorios personales — para eso usar completar_recordatorio.',
       parameters: {
         type: 'object',
         properties: {
@@ -526,6 +526,15 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           time: {
             type: 'string',
             description: 'Hora de la cita. Formato HH:MM (24h). "la de las 3pm" = "15:00".',
+          },
+          amount: {
+            type: 'number',
+            description: 'Monto cobrado por la cita completada si el usuario lo menciona. "sí, cobré 1500" = 1500.',
+          },
+          paymentMethod: {
+            type: 'string',
+            enum: ['CASH', 'TRANSFER', 'CARD', 'OTHER'],
+            description: 'Método de pago si lo menciona. efectivo=CASH, transferencia=TRANSFER, tarjeta=CARD.',
           },
         },
         required: ['status'],

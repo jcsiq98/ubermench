@@ -175,6 +175,101 @@ describe('Financial Firewall — fake-confirmation detectors', () => {
   });
 });
 
+describe('Appointment closeout — amount extraction', () => {
+  const handler = makeHandler();
+
+  it.each([
+    ['sí, cobré 1500', 1500],
+    ['cobre $1,500 en efectivo', 1500],
+    ['fueron 2 300 pesos', 2300],
+  ])('extracts "%s" as %s', (text, amount) => {
+    expect(handler.extractMoneyAmount(text)).toBe(amount);
+  });
+
+  it('ignores replies without a positive amount', () => {
+    expect(handler.extractMoneyAmount('sí se hizo')).toBeNull();
+  });
+});
+
+describe('Appointment closeout — MVP flow', () => {
+  function makeCloseoutHandler() {
+    const handler = makeHandler();
+    const appointment = {
+      id: 'appt-1',
+      clientName: 'señor rocha',
+      description: 'reparación',
+      scheduledAt: new Date('2026-05-07T23:00:00.000Z'),
+    };
+    handler.appointmentsService = {
+      parseScheduledDate: jest.fn().mockReturnValue(null),
+      findRecentPastAppointment: jest.fn().mockResolvedValue(appointment),
+      findByContext: jest.fn(),
+      markResult: jest.fn().mockResolvedValue(appointment),
+    };
+    handler.queueService = {
+      removeJob: jest.fn().mockResolvedValue(undefined),
+    };
+    handler.sendAndRecord = jest.fn().mockResolvedValue(undefined);
+    handler.setPendingAppointmentCloseout = jest.fn().mockResolvedValue(undefined);
+    handler.clearPendingAppointmentCloseout = jest.fn().mockResolvedValue(undefined);
+    handler.handleRegistrarIngreso = jest.fn().mockResolvedValue(undefined);
+    return { handler, appointment };
+  }
+
+  it('asks for the amount when a completed appointment has no charge', async () => {
+    const { handler, appointment } = makeCloseoutHandler();
+
+    await handler.handleConfirmarResultadoCita(
+      '+5215555550000',
+      { status: 'completed' },
+      'provider-1',
+    );
+
+    expect(handler.appointmentsService.markResult).toHaveBeenCalledWith(
+      appointment.id,
+      'completed',
+    );
+    expect(handler.setPendingAppointmentCloseout).toHaveBeenCalledWith(
+      '+5215555550000',
+      expect.objectContaining({
+        appointmentId: appointment.id,
+        providerProfileId: 'provider-1',
+        clientName: 'señor rocha',
+      }),
+    );
+    expect(handler.sendAndRecord).toHaveBeenCalledWith(
+      '+5215555550000',
+      '¿Cuánto cobraste? Te lo registro como ingreso.',
+      'confirmar_resultado_cita',
+    );
+  });
+
+  it('registers income when the completion includes the amount', async () => {
+    const { handler } = makeCloseoutHandler();
+
+    await handler.handleConfirmarResultadoCita(
+      '+5215555550000',
+      { status: 'completed', amount: 1500, paymentMethod: 'TRANSFER' },
+      'provider-1',
+      'America/Mexico_City',
+      'src-hash',
+    );
+
+    expect(handler.handleRegistrarIngreso).toHaveBeenCalledWith(
+      '+5215555550000',
+      expect.objectContaining({
+        amount: 1500,
+        clientName: 'señor rocha',
+        description: 'reparación',
+        paymentMethod: 'TRANSFER',
+      }),
+      'provider-1',
+      'America/Mexico_City',
+      'src-hash',
+    );
+  });
+});
+
 describe('Financial Firewall — parseRecoveryToolCall', () => {
   const handler = makeHandler();
 

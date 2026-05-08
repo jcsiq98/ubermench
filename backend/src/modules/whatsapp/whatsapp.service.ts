@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import { canonicalizePhoneDigits } from '../../common/utils/phone.utils';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -190,10 +191,9 @@ export class WhatsAppService implements OnModuleInit {
    */
   normalizePhone(phone: string): string {
     if (!phone) return phone;
-    let cleaned = phone.replace(/\D/g, '');
-    // Mexican numbers: if starts with "521" followed by 10 digits → remove the "1"
-    if (cleaned.length === 13 && cleaned.startsWith('521')) {
-      cleaned = '52' + cleaned.slice(3);
+    const originalDigits = phone.replace(/\D/g, '');
+    const cleaned = canonicalizePhoneDigits(phone);
+    if (cleaned !== originalDigits) {
       this.logger.debug(`Normalized MX phone: ${phone} → ${cleaned}`);
     }
     return cleaned;

@@ -38,6 +38,7 @@ import {
   isTimezoneSkipPhrase,
 } from '../../common/utils/timezone.utils';
 import { sanitizeForWhatsApp } from '../../common/utils/whatsapp-format.utils';
+import { canonicalizePhoneE164, phoneLookupVariants } from '../../common/utils/phone.utils';
 import {
   FINANCIAL_EVENT,
   emitFinancialEvent,
@@ -98,6 +99,17 @@ interface PendingTimezoneState {
   createdAt: number;
 }
 
+const PENDING_APPOINTMENT_CLOSEOUT_PREFIX = 'wa_pending_appointment_closeout:';
+const PENDING_APPOINTMENT_CLOSEOUT_TTL = 86400; // 24 hours
+
+interface PendingAppointmentCloseoutState {
+  appointmentId: string;
+  providerProfileId: string;
+  clientName?: string | null;
+  description?: string | null;
+  scheduledAt: string;
+}
+
 const TIMEZONE_GATE_INTENTS = new Set<AiIntent>([
   AiIntent.AGENDAR_CITA,
   AiIntent.MODIFICAR_CITA,
@@ -135,7 +147,8 @@ export class WhatsAppProviderHandler {
   // ─── Session management ──────────────────────────────────
 
   private async getSession(phone: string): Promise<ProviderSession | null> {
-    const raw = await this.redis.get(`${SESSION_PREFIX}${phone}`);
+    const normalizedPhone = canonicalizePhoneE164(phone);
+    const raw = await this.redis.get(`${SESSION_PREFIX}${normalizedPhone}`);
     if (!raw) return null;
     try {
       return JSON.parse(raw);
@@ -148,15 +161,17 @@ export class WhatsAppProviderHandler {
     phone: string,
     session: ProviderSession,
   ): Promise<void> {
+    const normalizedPhone = canonicalizePhoneE164(phone);
     await this.redis.set(
-      `${SESSION_PREFIX}${phone}`,
+      `${SESSION_PREFIX}${normalizedPhone}`,
       JSON.stringify(session),
       SESSION_TTL,
     );
   }
 
   private async clearSession(phone: string): Promise<void> {
-    await this.redis.del(`${SESSION_PREFIX}${phone}`);
+    const normalizedPhone = canonicalizePhoneE164(phone);
+    await this.redis.del(`${SESSION_PREFIX}${normalizedPhone}`);
   }
 
   // ─── Cap. 46 — pending timezone (runtime gate state) ─────
@@ -164,7 +179,8 @@ export class WhatsAppProviderHandler {
   private async getPendingTimezone(
     phone: string,
   ): Promise<PendingTimezoneState | null> {
-    const raw = await this.redis.get(`${PENDING_TZ_PREFIX}${phone}`);
+    const normalizedPhone = canonicalizePhoneE164(phone);
+    const raw = await this.redis.get(`${PENDING_TZ_PREFIX}${normalizedPhone}`);
     if (!raw) return null;
     try {
       return JSON.parse(raw) as PendingTimezoneState;
@@ -177,15 +193,17 @@ export class WhatsAppProviderHandler {
     phone: string,
     state: PendingTimezoneState,
   ): Promise<void> {
+    const normalizedPhone = canonicalizePhoneE164(phone);
     await this.redis.set(
-      `${PENDING_TZ_PREFIX}${phone}`,
+      `${PENDING_TZ_PREFIX}${normalizedPhone}`,
       JSON.stringify(state),
       PENDING_TZ_TTL,
     );
   }
 
   private async clearPendingTimezone(phone: string): Promise<void> {
-    await this.redis.del(`${PENDING_TZ_PREFIX}${phone}`);
+    const normalizedPhone = canonicalizePhoneE164(phone);
+    await this.redis.del(`${PENDING_TZ_PREFIX}${normalizedPhone}`);
   }
 
   // ─── Cap. 47 — pending financial clarification (M1 state) ─
@@ -217,19 +235,45 @@ export class WhatsAppProviderHandler {
     await this.redis.del(`${PENDING_FIN_PREFIX}${phone}`);
   }
 
+  // ─── Pending appointment closeout (waiting for charge amount) ─────
+
+  private async getPendingAppointmentCloseout(
+    phone: string,
+  ): Promise<PendingAppointmentCloseoutState | null> {
+    const normalizedPhone = canonicalizePhoneE164(phone);
+    const raw = await this.redis.get(`${PENDING_APPOINTMENT_CLOSEOUT_PREFIX}${normalizedPhone}`);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as PendingAppointmentCloseoutState;
+    } catch {
+      return null;
+    }
+  }
+
+  private async setPendingAppointmentCloseout(
+    phone: string,
+    state: PendingAppointmentCloseoutState,
+  ): Promise<void> {
+    const normalizedPhone = canonicalizePhoneE164(phone);
+    await this.redis.set(
+      `${PENDING_APPOINTMENT_CLOSEOUT_PREFIX}${normalizedPhone}`,
+      JSON.stringify(state),
+      PENDING_APPOINTMENT_CLOSEOUT_TTL,
+    );
+  }
+
+  private async clearPendingAppointmentCloseout(phone: string): Promise<void> {
+    const normalizedPhone = canonicalizePhoneE164(phone);
+    await this.redis.del(`${PENDING_APPOINTMENT_CLOSEOUT_PREFIX}${normalizedPhone}`);
+  }
+
   // ─── Find provider by phone ──────────────────────────────
 
   private async findProviderByPhone(phone: string) {
-    // WA phone may or may not have +, normalize
-    const normalized = this.whatsapp.normalizePhone(phone);
-    // Try to match: the DB stores "+52XXXXXXXXXX" format
+    const variants = phoneLookupVariants(phone);
     const user = await this.prisma.user.findFirst({
       where: {
-        OR: [
-          { phone: `+${normalized}` },
-          { phone: normalized },
-          { phone },
-        ],
+        OR: variants.map((variant) => ({ phone: variant })),
         role: 'PROVIDER',
       },
       include: {
@@ -662,6 +706,16 @@ export class WhatsAppProviderHandler {
       if (handled) return;
     }
 
+    if (providerProfileId) {
+      const handled = await this.tryHandlePendingAppointmentCloseout(
+        phone,
+        text,
+        providerProfileId,
+        sourceTextHash(text),
+      );
+      if (handled) return;
+    }
+
     // Cap. 47 — M1 commit 3: pre-AI resolver. If we planted pending
     // financial state in a previous turn ("¿gasto o ingreso?",
     // "¿de cuánto fue?") and this message is a direct answer, write
@@ -823,7 +877,7 @@ export class WhatsAppProviderHandler {
             break;
 
           case AiIntent.CONFIRMAR_RESULTADO_CITA:
-            await this.handleConfirmarResultadoCita(phone, aiResponse.data, providerProfileId, tz);
+            await this.handleConfirmarResultadoCita(phone, aiResponse.data, providerProfileId, tz, srcHash);
             break;
 
           case AiIntent.VER_AGENDA:
@@ -1046,15 +1100,6 @@ export class WhatsAppProviderHandler {
         data?.clientName,
         paymentMethod,
       );
-
-      try {
-        const weekSummary = await this.incomeService.getWeekSummary(providerProfileId);
-        if (weekSummary.count > 1 && weekSummary.total > 0) {
-          confirmation += `\nLlevas *$${weekSummary.total.toLocaleString('es-MX')}* esta semana.`;
-        }
-      } catch {
-        // non-critical enrichment
-      }
 
       await this.sendFinancialConfirmation(
         phone,
@@ -2122,52 +2167,6 @@ export class WhatsAppProviderHandler {
 
     const reminderMinutes = data?.reminderMinutes ? Number(data.reminderMinutes) : undefined;
 
-    // Guard: if there's already an active appointment with the same client on the same day,
-    // the LLM likely misclassified a modify request as a new appointment.
-    // Auto-redirect to update instead of creating a duplicate.
-    if (data?.clientName && !JUNK_CLIENT_NAMES.has(data.clientName.trim().toLowerCase())) {
-      try {
-        const existing = await this.appointmentsService.findByContext(
-          providerProfileId, data.clientName, scheduledAt, tz,
-        );
-        if (existing.length > 0) {
-          const target = existing[0];
-          const oldTime = formatTime(target.scheduledAt, tz);
-          const updates: import('../appointments/appointments.service').UpdateAppointmentDto = {
-            scheduledAt,
-          };
-          if (data.address) updates.address = data.address;
-          if (data.description) updates.description = data.description;
-          if (reminderMinutes !== undefined) updates.reminderMinutes = reminderMinutes;
-
-          const updated = await this.appointmentsService.update(target.id, updates);
-          const newTime = formatTime(updated.scheduledAt, tz);
-          let confirmation = `♻️ Ya tenías una cita con *${target.clientName}* a las *${oldTime}* — la moví a las *${newTime}*.`;
-
-          if (updates.scheduledAt) {
-            await this.cancelAppointmentFollowup(updated.id);
-            this.scheduleAppointmentFollowup(
-              updated.id, phone, updated.scheduledAt, updated.clientName ?? undefined, tz,
-            );
-          }
-          if (reminderMinutes) {
-            await this.cancelAppointmentReminder(updated.id);
-            const scheduled = await this.scheduleAppointmentReminder(
-              updated.id, phone, updated.scheduledAt, reminderMinutes, updated.clientName ?? undefined, tz,
-            );
-            if (scheduled) {
-              confirmation += `\n\n🔔 Recordatorio reprogramado: *${reminderMinutes} minutos* antes.`;
-            }
-          }
-
-          await this.sendAndRecord(phone, confirmation);
-          return;
-        }
-      } catch (err: any) {
-        this.logger.warn(`Duplicate check failed, proceeding with create: ${err.message}`);
-      }
-    }
-
     try {
       const appointment = await this.appointmentsService.create({
         providerId: providerProfileId,
@@ -2564,6 +2563,7 @@ export class WhatsAppProviderHandler {
     data: Record<string, any> | undefined,
     providerProfileId?: string,
     tz: string = DEFAULT_TIMEZONE,
+    srcHash?: string,
   ): Promise<void> {
     if (!providerProfileId) {
       await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
@@ -2622,6 +2622,40 @@ export class WhatsAppProviderHandler {
       if (appointment.clientName) msg += `\n👤 ${appointment.clientName}`;
 
       await this.sendAndRecord(phone, msg);
+
+      if (status === 'completed') {
+        const amount = this.normalizePositiveAmount(data?.amount);
+
+        if (amount) {
+          await this.clearPendingAppointmentCloseout(phone);
+          await this.handleRegistrarIngreso(
+            phone,
+            {
+              amount,
+              clientName: appointment.clientName,
+              description: appointment.description || 'Cita completada',
+              paymentMethod: data?.paymentMethod,
+            },
+            providerProfileId,
+            tz,
+            srcHash,
+          );
+          return;
+        }
+
+        await this.setPendingAppointmentCloseout(phone, {
+          appointmentId: appointment.id,
+          providerProfileId,
+          clientName: appointment.clientName,
+          description: appointment.description,
+          scheduledAt: appointment.scheduledAt.toISOString(),
+        });
+        await this.sendAndRecord(
+          phone,
+          '¿Cuánto cobraste? Te lo registro como ingreso.',
+          AiIntent.CONFIRMAR_RESULTADO_CITA,
+        );
+      }
     } catch (error: any) {
       this.logger.error(`Error confirming appointment result: ${error.message}`);
       await this.sendAndRecord(phone, '❌ No se pudo registrar el resultado. Intenta de nuevo.');
@@ -4532,6 +4566,61 @@ export class WhatsAppProviderHandler {
       detected.kind,
       srcHash,
     );
+  }
+
+  private async tryHandlePendingAppointmentCloseout(
+    phone: string,
+    text: string,
+    providerProfileId: string,
+    srcHash: string,
+  ): Promise<boolean> {
+    const pending = await this.getPendingAppointmentCloseout(phone);
+    if (!pending) return false;
+
+    if (pending.providerProfileId !== providerProfileId) {
+      await this.clearPendingAppointmentCloseout(phone);
+      return false;
+    }
+
+    const amount = this.extractMoneyAmount(text);
+    if (!amount) return false;
+
+    await this.clearPendingAppointmentCloseout(phone);
+    await this.handleRegistrarIngreso(
+      phone,
+      {
+        amount,
+        clientName: pending.clientName,
+        description: pending.description || 'Cita completada',
+      },
+      providerProfileId,
+      DEFAULT_TIMEZONE,
+      srcHash,
+    );
+    return true;
+  }
+
+  private normalizePositiveAmount(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      return this.extractMoneyAmount(value);
+    }
+    return null;
+  }
+
+  private extractMoneyAmount(text: string): number | null {
+    const match = text.match(/\$?\s*(\d{1,3}(?:[,\s]\d{3})+|\d+(?:[.,]\d{1,2})?)/);
+    if (!match) return null;
+
+    const raw = match[1].replace(/\s/g, '');
+    const normalized = raw.includes(',') && !raw.includes('.')
+      ? raw.replace(/,/g, '')
+      : raw.replace(/,/g, '');
+    const amount = Number(normalized);
+
+    return Number.isFinite(amount) && amount > 0 ? amount : null;
   }
 
   // ─── Cap. 47 — pending financial resolve (M1 commit 3) ─────────

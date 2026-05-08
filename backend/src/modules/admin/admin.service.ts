@@ -7,6 +7,7 @@ import {
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { canonicalizePhoneE164, phoneLookupVariants } from '../../common/utils/phone.utils';
 
 @Injectable()
 export class AdminService {
@@ -96,8 +97,10 @@ export class AdminService {
     }
 
     // Check if user already exists
-    const existingUser = await this.prisma.user.findUnique({
-      where: { phone: application.phone },
+    const applicationPhone = canonicalizePhoneE164(application.phone);
+
+    const existingUser = await this.prisma.user.findFirst({
+      where: { OR: phoneLookupVariants(applicationPhone).map((p) => ({ phone: p })) },
     });
 
     if (existingUser?.role === 'PROVIDER') {
@@ -138,7 +141,7 @@ export class AdminService {
     } else {
       user = await this.prisma.user.create({
         data: {
-          phone: application.phone,
+          phone: applicationPhone,
           name: application.name,
           role: 'PROVIDER',
           providerProfile: {
@@ -197,7 +200,7 @@ export class AdminService {
 
     // Emit event for WhatsApp notification
     this.eventEmitter.emit('application.approved', {
-      phone: application.phone,
+      phone: applicationPhone,
       name: application.name,
       tier,
     });
@@ -403,16 +406,11 @@ export class AdminService {
     phone: string,
     data: { name?: string },
   ): Promise<{ success: boolean; user: { id: string; phone: string; name: string | null } }> {
-    let normalized = phone.replace(/\D/g, '');
-    if (!normalized.startsWith('+')) normalized = `+${normalized}`;
+    const variants = phoneLookupVariants(phone);
 
     const user = await this.prisma.user.findFirst({
       where: {
-        OR: [
-          { phone: normalized },
-          { phone: phone },
-          { phone: `+${phone.replace(/\D/g, '')}` },
-        ],
+        OR: variants.map((variant) => ({ phone: variant })),
       },
     });
 

@@ -12,6 +12,7 @@ import {
   isMexicanPhone,
   isTimezoneSkipPhrase,
 } from '../../common/utils/timezone.utils';
+import { canonicalizePhoneE164 } from '../../common/utils/phone.utils';
 
 export enum OnboardingStep {
   NAME = 'NAME',
@@ -88,8 +89,9 @@ export class WhatsAppOnboardingHandler {
     senderName: string,
     text: string,
   ): Promise<void> {
-    const session = await this.getSession(senderPhone);
-    const dbPhone = this.normalizePhoneForDb(senderPhone);
+    const phone = canonicalizePhoneE164(senderPhone);
+    const session = await this.getSession(phone);
+    const dbPhone = this.normalizePhoneForDb(phone);
 
     // Active onboarding step takes priority over the "you already have an
     // account" early return. Cap. 46: TRADE creates the User +
@@ -108,7 +110,7 @@ export class WhatsAppOnboardingHandler {
 
       if (existing?.providerProfile) {
         await this.sendAndLog(
-          senderPhone,
+          phone,
           `👋 ¡Hola ${existing.name || ''}! Ya tienes tu cuenta activa.\n\n` +
             `Puedes escribirme lo que necesites. Por ejemplo:\n` +
             `• "Cobré 800 de una fuga"\n` +
@@ -119,24 +121,24 @@ export class WhatsAppOnboardingHandler {
       }
     }
 
-    await this.aiContextService.addMessage(senderPhone, 'user', text, 'onboarding');
+    await this.aiContextService.addMessage(phone, 'user', text, 'onboarding');
 
     if (!session) {
-      return this.startOnboarding(senderPhone, senderName);
+      return this.startOnboarding(phone, senderName);
     }
 
     switch (session.step) {
       case OnboardingStep.NAME:
-        return this.handleNameResponse(senderPhone, text, session);
+        return this.handleNameResponse(phone, text, session);
       case OnboardingStep.TRADE:
-        return this.handleTradeResponse(senderPhone, text, session);
+        return this.handleTradeResponse(phone, text, session);
       case OnboardingStep.TIMEZONE:
-        return this.handleTimezoneResponse(senderPhone, text, session);
+        return this.handleTimezoneResponse(phone, text, session);
       case OnboardingStep.DONE:
-        await this.sendAndLog(senderPhone, `Ya estás registrado. Escríbeme lo que necesites.`);
+        await this.sendAndLog(phone, `Ya estás registrado. Escríbeme lo que necesites.`);
         return;
       default:
-        return this.startOnboarding(senderPhone, senderName);
+        return this.startOnboarding(phone, senderName);
     }
   }
 
@@ -504,10 +506,6 @@ Responde SOLO con JSON.`,
   }
 
   private normalizePhoneForDb(phone: string): string {
-    let cleaned = phone.replace(/\D/g, '');
-    if (cleaned.length === 13 && cleaned.startsWith('521')) {
-      cleaned = '52' + cleaned.slice(3);
-    }
-    return `+${cleaned}`;
+    return canonicalizePhoneE164(phone);
   }
 }

@@ -14,6 +14,7 @@ import { WhatsAppService } from './modules/whatsapp/whatsapp.service';
 import { PrismaService } from './prisma/prisma.service';
 import { RedisService } from './config/redis.service';
 import { QueueService } from './common/queues/queue.service';
+import { phoneLookupVariants } from './common/utils/phone.utils';
 
 @Controller()
 export class AppController {
@@ -124,12 +125,11 @@ export class AppController {
       throw new ForbiddenException('Invalid verify token');
     }
 
-    let normalized = phone.replace(/\D/g, '');
-    if (!normalized.startsWith('+')) normalized = `+${normalized}`;
+    const variants = this.phoneVariants(phone);
 
     const user = await this.prisma.user.findFirst({
       where: {
-        OR: [{ phone: normalized }, { phone: `+${phone}` }],
+        OR: variants.map((p) => ({ phone: p })),
       },
       include: { providerProfile: { select: { id: true, bio: true } } },
     });
@@ -393,20 +393,7 @@ export class AppController {
   // ─── Private helpers ──────────────────────────────────────
 
   private phoneVariants(raw: string): string[] {
-    const digits = raw.replace(/\D/g, '');
-    const variants = new Set<string>();
-    variants.add(digits);
-    variants.add(`+${digits}`);
-    if (digits.startsWith('521')) {
-      const without1 = `52${digits.slice(3)}`;
-      variants.add(without1);
-      variants.add(`+${without1}`);
-    } else if (digits.startsWith('52') && !digits.startsWith('521')) {
-      const with1 = `521${digits.slice(2)}`;
-      variants.add(with1);
-      variants.add(`+${with1}`);
-    }
-    return [...variants];
+    return phoneLookupVariants(raw);
   }
 
   private async checkDb(): Promise<boolean> {
