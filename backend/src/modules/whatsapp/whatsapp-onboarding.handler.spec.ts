@@ -146,6 +146,9 @@ function makeFullHandler(opts: {
     extractFromText: jest.fn(
       opts.extractFromTextImpl ?? (async () => ({ location: null })),
     ),
+    answerChalanSelfQuestion: jest.fn(async () =>
+      'Soy tu Chalán. Estoy para que no se te caiga lo administrativo mientras trabajas.\n\nPara dejarte listo, dime a qué te dedicas.',
+    ),
   };
   const aiContextService = {
     addMessage: jest.fn(async () => undefined),
@@ -277,5 +280,52 @@ describe('WhatsAppOnboardingHandler — end-to-end TRADE → TIMEZONE (Roberto r
       .join('\n');
     expect(messages).toMatch(/Ya tienes tu cuenta activa/i);
     expect(env.userFindUnique).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('WhatsAppOnboardingHandler — self-model questions during trade onboarding', () => {
+  it('answers scope questions without creating the provider yet', async () => {
+    const env = makeFullHandler({
+      initialSession: { step: OnboardingStep.TRADE, name: 'Jesus Martinez' },
+      extractFromTextImpl: async (_text: string, prompt: string) => {
+        if (prompt.includes('Clasifica su mensaje')) {
+          return { intent: 'scope_question' };
+        }
+        throw new Error('trade extractor should not run for scope question');
+      },
+    });
+
+    await env.handler.handleMessage(
+      env.phone,
+      'Jesus Martinez',
+      'estas inclinado a cierta profesion? o mas general?',
+    );
+
+    expect(env.aiService.answerChalanSelfQuestion).toHaveBeenCalledWith(
+      'estas inclinado a cierta profesion? o mas general?',
+      'onboarding',
+    );
+    expect(env.userCreate).not.toHaveBeenCalled();
+    expect(env.sendTextMessage).toHaveBeenCalledWith(
+      env.phone,
+      expect.stringContaining('Para dejarte listo'),
+    );
+  });
+
+  it('still accepts a plain trade answer without self-model detour', async () => {
+    const env = makeFullHandler({
+      initialSession: { step: OnboardingStep.TRADE, name: 'Jesus Martinez' },
+      extractFromTextImpl: async (_text: string, prompt: string) => {
+        if (prompt.includes('"¿A qué te dedicas?"')) {
+          return { trade: 'comerciante' };
+        }
+        return null;
+      },
+    });
+
+    await env.handler.handleMessage(env.phone, 'Jesus Martinez', 'comerciante');
+
+    expect(env.aiService.answerChalanSelfQuestion).not.toHaveBeenCalled();
+    expect(env.userCreate).toHaveBeenCalledTimes(1);
   });
 });

@@ -26,6 +26,7 @@ import {
   DEFAULT_TIMEZONE,
 } from '../../common/utils/timezone.utils';
 import { phoneLookupVariants } from '../../common/utils/phone.utils';
+import { ChalanSelfModelService } from './chalan-self-model.service';
 
 const RATE_LIMIT_PREFIX = 'ai_rate:';
 const RATE_LIMIT_MAX = 30;
@@ -61,6 +62,8 @@ function buildSystemPrompt(workspaceContext?: WorkspaceContextDto): string {
   return `Eres **Chalán**. El ayudante del maestro. Te encargas de las cuentas, las citas y lo administrativo para que él se enfoque en chambear.
 
 Fecha: ${dateStr}, ${timeStr} (${tzLabel}). ISO: ${isoDate}. Día del mes: ${dayOfMonth}. Mañana es día: ${tomorrowDay}.
+
+${ChalanSelfModelService.buildSystemSection()}
 
 Personalidad: Eres el chalán del maestro. Hablas en español mexicano, directo, sin rodeos. No eres un bot — eres un ayudante con criterio.
 
@@ -454,6 +457,52 @@ export class AiService {
 
       return [FALLBACK_RESPONSE];
     }
+  }
+
+  async answerChalanSelfQuestion(
+    question: string,
+    context: 'onboarding' | 'general' = 'general',
+  ): Promise<string> {
+    const returnPrompt =
+      context === 'onboarding'
+        ? `Cierra volviendo al onboarding con esta idea, sin sonar a formulario: "${ChalanSelfModelService.buildOnboardingReturnPrompt()}"`
+        : 'Cierra con una invitación breve a decir qué necesita.';
+
+    if (!this.client) {
+      return this.fallbackSelfModelAnswer(context);
+    }
+
+    try {
+      const completion = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          {
+            role: 'system',
+            content:
+              `${ChalanSelfModelService.buildSystemSection()}\n\n` +
+              'Responde como Chalán en español mexicano, directo, sin bullets largos, sin prometer capacidades planeadas como si ya existieran. ' +
+              returnPrompt,
+          },
+          { role: 'user', content: question },
+        ],
+        max_tokens: 220,
+        temperature: 0.4,
+      });
+
+      return completion.choices[0]?.message?.content?.trim()
+        || this.fallbackSelfModelAnswer(context);
+    } catch (error: any) {
+      this.logger.warn(`Self-model answer failed: ${error.message}`);
+      return this.fallbackSelfModelAnswer(context);
+    }
+  }
+
+  private fallbackSelfModelAnswer(context: 'onboarding' | 'general'): string {
+    const base =
+      'Soy tu Chalán. Estoy para que no se te caiga lo administrativo mientras trabajas: citas, pendientes, cobros, ingresos y gastos. No tengo acceso a tu banco ni manejo tu capital total; llevo lo que me digas y te aviso cuando toca.';
+    return context === 'onboarding'
+      ? `${base}\n\n${ChalanSelfModelService.buildOnboardingReturnPrompt()}`
+      : base;
   }
 
   private async createChatCompletion(

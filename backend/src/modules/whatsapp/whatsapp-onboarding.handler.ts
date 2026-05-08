@@ -31,6 +31,14 @@ interface OnboardingSession {
   timezoneAttempts?: number;
 }
 
+type OnboardingTradeIntent =
+  | 'trade_answer'
+  | 'scope_question'
+  | 'data_question'
+  | 'capability_question'
+  | 'unsupported_question'
+  | 'other';
+
 const MAX_TIMEZONE_ATTEMPTS = 2;
 
 const SESSION_PREFIX = 'wa_onboarding:';
@@ -230,6 +238,16 @@ Responde con JSON: {"name": "Nombre Extraído"} o {"name": null}`,
       return;
     }
 
+    const tradeIntent = await this.classifyTradeStepMessage(trimmed);
+    if (tradeIntent !== 'trade_answer') {
+      const answer = await this.aiService.answerChalanSelfQuestion(
+        trimmed,
+        'onboarding',
+      );
+      await this.sendAndLog(phone, answer);
+      return;
+    }
+
     // Use LLM to extract the trade/occupation. The text may come from a long
     // voice transcription (Whisper), so we instruct the LLM to extract just
     // the trade — and to return null if no clear trade is mentioned.
@@ -336,6 +354,62 @@ Responde con JSON.`,
       await this.sendAndLog(phone, `Hubo un error. Intenta de nuevo enviando cualquier mensaje.`);
       await this.clearSession(phone);
     }
+  }
+
+  private async classifyTradeStepMessage(
+    text: string,
+  ): Promise<OnboardingTradeIntent> {
+    const normalized = text.toLowerCase().trim();
+
+    if (this.looksLikeSelfQuestion(normalized)) {
+      const classified = await this.aiService.extractFromText(
+        text,
+        `El usuario está en onboarding y se le preguntó "¿A qué te dedicas?".
+Clasifica su mensaje en UNA de estas categorías:
+- trade_answer: responde con oficio/profesión/actividad clara ("plomero", "soy abogado", "comerciante")
+- scope_question: pregunta qué es Chalán, para quién sirve, cuál es su propósito o alcance
+- data_question: pregunta dónde guarda datos, si accede a bancos, si lleva capital/saldo total o privacidad
+- capability_question: pregunta si puede hacer algo específico ("me puedes llamar", "sirve para estilistas", "puedes recordar juntas")
+- unsupported_question: pregunta algo totalmente fuera del producto
+- other: no queda claro
+Responde SOLO JSON: {"intent":"..."}.`,
+      );
+      return this.sanitizeTradeIntent(classified?.intent);
+    }
+
+    return 'trade_answer';
+  }
+
+  private looksLikeSelfQuestion(normalized: string): boolean {
+    return normalized.includes('?')
+      || normalized.includes('qué eres')
+      || normalized.includes('que eres')
+      || normalized.includes('para qué')
+      || normalized.includes('para que')
+      || normalized.includes('sirve')
+      || normalized.includes('alcance')
+      || normalized.includes('propósito')
+      || normalized.includes('proposito')
+      || normalized.includes('datos')
+      || normalized.includes('capital')
+      || normalized.includes('banco')
+      || normalized.includes('guardar')
+      || normalized.includes('llamar')
+      || normalized.includes('llamada');
+  }
+
+  private sanitizeTradeIntent(raw: unknown): OnboardingTradeIntent {
+    const allowed: OnboardingTradeIntent[] = [
+      'trade_answer',
+      'scope_question',
+      'data_question',
+      'capability_question',
+      'unsupported_question',
+      'other',
+    ];
+    return typeof raw === 'string' && allowed.includes(raw as OnboardingTradeIntent)
+      ? (raw as OnboardingTradeIntent)
+      : 'other';
   }
 
   /**
