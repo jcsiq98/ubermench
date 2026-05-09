@@ -3,7 +3,13 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../config/redis.service';
 import { WhatsAppService } from './whatsapp.service';
 import { AiService } from '../ai/ai.service';
+import { AiIntent } from '../ai/ai.types';
 import { AiContextService } from '../ai/ai-context.service';
+import { IncomeService } from '../income/income.service';
+import { RemindersService } from '../reminders/reminders.service';
+import { QueueService } from '../../common/queues/queue.service';
+import { QUEUE_NAMES } from '../../common/queues/queue.constants';
+import { PersonalReminderJobData } from '../../common/queues/processors/personal-reminder.processor';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { sanitizeForWhatsApp } from '../../common/utils/whatsapp-format.utils';
 import {
@@ -29,6 +35,7 @@ interface OnboardingSession {
   // for non-Mexican phones).
   providerProfileId?: string;
   timezoneAttempts?: number;
+  pendingInitialRequest?: string;
 }
 
 type OnboardingTradeIntent =
@@ -55,6 +62,9 @@ export class WhatsAppOnboardingHandler {
     private aiService: AiService,
     private aiContextService: AiContextService,
     private workspaceService: WorkspaceService,
+    private incomeService: IncomeService,
+    private remindersService: RemindersService,
+    private queueService: QueueService,
   ) {}
 
   private async sendAndLog(
@@ -132,7 +142,7 @@ export class WhatsAppOnboardingHandler {
     await this.aiContextService.addMessage(phone, 'user', text, 'onboarding');
 
     if (!session) {
-      return this.startOnboarding(phone, senderName);
+      return this.startOnboarding(phone, senderName, text);
     }
 
     switch (session.step) {
@@ -153,7 +163,12 @@ export class WhatsAppOnboardingHandler {
   private async startOnboarding(
     phone: string,
     name: string,
+    initialText?: string,
   ): Promise<void> {
+    const pendingInitialRequest = this.looksLikeOperationalInitialRequest(initialText)
+      ? initialText?.trim()
+      : undefined;
+
     if (name) {
       const capitalizedName = name
         .split(' ')
@@ -163,16 +178,17 @@ export class WhatsAppOnboardingHandler {
       await this.setSession(phone, {
         step: OnboardingStep.TRADE,
         name: capitalizedName,
+        pendingInitialRequest,
       });
 
       await this.sendAndLog(
         phone,
         `👋 ¡Hola, *${capitalizedName}*! Soy tu Chalán.\n\n` +
-          `Te ayudo a llevar el control de tus ingresos, tu agenda y tu negocio — todo por aquí, por WhatsApp.\n\n` +
+          `${pendingInitialRequest ? 'Sí puedo ayudarte con eso. Para hacerlo bien, primero te dejo registrado.\n\n' : 'Te ayudo a llevar el control de tus ingresos, tu agenda y tu negocio — todo por aquí, por WhatsApp.\n\n'}` +
           `*¿A qué te dedicas?*\n_(plomero, electricista, albañil, pintor, lo que sea)_`,
       );
     } else {
-      await this.setSession(phone, { step: OnboardingStep.NAME });
+      await this.setSession(phone, { step: OnboardingStep.NAME, pendingInitialRequest });
 
       await this.sendAndLog(
         phone,
@@ -346,6 +362,13 @@ Responde con JSON.`,
         phone,
         `Listo, *${session.name}*. Ya tienes tu Chalán.\n\nDime qué necesitas — por texto o por audio.`,
       );
+      if (created.providerProfile?.id) {
+        await this.processPendingInitialRequest(
+          phone,
+          session,
+          created.providerProfile.id,
+        );
+      }
     } catch (error: any) {
       this.logger.error(
         `Error creating provider: ${error.message}`,
@@ -354,6 +377,12 @@ Responde con JSON.`,
       await this.sendAndLog(phone, `Hubo un error. Intenta de nuevo enviando cualquier mensaje.`);
       await this.clearSession(phone);
     }
+  }
+
+  private looksLikeOperationalInitialRequest(text?: string): boolean {
+    if (!text) return false;
+    const normalized = text.toLowerCase();
+    return /\b(cobro|cobré|cobre|ingreso|me pagaron|recordatorio|recu[eé]rdame|agenda|cita|gasto|gast[eé])\b/.test(normalized);
   }
 
   private async classifyTradeStepMessage(
@@ -447,6 +476,7 @@ Responde SOLO JSON: {"intent":"..."}.`,
         `Va. Por ahora dejo *Ciudad de México* como referencia. ` +
           `Cuando quieras cambiarla, dime *"estoy en X"* o *"mi zona es X"*.`,
       );
+      await this.processPendingInitialRequest(phone, session, providerProfileId);
       this.logger.log(
         `Timezone prompt skipped during onboarding for ${phone}`,
       );
@@ -490,6 +520,7 @@ Responde SOLO con JSON.`,
           `Tus citas y recordatorios usarán esta hora.\n\n` +
           `Dime qué necesitas — por texto o por audio.`,
       );
+      await this.processPendingInitialRequest(phone, session, providerProfileId);
       this.logger.log(
         `Onboarding timezone set: ${resolved} for ${phone} (provider=${providerProfileId})`,
       );
@@ -516,6 +547,11 @@ Responde SOLO con JSON.`,
         `Mejor seguimos. Por ahora dejo *Ciudad de México* como referencia. ` +
           `Cuando quieras cambiarla, dime *"estoy en X"* o *"mi zona es X"*.`,
       );
+      await this.processPendingInitialRequest(
+        phone,
+        session,
+        session.providerProfileId,
+      );
       this.logger.log(
         `Timezone prompt exhausted after ${attempts} attempts for ${phone}`,
       );
@@ -532,6 +568,117 @@ Responde SOLO con JSON.`,
         `*Amsterdam*, *Miami*, *Madrid*, *Bogotá*, *Buenos Aires*, lo que sea.\n\n` +
         `_(O escribe *luego* si prefieres dejarlo para después.)_`,
     );
+  }
+
+  private async processPendingInitialRequest(
+    phone: string,
+    session: OnboardingSession,
+    providerProfileId?: string,
+  ): Promise<void> {
+    const pending = session.pendingInitialRequest?.trim();
+    if (!pending || !providerProfileId) return;
+
+    try {
+      const responses = await this.aiService.processMessage(
+        phone,
+        pending,
+        session.name,
+      );
+
+      for (const response of responses) {
+        if (response.intent === AiIntent.REGISTRAR_INGRESO) {
+          await this.executePendingIncome(phone, response.data, providerProfileId);
+        } else if (response.intent === AiIntent.CREAR_RECORDATORIO) {
+          await this.executePendingReminder(phone, response.data, providerProfileId, pending);
+        }
+      }
+    } catch (error: any) {
+      this.logger.warn(`Could not process pending onboarding request for ${phone}: ${error.message}`);
+      await this.sendAndLog(
+        phone,
+        'Me quedé con tu primer pedido, pero no lo pude registrar automático. Escríbemelo otra vez y lo hago.',
+      );
+    }
+  }
+
+  private async executePendingIncome(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId: string,
+  ): Promise<void> {
+    const amount = data?.amount;
+    if (!amount || typeof amount !== 'number' || amount <= 0) return;
+
+    const created = await this.incomeService.create({
+      providerId: providerProfileId,
+      amount,
+      description: data?.description,
+      clientName: data?.clientName,
+      paymentMethod: data?.paymentMethod,
+    });
+    const msg = this.incomeService.formatIncomeConfirmation(
+      amount,
+      data?.description,
+      data?.clientName,
+      data?.paymentMethod,
+    );
+    await this.sendAndLog(phone, msg, AiIntent.REGISTRAR_INGRESO);
+    this.logger.log(`Processed pending onboarding income ${created.id} for ${phone}`);
+  }
+
+  private async executePendingReminder(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId: string,
+    originalText: string,
+  ): Promise<void> {
+    const remindAt = this.remindersService.parseScheduledDate(data?.date, data?.time)
+      ?? this.parseRelativeReminder(originalText);
+    if (!remindAt) return;
+
+    const description = data?.description || 'Recordatorio';
+    const reminder = await this.remindersService.create({
+      providerId: providerProfileId,
+      description,
+      remindAt,
+    });
+    await this.sendAndLog(
+      phone,
+      this.remindersService.formatReminderConfirmation(description, remindAt),
+      AiIntent.CREAR_RECORDATORIO,
+    );
+
+    const delay = remindAt.getTime() - Date.now();
+    if (delay > 0) {
+      const jobData: PersonalReminderJobData = {
+        reminderId: reminder.id,
+        providerPhone: phone,
+        description,
+        remindAt: remindAt.toISOString(),
+      };
+      await this.queueService.addJob(
+        QUEUE_NAMES.PERSONAL_REMINDER,
+        'personal-reminder',
+        jobData,
+        { delay, jobId: `personal-reminder-${reminder.id}` },
+      );
+    }
+  }
+
+  private parseRelativeReminder(text: string): Date | null {
+    const normalized = text.toLowerCase();
+    const hourMatch = normalized.match(/en\s+(?:una|1)\s+hora/);
+    if (hourMatch) return new Date(Date.now() + 60 * 60 * 1000);
+
+    const minuteMatch = normalized.match(/en\s+(\d{1,3})\s+min/);
+    if (minuteMatch) {
+      const minutes = Number(minuteMatch[1]);
+      if (Number.isFinite(minutes) && minutes > 0) {
+        return new Date(Date.now() + minutes * 60 * 1000);
+      }
+    }
+
+    return null;
   }
 
   // Skip phrase + Mexican phone detection moved to timezone.utils.ts so

@@ -12,7 +12,7 @@ import {
 function makeHandler(): any {
   const noop = null as any;
   return new (WhatsAppOnboardingHandler as any)(
-    noop, noop, noop, noop, noop, noop,
+    noop, noop, noop, noop, noop, noop, noop, noop, noop,
   );
 }
 
@@ -114,6 +114,7 @@ function makeRedis(state: RedisState) {
 function makeFullHandler(opts: {
   initialSession?: { step: OnboardingStep; name?: string; trade?: string };
   extractFromTextImpl?: (text: string, prompt: string) => Promise<any>;
+  processMessageImpl?: (phone: string, text: string) => Promise<any[]>;
 }) {
   const phone = '+15755716627'; // Roberto-style: +1 country code
   const redisState: RedisState = { store: new Map() };
@@ -146,6 +147,7 @@ function makeFullHandler(opts: {
     extractFromText: jest.fn(
       opts.extractFromTextImpl ?? (async () => ({ location: null })),
     ),
+    processMessage: jest.fn(opts.processMessageImpl ?? (async () => [])),
     answerChalanSelfQuestion: jest.fn(async () =>
       'Soy tu Chalán. Estoy para que no se te caiga lo administrativo mientras trabajas.\n\nPara dejarte listo, dime a qué te dedicas.',
     ),
@@ -165,6 +167,18 @@ function makeFullHandler(opts: {
     setTimezone,
     markTimezonePromptSkipped,
   };
+  const incomeService = {
+    create: jest.fn(async () => ({ id: 'income-1' })),
+    formatIncomeConfirmation: jest.fn(() => 'Anotado. *$5,000*.'),
+  };
+  const remindersService = {
+    parseScheduledDate: jest.fn(() => new Date('2026-05-09T18:00:00.000Z')),
+    create: jest.fn(async () => ({ id: 'reminder-1' })),
+    formatReminderConfirmation: jest.fn(() => 'Recordatorio creado.'),
+  };
+  const queueService = {
+    addJob: jest.fn(async () => 'job-1'),
+  };
 
   const handler = new (WhatsAppOnboardingHandler as any)(
     whatsapp,
@@ -173,6 +187,9 @@ function makeFullHandler(opts: {
     aiService,
     aiContextService,
     workspaceService,
+    incomeService,
+    remindersService,
+    queueService,
   );
 
   return {
@@ -187,6 +204,9 @@ function makeFullHandler(opts: {
     aiService,
     aiContextService,
     workspaceService,
+    incomeService,
+    remindersService,
+    queueService,
     setTimezone,
     getWorkspace,
     markTimezonePromptSkipped,
@@ -327,5 +347,55 @@ describe('WhatsAppOnboardingHandler — self-model questions during trade onboar
 
     expect(env.aiService.answerChalanSelfQuestion).not.toHaveBeenCalled();
     expect(env.userCreate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('WhatsAppOnboardingHandler — pending first request', () => {
+  it('keeps the first operational request and processes it after timezone', async () => {
+    const env = makeFullHandler({
+      processMessageImpl: async () => [
+        {
+          intent: 'registrar_ingreso',
+          data: { amount: 5000, description: 'cobro inicial' },
+        },
+        {
+          intent: 'crear_recordatorio',
+          data: { description: 'cita', date: undefined, time: undefined },
+        },
+      ],
+      extractFromTextImpl: async (_text: string, prompt: string) => {
+        if (prompt.includes('"¿A qué te dedicas?"')) return { trade: 'electricista' };
+        if (prompt.includes('"¿En qué ciudad o país trabajas?"')) return { location: 'Los Ángeles' };
+        return null;
+      },
+    });
+
+    await env.handler.handleMessage(
+      env.phone,
+      'Gil',
+      'puedes ingresar un cobro de 5 mil pesos y darme un recordatorio en una hora para una cita',
+    );
+
+    let session = JSON.parse(env.redisState.store.get(`wa_onboarding:${env.phone}`)!);
+    expect(session.pendingInitialRequest).toContain('cobro de 5 mil');
+
+    await env.handler.handleMessage(env.phone, 'Gil', 'electricista');
+    session = JSON.parse(env.redisState.store.get(`wa_onboarding:${env.phone}`)!);
+    expect(session.pendingInitialRequest).toContain('cobro de 5 mil');
+
+    await env.handler.handleMessage(env.phone, 'Gil', 'Los Ángeles');
+
+    expect(env.aiService.processMessage).toHaveBeenCalledWith(
+      env.phone,
+      expect.stringContaining('cobro de 5 mil'),
+      'Gil',
+    );
+    expect(env.incomeService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 5000, providerId: 'pp-123' }),
+    );
+    expect(env.remindersService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ description: 'cita', providerId: 'pp-123' }),
+    );
+    expect(env.queueService.addJob).toHaveBeenCalled();
   });
 });
