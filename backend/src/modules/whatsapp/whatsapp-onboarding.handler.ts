@@ -19,6 +19,11 @@ import {
   isTimezoneSkipPhrase,
 } from '../../common/utils/timezone.utils';
 import { canonicalizePhoneE164 } from '../../common/utils/phone.utils';
+import {
+  buildWelcomeMessage,
+  buildShortGreeting,
+  buildExamplesBlock,
+} from './trade-examples';
 
 export enum OnboardingStep {
   NAME = 'NAME',
@@ -358,15 +363,22 @@ Responde con JSON.`,
 
       await this.clearSession(phone);
 
-      await this.sendAndLog(
-        phone,
-        `Listo, *${session.name}*. Ya tienes tu Chalán.\n\nDime qué necesitas — por texto o por audio.`,
-      );
-      if (created.providerProfile?.id) {
-        await this.processPendingInitialRequest(
+      const hadPending = Boolean(session.pendingInitialRequest?.trim());
+
+      if (hadPending) {
+        await this.sendAndLog(phone, buildShortGreeting(session.name || ''));
+        if (created.providerProfile?.id) {
+          await this.processPendingInitialRequest(
+            phone,
+            session,
+            created.providerProfile.id,
+          );
+        }
+        await this.sendAndLog(phone, buildExamplesBlock(session.trade));
+      } else {
+        await this.sendAndLog(
           phone,
-          session,
-          created.providerProfile.id,
+          buildWelcomeMessage(session.name || '', session.trade),
         );
       }
     } catch (error: any) {
@@ -471,12 +483,19 @@ Responde SOLO JSON: {"intent":"..."}.`,
     if (this.isSkipPhrase(trimmed)) {
       await this.workspaceService.markTimezonePromptSkipped(providerProfileId);
       await this.clearSession(phone);
+      const hadPendingSkip = Boolean(session.pendingInitialRequest?.trim());
+
       await this.sendAndLog(
         phone,
         `Va. Por ahora dejo *Ciudad de México* como referencia. ` +
           `Cuando quieras cambiarla, dime *"estoy en X"* o *"mi zona es X"*.`,
       );
-      await this.processPendingInitialRequest(phone, session, providerProfileId);
+
+      if (hadPendingSkip) {
+        await this.processPendingInitialRequest(phone, session, providerProfileId);
+      }
+      await this.sendAndLog(phone, buildExamplesBlock(session.trade));
+
       this.logger.log(
         `Timezone prompt skipped during onboarding for ${phone}`,
       );
@@ -514,13 +533,19 @@ Responde SOLO con JSON.`,
 
       await this.clearSession(phone);
       const label = getTimezoneLabel(resolved);
+      const hadPending = Boolean(session.pendingInitialRequest?.trim());
+
       await this.sendAndLog(
         phone,
         `Listo, *${name}*. Tu zona quedó como *${label}*. ` +
-          `Tus citas y recordatorios usarán esta hora.\n\n` +
-          `Dime qué necesitas — por texto o por audio.`,
+          `Tus citas y recordatorios usarán esta hora.`,
       );
-      await this.processPendingInitialRequest(phone, session, providerProfileId);
+
+      if (hadPending) {
+        await this.processPendingInitialRequest(phone, session, providerProfileId);
+      }
+      await this.sendAndLog(phone, buildExamplesBlock(session.trade));
+
       this.logger.log(
         `Onboarding timezone set: ${resolved} for ${phone} (provider=${providerProfileId})`,
       );
@@ -542,16 +567,23 @@ Responde SOLO con JSON.`,
         session.providerProfileId,
       );
       await this.clearSession(phone);
+      const hadPendingExhausted = Boolean(session.pendingInitialRequest?.trim());
+
       await this.sendAndLog(
         phone,
         `Mejor seguimos. Por ahora dejo *Ciudad de México* como referencia. ` +
           `Cuando quieras cambiarla, dime *"estoy en X"* o *"mi zona es X"*.`,
       );
-      await this.processPendingInitialRequest(
-        phone,
-        session,
-        session.providerProfileId,
-      );
+
+      if (hadPendingExhausted) {
+        await this.processPendingInitialRequest(
+          phone,
+          session,
+          session.providerProfileId,
+        );
+      }
+      await this.sendAndLog(phone, buildExamplesBlock(session.trade));
+
       this.logger.log(
         `Timezone prompt exhausted after ${attempts} attempts for ${phone}`,
       );
