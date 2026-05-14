@@ -20,10 +20,10 @@ import {
 } from '../../common/utils/timezone.utils';
 import { canonicalizePhoneE164 } from '../../common/utils/phone.utils';
 import {
-  buildWelcomeMessage,
   buildShortGreeting,
   buildExamplesBlock,
 } from './trade-examples';
+import { WelcomeExamplesService } from './welcome-examples.service';
 
 export enum OnboardingStep {
   NAME = 'NAME',
@@ -70,6 +70,7 @@ export class WhatsAppOnboardingHandler {
     private incomeService: IncomeService,
     private remindersService: RemindersService,
     private queueService: QueueService,
+    private welcomeExamplesService: WelcomeExamplesService,
   ) {}
 
   private async sendAndLog(
@@ -363,24 +364,11 @@ Responde con JSON.`,
 
       await this.clearSession(phone);
 
-      const hadPending = Boolean(session.pendingInitialRequest?.trim());
-
-      if (hadPending) {
-        await this.sendAndLog(phone, buildShortGreeting(session.name || ''));
-        if (created.providerProfile?.id) {
-          await this.processPendingInitialRequest(
-            phone,
-            session,
-            created.providerProfile.id,
-          );
-        }
-        await this.sendAndLog(phone, buildExamplesBlock(session.trade));
-      } else {
-        await this.sendAndLog(
-          phone,
-          buildWelcomeMessage(session.name || '', session.trade),
-        );
-      }
+      await this.sendWelcomeFlow(
+        phone,
+        session,
+        created.providerProfile?.id,
+      );
     } catch (error: any) {
       this.logger.error(
         `Error creating provider: ${error.message}`,
@@ -483,7 +471,6 @@ Responde SOLO JSON: {"intent":"..."}.`,
     if (this.isSkipPhrase(trimmed)) {
       await this.workspaceService.markTimezonePromptSkipped(providerProfileId);
       await this.clearSession(phone);
-      const hadPendingSkip = Boolean(session.pendingInitialRequest?.trim());
 
       await this.sendAndLog(
         phone,
@@ -491,10 +478,9 @@ Responde SOLO JSON: {"intent":"..."}.`,
           `Cuando quieras cambiarla, dime *"estoy en X"* o *"mi zona es X"*.`,
       );
 
-      if (hadPendingSkip) {
-        await this.processPendingInitialRequest(phone, session, providerProfileId);
-      }
-      await this.sendAndLog(phone, buildExamplesBlock(session.trade));
+      await this.sendWelcomeFlow(phone, session, providerProfileId, {
+        skipGreeting: true,
+      });
 
       this.logger.log(
         `Timezone prompt skipped during onboarding for ${phone}`,
@@ -533,7 +519,6 @@ Responde SOLO con JSON.`,
 
       await this.clearSession(phone);
       const label = getTimezoneLabel(resolved);
-      const hadPending = Boolean(session.pendingInitialRequest?.trim());
 
       await this.sendAndLog(
         phone,
@@ -541,10 +526,9 @@ Responde SOLO con JSON.`,
           `Tus citas y recordatorios usarán esta hora.`,
       );
 
-      if (hadPending) {
-        await this.processPendingInitialRequest(phone, session, providerProfileId);
-      }
-      await this.sendAndLog(phone, buildExamplesBlock(session.trade));
+      await this.sendWelcomeFlow(phone, session, providerProfileId, {
+        skipGreeting: true,
+      });
 
       this.logger.log(
         `Onboarding timezone set: ${resolved} for ${phone} (provider=${providerProfileId})`,
@@ -567,7 +551,6 @@ Responde SOLO con JSON.`,
         session.providerProfileId,
       );
       await this.clearSession(phone);
-      const hadPendingExhausted = Boolean(session.pendingInitialRequest?.trim());
 
       await this.sendAndLog(
         phone,
@@ -575,14 +558,12 @@ Responde SOLO con JSON.`,
           `Cuando quieras cambiarla, dime *"estoy en X"* o *"mi zona es X"*.`,
       );
 
-      if (hadPendingExhausted) {
-        await this.processPendingInitialRequest(
-          phone,
-          session,
-          session.providerProfileId,
-        );
-      }
-      await this.sendAndLog(phone, buildExamplesBlock(session.trade));
+      await this.sendWelcomeFlow(
+        phone,
+        session,
+        session.providerProfileId,
+        { skipGreeting: true },
+      );
 
       this.logger.log(
         `Timezone prompt exhausted after ${attempts} attempts for ${phone}`,
@@ -600,6 +581,45 @@ Responde SOLO con JSON.`,
         `*Amsterdam*, *Miami*, *Madrid*, *Bogotá*, *Buenos Aires*, lo que sea.\n\n` +
         `_(O escribe *luego* si prefieres dejarlo para después.)_`,
     );
+  }
+
+  /**
+   * Unified welcome flow used at every onboarding terminus (normal close,
+   * timezone resolved, timezone skipped, timezone exhausted).
+   *
+   * Order of operations (Cap. 49 — revision):
+   *   1. Send a short greeting (unless `skipGreeting` — caller already sent
+   *      a context-specific intro like the timezone confirmation).
+   *   2. If there is a pending operational request the user sent during
+   *      onboarding ("recuérdame X"), process it now. Its own confirmation
+   *      acts as proof the bot is working.
+   *   3. Generate trade-specific examples via LLM (with 5s timeout). On
+   *      success, send them as a separate "Te puedo ayudar con cosas así"
+   *      message. On failure, send a short "Dime qué necesitas" fallback.
+   *
+   * Splitting greeting and examples into two messages is deliberate (Cap.
+   * 49): the LLM call buys the bot a beat that feels like it's thinking
+   * about the user, not just spitting a template.
+   */
+  private async sendWelcomeFlow(
+    phone: string,
+    session: OnboardingSession,
+    providerProfileId: string | undefined,
+    options: { skipGreeting?: boolean } = {},
+  ): Promise<void> {
+    if (!options.skipGreeting) {
+      await this.sendAndLog(phone, buildShortGreeting(session.name || ''));
+    }
+
+    const hadPending = Boolean(session.pendingInitialRequest?.trim());
+    if (hadPending && providerProfileId) {
+      await this.processPendingInitialRequest(phone, session, providerProfileId);
+    }
+
+    const examples = await this.welcomeExamplesService.generateExamples(
+      session.trade || '',
+    );
+    await this.sendAndLog(phone, buildExamplesBlock(examples));
   }
 
   private async processPendingInitialRequest(

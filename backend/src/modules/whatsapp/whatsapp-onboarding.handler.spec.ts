@@ -12,7 +12,7 @@ import {
 function makeHandler(): any {
   const noop = null as any;
   return new (WhatsAppOnboardingHandler as any)(
-    noop, noop, noop, noop, noop, noop, noop, noop, noop,
+    noop, noop, noop, noop, noop, noop, noop, noop, noop, noop,
   );
 }
 
@@ -172,12 +172,17 @@ function makeFullHandler(opts: {
     formatIncomeConfirmation: jest.fn(() => 'Anotado. *$5,000*.'),
   };
   const remindersService = {
-    parseScheduledDate: jest.fn(() => new Date('2026-05-09T18:00:00.000Z')),
+    // 1h in the future so the BullMQ scheduling code path runs (delay > 0).
+    // Was previously hardcoded to 2026-05-09 — broke once that date passed.
+    parseScheduledDate: jest.fn(() => new Date(Date.now() + 60 * 60 * 1000)),
     create: jest.fn(async () => ({ id: 'reminder-1' })),
     formatReminderConfirmation: jest.fn(() => 'Recordatorio creado.'),
   };
   const queueService = {
     addJob: jest.fn(async () => 'job-1'),
+  };
+  const welcomeExamplesService = {
+    generateExamples: jest.fn(async () => null),
   };
 
   const handler = new (WhatsAppOnboardingHandler as any)(
@@ -190,6 +195,7 @@ function makeFullHandler(opts: {
     incomeService,
     remindersService,
     queueService,
+    welcomeExamplesService,
   );
 
   return {
@@ -207,6 +213,7 @@ function makeFullHandler(opts: {
     incomeService,
     remindersService,
     queueService,
+    welcomeExamplesService,
     setTimezone,
     getWorkspace,
     markTimezonePromptSkipped,
