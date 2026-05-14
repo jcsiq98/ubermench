@@ -41,6 +41,8 @@ interface OnboardingSession {
   providerProfileId?: string;
   timezoneAttempts?: number;
   pendingInitialRequest?: string;
+  // Cap. 49 — count failed LLM trade extractions to trigger raw fallback.
+  tradeAttempts?: number;
 }
 
 type OnboardingTradeIntent =
@@ -270,34 +272,91 @@ Responde con JSON: {"name": "Nombre Extraído"} o {"name": null}`,
       return;
     }
 
-    // Use LLM to extract the trade/occupation. The text may come from a long
-    // voice transcription (Whisper), so we instruct the LLM to extract just
-    // the trade — and to return null if no clear trade is mentioned.
+    // Extract whatever the user says they do for a living. Accept any
+    // honest description — trades, professions, self-employment labels,
+    // services, freelance work — and only reject filler/non-answers.
+    // The text may come from a long voice transcription (Whisper), so we
+    // instruct the LLM to pull out just the role and ignore noise.
     const extracted = await this.aiService.extractFromText(
       trimmed,
       `El usuario está respondiendo a la pregunta "¿A qué te dedicas?".
-Extrae SOLO el oficio o profesión, en 1-3 palabras máximo, en minúsculas, sin artículos ni muletillas.
+Tu tarea: extraer una etiqueta corta (1-4 palabras, minúsculas, sin artículos ni muletillas) que describa a qué se dedica.
+
+Acepta CUALQUIER descripción honesta: oficios tradicionales (plomero, electricista, albañil), profesiones (dentista, contador), trabajadores independientes ("trabajador independiente", "freelancer"), comerciantes ("vendedor de tamales", "comerciante"), servicios ("estilista", "manicurista"), creativos ("diseñador", "fotógrafo"), etc.
+
+Reglas:
+- Si la respuesta es genérica pero honesta (ej. "trabajador independiente", "freelancer", "ama de casa", "comerciante"), DEVUÉLVELA tal cual normalizada en minúsculas.
+- Si menciona oficio específico ("soy plomero", "yo me dedico a la electricidad"), extrae el oficio limpio ("plomero", "electricista").
+- Si la transcripción tiene ruido pero hay un oficio claro, extráelo.
+- Devuelve {"trade": null} SOLO si el mensaje no contiene ninguna actividad reconocible (ej. "no sé", "hola", "qué tal", "?", "un mensaje al azar sin contexto").
+
 Ejemplos:
 - "soy plomero" → {"trade": "plomero"}
-- "el flomero, lo que sea. ah ok, ok, ok..." → {"trade": "plomero"}
+- "trabajador independiente" → {"trade": "trabajador independiente"}
+- "soy trabajador independiente" → {"trade": "trabajador independiente"}
+- "vendedor de tacos" → {"trade": "vendedor de tacos"}
+- "el flomero, lo que sea. ah ok, ok..." → {"trade": "plomero"}
 - "yo me dedico a la electricidad residencial" → {"trade": "electricista"}
-- "pues hago de todo, albañilería, plomería..." → {"trade": "albañil"}
-Si NO puedes identificar un oficio claro, responde: {"trade": null}
-Responde con JSON.`,
+- "ama de casa" → {"trade": "ama de casa"}
+- "diseñador gráfico freelance" → {"trade": "diseñador gráfico"}
+- "hola" → {"trade": null}
+- "no sé" → {"trade": null}
+
+Responde SOLO con JSON.`,
     );
 
     const sanitized = this.sanitizeTrade(extracted?.trade);
 
     if (!sanitized) {
+      const attempts = (session.tradeAttempts ?? 0) + 1;
+      session.tradeAttempts = attempts;
+      await this.setSession(phone, session);
+
+      // After 2 failed extractions, accept the user's raw text as-is to
+      // unblock onboarding. The trade field is informational, not a gate
+      // on functionality — better to record "what they said" than to
+      // trap them in a loop. Mirrors the timezone-skip safety net.
+      if (attempts >= 2) {
+        const fallback = this.sanitizeTradeRawFallback(trimmed);
+        if (fallback) {
+          session.trade = fallback;
+          this.logger.log(
+            `Onboarding accepted raw trade after ${attempts} attempts: "${fallback}" for ${phone}`,
+          );
+          return this.completeTradeStep(phone, session);
+        }
+      }
+
       await this.sendAndLog(
         phone,
-        `No te entendí bien el oficio. Dime en pocas palabras a qué te dedicas (plomero, electricista, albañil, etc.).`,
+        `No te entendí bien. Dime en pocas palabras a qué te dedicas — puede ser cualquier oficio, profesión o actividad.`,
       );
       return;
     }
 
-    const trade = sanitized;
-    session.trade = trade;
+    session.trade = sanitized;
+    return this.completeTradeStep(phone, session);
+  }
+
+  /**
+   * Shared completion for the TRADE step: persists the User +
+   * ProviderProfile + ProviderApplication, then either proceeds to the
+   * timezone step (non-Mexican phones) or runs the welcome flow.
+   *
+   * Reached from two paths:
+   *   1. The LLM extractor returned a clean trade (normal path).
+   *   2. After 2 failed LLM extractions, the raw fallback accepted the
+   *      user's text as-is to unblock onboarding.
+   */
+  private async completeTradeStep(
+    phone: string,
+    session: OnboardingSession,
+  ): Promise<void> {
+    const trade = session.trade;
+    if (!trade) {
+      this.logger.error(`completeTradeStep called without session.trade for ${phone}`);
+      return;
+    }
 
     try {
       const dbPhone = this.normalizePhoneForDb(phone);
@@ -340,7 +399,7 @@ Responde con JSON.`,
       });
 
       this.logger.log(
-        `✅ Provider registered: ${session.name} (${dbPhone}) — ${session.trade}`,
+        `✅ Provider registered: ${session.name} (${dbPhone}) — ${trade}`,
       );
 
       // Cap. 46 — for non-Mexican numbers we ask timezone before
@@ -776,6 +835,36 @@ Responde SOLO con JSON.`,
     if (meaningful.length === 0) return null;
 
     return meaningful.join(' ');
+  }
+
+  /**
+   * Raw fallback used after 2 failed LLM extractions. More permissive
+   * than sanitizeTrade: accepts up to 5 words, only strips leading
+   * "soy/yo soy/me dedico" preambles and obvious punctuation. Goal is to
+   * unblock onboarding when the LLM extractor is being too strict — we'd
+   * rather record an imperfect trade label than trap the user.
+   */
+  private sanitizeTradeRawFallback(raw: string): string | null {
+    if (typeof raw !== 'string') return null;
+
+    let cleaned = raw
+      .toLowerCase()
+      .normalize('NFC')
+      .replace(/[.,;:!?"'`()¿¡]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    cleaned = cleaned.replace(
+      /^(soy un|soy una|soy|yo soy|me dedico a la|me dedico a el|me dedico a|trabajo de|trabajo como|hago de|el|la|los|las|un|una)\s+/i,
+      '',
+    );
+
+    if (!cleaned) return null;
+
+    const words = cleaned.split(' ').slice(0, 5).join(' ');
+    if (words.length < 2 || words.length > 60) return null;
+
+    return words;
   }
 
   private normalizePhoneForDb(phone: string): string {

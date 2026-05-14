@@ -357,6 +357,64 @@ describe('WhatsAppOnboardingHandler — self-model questions during trade onboar
   });
 });
 
+describe('WhatsAppOnboardingHandler — trade extraction edge cases', () => {
+  it('accepts "trabajador independiente" via the LLM extractor', async () => {
+    const env = makeFullHandler({
+      initialSession: { step: OnboardingStep.TRADE, name: 'Jose Carlos' },
+      extractFromTextImpl: async (_text: string, prompt: string) => {
+        if (prompt.includes('"¿A qué te dedicas?"')) {
+          return { trade: 'trabajador independiente' };
+        }
+        return null;
+      },
+    });
+
+    await env.handler.handleMessage(
+      env.phone,
+      'Jose Carlos',
+      'soy trabajador independiente',
+    );
+
+    expect(env.userCreate).toHaveBeenCalledTimes(1);
+    const userCreateArgs = env.userCreate.mock.calls[0][0];
+    expect(userCreateArgs.data.providerProfile.create.bio).toBe(
+      'trabajador independiente',
+    );
+  });
+
+  it('falls back to raw text after 2 LLM rejections to unblock onboarding', async () => {
+    const env = makeFullHandler({
+      initialSession: { step: OnboardingStep.TRADE, name: 'Jose Carlos' },
+      // LLM keeps returning null no matter what — simulate a strict extractor.
+      extractFromTextImpl: async (_text: string, prompt: string) => {
+        if (prompt.includes('Clasifica su mensaje')) {
+          return { intent: 'trade_answer' };
+        }
+        if (prompt.includes('"¿A qué te dedicas?"')) {
+          return { trade: null };
+        }
+        return null;
+      },
+    });
+
+    // First attempt — should be rejected, increment counter.
+    await env.handler.handleMessage(env.phone, 'JC', 'algo raro que el LLM no entiende');
+    expect(env.userCreate).not.toHaveBeenCalled();
+    const sessionAfter1 = JSON.parse(
+      env.redisState.store.get(`wa_onboarding:${env.phone}`)!,
+    );
+    expect(sessionAfter1.tradeAttempts).toBe(1);
+
+    // Second attempt — fallback kicks in, accepts raw text.
+    await env.handler.handleMessage(env.phone, 'JC', 'consultor de negocios');
+    expect(env.userCreate).toHaveBeenCalledTimes(1);
+    const userCreateArgs = env.userCreate.mock.calls[0][0];
+    expect(userCreateArgs.data.providerProfile.create.bio).toBe(
+      'consultor de negocios',
+    );
+  });
+});
+
 describe('WhatsAppOnboardingHandler — pending first request', () => {
   it('keeps the first operational request and processes it after timezone', async () => {
     const env = makeFullHandler({
