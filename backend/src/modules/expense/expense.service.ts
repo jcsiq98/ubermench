@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
-import { getWeekStartUtc, getMonthStartUtc, DEFAULT_TIMEZONE } from '../../common/utils/timezone.utils';
+import {
+  getWeekStartUtc,
+  getMonthStartUtc,
+  DEFAULT_TIMEZONE,
+  formatDate,
+} from '../../common/utils/timezone.utils';
 import {
   FINANCIAL_EVENT,
   emitFinancialEvent,
@@ -21,11 +26,19 @@ export interface CreateExpenseDto {
   sourceTextHash?: string;
 }
 
+export interface ExpenseSummaryItem {
+  amount: number;
+  category: string | null;
+  description: string | null;
+  date: Date;
+}
+
 export interface ExpenseSummary {
   period: string;
   total: number;
   count: number;
   byCategory: { category: string; total: number; count: number }[];
+  items: ExpenseSummaryItem[];
 }
 
 @Injectable()
@@ -111,6 +124,7 @@ export class ExpenseService {
         providerId,
         date: { gte: from, lte: to },
       },
+      orderBy: { date: 'asc' },
     });
 
     const total = expenses.reduce(
@@ -131,7 +145,14 @@ export class ExpenseService {
       ([category, data]) => ({ category, ...data }),
     );
 
-    return { period, total, count: expenses.length, byCategory };
+    const items: ExpenseSummaryItem[] = expenses.map((e) => ({
+      amount: Number(e.amount),
+      category: e.category,
+      description: e.description,
+      date: e.date,
+    }));
+
+    return { period, total, count: expenses.length, byCategory, items };
   }
 
   async deleteLast(providerId: string) {
@@ -220,23 +241,102 @@ export class ExpenseService {
     return msg;
   }
 
-  formatExpenseSummaryMessage(summary: ExpenseSummary): string {
+  formatExpenseSummaryMessage(
+    summary: ExpenseSummary,
+    tz: string = DEFAULT_TIMEZONE,
+  ): string {
     if (summary.count === 0) {
       return `📊 No tienes gastos registrados ${summary.period}.`;
     }
 
     let msg =
       `📊 *Gastos ${summary.period}*\n\n` +
-      `💸 Total: *$${summary.total.toLocaleString('es-MX')}*\n` +
-      `📝 Gastos: ${summary.count}\n`;
+      `Total: *$${summary.total.toLocaleString('es-MX')}*\n` +
+      `Gastos: ${summary.count}`;
 
     if (summary.byCategory.length > 1) {
-      msg += '\nPor categoría:\n';
+      msg += '\n\nPor categoría:\n';
       for (const c of summary.byCategory) {
-        msg += `  🏷️ ${c.category}: $${c.total.toLocaleString('es-MX')} (${c.count})\n`;
+        msg += `• ${c.category}: $${c.total.toLocaleString('es-MX')} (${c.count})\n`;
       }
+      msg = msg.replace(/\n$/, '');
+    }
+
+    if (summary.items.length > 0 && summary.items.length <= 8) {
+      msg += '\n\nDetalle:\n';
+      for (const item of summary.items) {
+        msg += `${formatExpenseLine(item, tz)}\n`;
+      }
+      msg = msg.replace(/\n$/, '');
+    } else if (summary.items.length > 8) {
+      const groupedByMonth = groupExpenseItemsByMonth(summary.items, tz);
+      msg += '\n\nPor mes:\n';
+      for (const group of groupedByMonth) {
+        msg += `• ${group.label}: $${group.total.toLocaleString('es-MX')} (${group.count})\n`;
+      }
+      msg = msg.replace(/\n$/, '');
+
+      const recent = summary.items.slice(-5).reverse();
+      msg += '\n\nMás recientes:\n';
+      for (const item of recent) {
+        msg += `${formatExpenseLine(item, tz)}\n`;
+      }
+      msg = msg.replace(/\n$/, '');
     }
 
     return msg;
   }
+}
+
+// ──────────────────────────────────────────────
+// Module-private formatting helpers (Cap. 49)
+// ──────────────────────────────────────────────
+
+function formatShortDate(date: Date, tz: string): string {
+  // "02 may" style. Intl in es-MX returns "02-may" or "2 may." depending on
+  // node/icu version — normalize both into "DD may".
+  const raw = formatDate(date, tz, {
+    weekday: undefined,
+    day: '2-digit',
+    month: 'short',
+  });
+  return raw
+    .replace(/\./g, '')
+    .replace(/-/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function formatExpenseLine(item: ExpenseSummaryItem, tz: string): string {
+  const date = formatShortDate(item.date, tz);
+  const amount = `$${item.amount.toLocaleString('es-MX')}`;
+  const parts: string[] = [`${date} — ${amount}`];
+
+  const detailBits: string[] = [];
+  if (item.description) detailBits.push(item.description);
+  if (item.category) detailBits.push(item.category);
+
+  if (detailBits.length > 0) parts.push(detailBits.join(', '));
+
+  return `• ${parts.join(' ')}`;
+}
+
+function groupExpenseItemsByMonth(
+  items: ExpenseSummaryItem[],
+  tz: string,
+): { label: string; total: number; count: number }[] {
+  const groups = new Map<string, { label: string; total: number; count: number }>();
+  for (const item of items) {
+    const label = formatDate(item.date, tz, {
+      weekday: undefined,
+      day: undefined,
+      month: 'long',
+      year: 'numeric',
+    });
+    const existing = groups.get(label) ?? { label, total: 0, count: 0 };
+    existing.total += item.amount;
+    existing.count += 1;
+    groups.set(label, existing);
+  }
+  return Array.from(groups.values());
 }

@@ -2072,13 +2072,13 @@ export class WhatsAppProviderHandler {
 
       let msg = '';
       if (incomeR.status === 'fulfilled') {
-        msg += this.incomeService.formatSummaryMessage(incomeR.value);
+        msg += this.incomeService.formatSummaryMessage(incomeR.value, tz);
       }
       if (expenseR.status === 'fulfilled' && expenseR.value.count > 0) {
-        msg += `\n${this.expenseService.formatExpenseSummaryMessage(expenseR.value)}`;
+        msg += `\n\n${this.expenseService.formatExpenseSummaryMessage(expenseR.value, tz)}`;
         if (incomeR.status === 'fulfilled') {
           const net = incomeR.value.total - expenseR.value.total;
-          msg += `\n💰 *Balance ${dateRange.label}: $${net.toLocaleString('es-MX')}*`;
+          msg += `\n\n*Balance ${dateRange.label}: $${net.toLocaleString('es-MX')}*`;
         }
       }
 
@@ -2123,21 +2123,21 @@ export class WhatsAppProviderHandler {
     const parts: string[] = [];
 
     if (weekIncomeR.status === 'fulfilled') {
-      let weekBlock = this.incomeService.formatSummaryMessage(weekIncomeR.value);
+      let weekBlock = this.incomeService.formatSummaryMessage(weekIncomeR.value, tz);
       if (weekExpenseR.status === 'fulfilled' && weekExpenseR.value.count > 0) {
-        weekBlock += `\n${this.expenseService.formatExpenseSummaryMessage(weekExpenseR.value)}`;
+        weekBlock += `\n\n${this.expenseService.formatExpenseSummaryMessage(weekExpenseR.value, tz)}`;
         const weekNet = weekIncomeR.value.total - weekExpenseR.value.total;
-        weekBlock += `\n💰 *Balance semana: $${weekNet.toLocaleString('es-MX')}*`;
+        weekBlock += `\n\n*Balance semana: $${weekNet.toLocaleString('es-MX')}*`;
       }
       parts.push(weekBlock);
     }
 
     if (monthIncomeR.status === 'fulfilled') {
-      let monthBlock = this.incomeService.formatSummaryMessage(monthIncomeR.value);
+      let monthBlock = this.incomeService.formatSummaryMessage(monthIncomeR.value, tz);
       if (monthExpenseR.status === 'fulfilled' && monthExpenseR.value.count > 0) {
-        monthBlock += `\n${this.expenseService.formatExpenseSummaryMessage(monthExpenseR.value)}`;
+        monthBlock += `\n\n${this.expenseService.formatExpenseSummaryMessage(monthExpenseR.value, tz)}`;
         const monthNet = monthIncomeR.value.total - monthExpenseR.value.total;
-        monthBlock += `\n💰 *Balance mes: $${monthNet.toLocaleString('es-MX')}*`;
+        monthBlock += `\n\n*Balance mes: $${monthNet.toLocaleString('es-MX')}*`;
       }
       parts.push(monthBlock);
     }
