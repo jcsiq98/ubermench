@@ -22,6 +22,7 @@ import { canonicalizePhoneE164 } from '../../common/utils/phone.utils';
 import {
   buildShortGreeting,
   buildExamplesBlock,
+  buildActivationHelpMessage,
 } from './trade-examples';
 import { WelcomeExamplesService } from './welcome-examples.service';
 
@@ -137,11 +138,9 @@ export class WhatsAppOnboardingHandler {
       if (existing?.providerProfile) {
         await this.sendAndLog(
           phone,
-          `👋 ¡Hola ${existing.name || ''}! Ya tienes tu cuenta activa.\n\n` +
-            `Puedes escribirme lo que necesites. Por ejemplo:\n` +
-            `• "Cobré 800 de una fuga"\n` +
-            `• "Mañana tengo trabajo a las 10"\n` +
-            `• "¿Cuánto llevo esta semana?"`,
+          existing.name
+            ? `Aquí sigo, ${existing.name}.\n\n${buildActivationHelpMessage()}`
+            : buildActivationHelpMessage(),
         );
         return;
       }

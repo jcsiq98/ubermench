@@ -23,9 +23,9 @@ export class WelcomeExamplesService {
   // can request. Update this list when a new tool ships in ai.tools.ts.
   private static readonly CAPABILITIES = [
     'registrar un ingreso o cobro (con o sin descripción y cliente)',
-    'registrar un gasto (con o sin categoría)',
     'agendar una cita o trabajo (con fecha y hora)',
     'crear un recordatorio personal con fecha y hora',
+    'registrar un gasto (con o sin categoría)',
     'pedir un resumen financiero (semana, mes, periodo custom)',
     'generar un link de cobro para mandar a un cliente',
   ];
@@ -58,7 +58,7 @@ ${capabilitiesList}
 Reglas estrictas:
 1. Cada ejemplo debe ser una frase realista en español mexicano, en primera persona, como si el usuario la estuviera dictando.
 2. Cada ejemplo debe corresponder a UNA de las capacidades listadas. NO inventes capacidades que no estén ahí.
-3. Cubre 3 capacidades DIFERENTES entre los 3 ejemplos (típicamente: un cobro/ingreso, una cita o recordatorio, y un gasto o algo más).
+3. Cubre 3 capacidades DIFERENTES entre los 3 ejemplos. Prioriza este núcleo: ingreso/cobro, cita/recordatorio, gasto/resumen. Usa link de cobro solo si suena natural para el oficio.
 4. Cada frase debe ser corta: máximo 60 caracteres.
 5. Usa contexto específico del oficio: nombres de herramientas, materiales, clientes, situaciones típicas. Si el oficio es vago (ej. "trabajador independiente"), usa ejemplos genéricos pero naturales.
 6. Sin emojis. Sin comillas dentro de la frase. Sin formato markdown.

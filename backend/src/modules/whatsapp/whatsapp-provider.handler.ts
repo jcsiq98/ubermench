@@ -55,6 +55,7 @@ import {
   shouldPlantPending,
   classifyPendingResolution,
 } from './whatsapp-provider.pending-financial';
+import { buildActivationHelpMessage } from './trade-examples';
 
 const JUNK_CLIENT_NAMES = new Set([
   'ninguno', 'ninguna', 'no', 'n/a', 'na', 'nada',
@@ -565,7 +566,7 @@ export class WhatsAppProviderHandler {
     }
 
     // ── Global keywords ──
-    if (normalized === 'help' || normalized === 'ayuda') {
+    if (this.isActivationHelpQuery(normalized)) {
       return this.sendHelpMenu(senderPhone);
     }
     if (normalized === 'menu' || normalized === 'inicio') {
@@ -3730,12 +3731,11 @@ export class WhatsAppProviderHandler {
   // ─── Dashboard / Help ───────────────────────────────────
 
   private async sendProviderDashboard(phone: string, name: string) {
-    const greeting = name ? `Soy tu Chalán, *${name}*. ` : `Soy tu Chalán. `;
     await this.whatsapp.sendTextMessage(
       phone,
-      `${greeting}Te llevo lo administrativo del negocio — ingresos, gastos, agenda, cobros, lo que se ofrezca. ` +
-        `Tú concéntrate en el oficio; del papeleo me encargo yo.\n\n` +
-        `Dime qué necesitas — por texto o por audio, como te acomode.`,
+      name
+        ? `Aquí estoy, ${name}.\n\n${buildActivationHelpMessage()}`
+        : buildActivationHelpMessage(),
     );
   }
 
@@ -3749,25 +3749,7 @@ export class WhatsAppProviderHandler {
   private async sendHelpMenu(phone: string) {
     await this.whatsapp.sendTextMessage(
       phone,
-      `❓ *Ayuda — Tu Chalán*\n\n` +
-        `💰 *Finanzas:*\n` +
-        `  "Cobré 1,200 en efectivo" — registrar ingreso\n` +
-        `  "Gasté 200 en material" — registrar gasto\n` +
-        `  "Borra el último gasto" — eliminar\n` +
-        `  "El último gasto era 300" — corregir monto\n` +
-        `  "Borra el gasto de material" — eliminar por nombre\n` +
-        `  "Gasto fijo de 500 de renta" — gasto recurrente\n` +
-        `  "¿Cómo voy esta semana?" — ver resumen\n\n` +
-        `📅 *Agenda:*\n` +
-        `  "Mañana a las 10 con la señora García" — agendar\n` +
-        `  "Cambia la cita a las 2pm" — modificar cita\n` +
-        `  "Cancela la cita con García" — cancelar\n` +
-        `  "¿Qué tengo hoy?" — ver agenda\n\n` +
-        `⚙️ *Perfil:*\n` +
-        `  "Cobro 800 por visita" — configurar servicios\n` +
-        `  "Trabajo lunes a viernes de 8 a 6" — horarios\n` +
-        `  "Mis servicios" — ver tu perfil\n\n` +
-        `🔄 *"reset"* — limpiar historial de conversación`,
+      buildActivationHelpMessage(),
     );
   }
 
@@ -3980,6 +3962,22 @@ export class WhatsAppProviderHandler {
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/[¿?¡!.,;:()]/g, '')
       .trim();
+  }
+
+  private isActivationHelpQuery(normalized: string): boolean {
+    const text = normalized.toLowerCase();
+    return [
+      'help',
+      'ayuda',
+      'que puedes hacer',
+      'que haces',
+      'como me ayudas',
+      'como me puedes ayudar',
+      'como funciona',
+      'como uso chalan',
+      'para que sirves',
+      'que es chalan',
+    ].includes(text);
   }
 
   // Verb stems for detecting action intent. Stem matching catches all

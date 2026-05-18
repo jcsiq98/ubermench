@@ -2,6 +2,7 @@ import {
   buildShortGreeting,
   buildExamplesBlock,
   buildWelcomeMessage,
+  buildActivationHelpMessage,
 } from './trade-examples';
 
 describe('trade-examples — buildShortGreeting', () => {
@@ -26,24 +27,43 @@ describe('trade-examples — buildExamplesBlock', () => {
     expect(block).toContain('Te puedo ayudar con cosas así:');
     expect(block.match(/^• /gm)?.length).toBe(3);
     expect(block).toContain('destapar un baño');
-    expect(block).toContain('Por texto o por audio, como te acomode.');
+    expect(block).toContain('Para empezar, mándame algo real');
   });
 
   it('falls back to a short closer when examples are null (LLM failure)', () => {
     const block = buildExamplesBlock(null);
-    expect(block).toBe('Dime qué necesitas — por texto o por audio.');
+    expect(block).toContain('Mándame algo real para empezar');
+    expect(block).toContain('Por texto o por audio');
     expect(block).not.toContain('•');
   });
 
   it('falls back to short closer when examples is empty array', () => {
     const block = buildExamplesBlock([]);
-    expect(block).toBe('Dime qué necesitas — por texto o por audio.');
+    expect(block).toContain('Mándame algo real para empezar');
   });
 
   it('handles any number of examples (not just 3) without breaking', () => {
     // Defensive: if upstream sanitization changes, we don't want crashes.
     const block = buildExamplesBlock(['solo uno']);
     expect(block).toContain('• "solo uno"');
+  });
+});
+
+describe('trade-examples — buildActivationHelpMessage', () => {
+  it('explains the core use cases without becoming a long manual', () => {
+    const msg = buildActivationHelpMessage();
+    expect(msg).toContain('Soy Chalán, tu ayudante por WhatsApp.');
+    expect(msg).toContain('como se las dirías a un ayudante');
+    expect(msg).toContain('"Cobré 800 por cambiar una llave"');
+    expect(msg).toContain('"Agenda con Laura el viernes a las 4"');
+    expect(msg).toContain('"Recuérdame comprar material mañana"');
+    expect(msg).toContain('"Hazme un link de cobro por 500"');
+    expect(msg.match(/^• /gm)?.length).toBeLessThanOrEqual(6);
+  });
+
+  it('keeps the closing instruction focused on normal text or audio', () => {
+    const msg = buildActivationHelpMessage();
+    expect(msg).toContain('Mándamelo normal, por texto o audio');
   });
 });
 
@@ -59,7 +79,7 @@ describe('trade-examples — buildWelcomeMessage', () => {
   it('with null examples, produces greeting + short closer', () => {
     const msg = buildWelcomeMessage('Alberto', null);
     expect(msg).toContain('Listo, Alberto. Ya tienes tu Chalán.');
-    expect(msg).toContain('Dime qué necesitas');
+    expect(msg).toContain('Mándame algo real para empezar');
     expect(msg).not.toContain('•');
   });
 

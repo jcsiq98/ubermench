@@ -97,5 +97,6 @@ describe('WelcomeExamplesService.generateExamples', () => {
     expect(instruction).toContain('trabajador independiente');
     expect(instruction).toContain('registrar un ingreso');
     expect(instruction).toContain('crear un recordatorio');
+    expect(instruction).toContain('Prioriza este núcleo');
   });
 });

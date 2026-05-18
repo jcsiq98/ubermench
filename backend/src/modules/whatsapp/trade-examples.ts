@@ -26,13 +26,16 @@ export function buildShortGreeting(name: string): string {
  */
 export function buildExamplesBlock(examples: readonly string[] | null): string {
   if (!examples || examples.length === 0) {
-    return 'Dime qué necesitas — por texto o por audio.';
+    return (
+      'Mándame algo real para empezar: un cobro, gasto, cita o recordatorio.\n' +
+      'Por texto o por audio, como te acomode.'
+    );
   }
 
   const bullets = examples.map((e) => `• "${e}"`).join('\n');
   return (
     `Te puedo ayudar con cosas así:\n${bullets}\n\n` +
-    `Por texto o por audio, como te acomode.`
+    `Para empezar, mándame algo real: un cobro, gasto, cita o recordatorio.`
   );
 }
 
@@ -45,4 +48,22 @@ export function buildWelcomeMessage(
   examples: readonly string[] | null,
 ): string {
   return `${buildShortGreeting(name)}\n\n${buildExamplesBlock(examples)}`;
+}
+
+export function buildActivationHelpMessage(): string {
+  return (
+    `Soy Chalán, tu ayudante por WhatsApp.\n\n` +
+    `Mándame las cosas como se las dirías a un ayudante:\n\n` +
+    `Cuentas\n` +
+    `• "Cobré 800 por cambiar una llave"\n` +
+    `• "Gasté 300 en material"\n\n` +
+    `Agenda y pendientes\n` +
+    `• "Agenda con Laura el viernes a las 4"\n` +
+    `• "Recuérdame comprar material mañana"\n\n` +
+    `Cobros\n` +
+    `• "Hazme un link de cobro por 500"\n\n` +
+    `Consultas\n` +
+    `• "¿Cuánto llevo esta semana?"\n\n` +
+    `Mándamelo normal, por texto o audio. Yo lo voy acomodando.`
+  );
 }

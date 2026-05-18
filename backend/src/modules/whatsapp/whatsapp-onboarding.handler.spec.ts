@@ -292,7 +292,7 @@ describe('WhatsAppOnboardingHandler — end-to-end TRADE → TIMEZONE (Roberto r
     expect(env.markTimezonePromptSkipped).not.toHaveBeenCalled();
   });
 
-  it('falls back to "Ya tienes tu cuenta activa" only when there is no active session', async () => {
+  it('sends activation examples only when there is no active session', async () => {
     const env = makeFullHandler({});
     env.userFindUnique.mockResolvedValueOnce({
       id: 'user-1',
@@ -305,7 +305,9 @@ describe('WhatsAppOnboardingHandler — end-to-end TRADE → TIMEZONE (Roberto r
     const messages = env.sendTextMessage.mock.calls
       .map((c) => c[1] as string)
       .join('\n');
-    expect(messages).toMatch(/Ya tienes tu cuenta activa/i);
+    expect(messages).toMatch(/Aquí sigo, Roberto/i);
+    expect(messages).toMatch(/Soy Chalán, tu ayudante por WhatsApp/i);
+    expect(messages).toMatch(/Cobré 800 por cambiar una llave/i);
     expect(env.userFindUnique).toHaveBeenCalledTimes(1);
   });
 });
