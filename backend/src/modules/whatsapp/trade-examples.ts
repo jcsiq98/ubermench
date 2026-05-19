@@ -53,13 +53,13 @@ export function buildWelcomeMessage(
 export function buildActivationHelpMessage(): string {
   return (
     `Soy Chalán, tu ayudante por WhatsApp.\n\n` +
-    `Mándame las cosas como se las dirías a un ayudante:\n\n` +
+    `Si trabajas por tu cuenta, mándame las cosas como se las dirías a alguien que te ayuda a ordenar el día:\n\n` +
     `Cuentas\n` +
-    `• "Cobré 800 por cambiar una llave"\n` +
-    `• "Gasté 300 en material"\n\n` +
+    `• "Cobré 450 por gelish a María"\n` +
+    `• "Gasté 300 en material o productos"\n\n` +
     `Agenda y pendientes\n` +
     `• "Agenda con Laura el viernes a las 4"\n` +
-    `• "Recuérdame comprar material mañana"\n\n` +
+    `• "Recuérdame comprar insumos mañana"\n\n` +
     `Cobros\n` +
     `• "Hazme un link de cobro por 500"\n\n` +
     `Consultas\n` +

@@ -53,10 +53,10 @@ describe('trade-examples — buildActivationHelpMessage', () => {
   it('explains the core use cases without becoming a long manual', () => {
     const msg = buildActivationHelpMessage();
     expect(msg).toContain('Soy Chalán, tu ayudante por WhatsApp.');
-    expect(msg).toContain('como se las dirías a un ayudante');
-    expect(msg).toContain('"Cobré 800 por cambiar una llave"');
+    expect(msg).toContain('Si trabajas por tu cuenta');
+    expect(msg).toContain('"Cobré 450 por gelish a María"');
     expect(msg).toContain('"Agenda con Laura el viernes a las 4"');
-    expect(msg).toContain('"Recuérdame comprar material mañana"');
+    expect(msg).toContain('"Recuérdame comprar insumos mañana"');
     expect(msg).toContain('"Hazme un link de cobro por 500"');
     expect(msg.match(/^• /gm)?.length).toBeLessThanOrEqual(6);
   });

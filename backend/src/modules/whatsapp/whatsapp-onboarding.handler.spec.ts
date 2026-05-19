@@ -307,7 +307,7 @@ describe('WhatsAppOnboardingHandler — end-to-end TRADE → TIMEZONE (Roberto r
       .join('\n');
     expect(messages).toMatch(/Aquí sigo, Roberto/i);
     expect(messages).toMatch(/Soy Chalán, tu ayudante por WhatsApp/i);
-    expect(messages).toMatch(/Cobré 800 por cambiar una llave/i);
+    expect(messages).toMatch(/Cobré 450 por gelish a María/i);
     expect(env.userFindUnique).toHaveBeenCalledTimes(1);
   });
 });

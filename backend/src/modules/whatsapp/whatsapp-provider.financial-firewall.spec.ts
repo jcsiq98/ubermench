@@ -442,7 +442,7 @@ describe('Financial Firewall — clarifyMessageForReason', () => {
 
   it('returns the right copy for falta_monto', () => {
     expect(handler.clarifyMessageForReason('falta_monto')).toBe(
-      '¿De cuánto fue, maestro?',
+      '¿De cuánto fue?',
     );
   });
 

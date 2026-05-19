@@ -192,7 +192,7 @@ export class WhatsAppOnboardingHandler {
         phone,
         `👋 ¡Hola, *${capitalizedName}*! Soy tu Chalán.\n\n` +
           `${pendingInitialRequest ? 'Sí puedo ayudarte con eso. Para hacerlo bien, primero te dejo registrado.\n\n' : 'Te ayudo a llevar el control de tus ingresos, tu agenda y tu negocio — todo por aquí, por WhatsApp.\n\n'}` +
-          `*¿A qué te dedicas?*\n_(plomero, electricista, albañil, pintor, lo que sea)_`,
+          `*¿A qué te dedicas?*\n_(uñas, pestañas, maquillaje, estilista, plomero, lo que sea)_`,
       );
     } else {
       await this.setSession(phone, { step: OnboardingStep.NAME, pendingInitialRequest });
@@ -246,7 +246,7 @@ Responde con JSON: {"name": "Nombre Extraído"} o {"name": null}`,
     await this.sendAndLog(
       phone,
       `Mucho gusto, *${session.name}* 👋\n\n` +
-        `*¿A qué te dedicas?*\n_(plomero, electricista, albañil, pintor, lo que sea)_`,
+        `*¿A qué te dedicas?*\n_(uñas, pestañas, maquillaje, estilista, plomero, lo que sea)_`,
     );
   }
 
@@ -257,7 +257,7 @@ Responde con JSON: {"name": "Nombre Extraído"} o {"name": null}`,
   ): Promise<void> {
     const trimmed = text.trim();
     if (trimmed.length < 2) {
-      await this.sendAndLog(phone, `Dime a qué te dedicas. Puede ser cualquier oficio.`);
+      await this.sendAndLog(phone, `Dime a qué te dedicas. Puede ser cualquier actividad o negocio.`);
       return;
     }
 
@@ -281,16 +281,19 @@ Responde con JSON: {"name": "Nombre Extraído"} o {"name": null}`,
       `El usuario está respondiendo a la pregunta "¿A qué te dedicas?".
 Tu tarea: extraer una etiqueta corta (1-4 palabras, minúsculas, sin artículos ni muletillas) que describa a qué se dedica.
 
-Acepta CUALQUIER descripción honesta: oficios tradicionales (plomero, electricista, albañil), profesiones (dentista, contador), trabajadores independientes ("trabajador independiente", "freelancer"), comerciantes ("vendedor de tamales", "comerciante"), servicios ("estilista", "manicurista"), creativos ("diseñador", "fotógrafo"), etc.
+Acepta CUALQUIER descripción honesta: servicios de belleza ("manicurista", "lashista", "maquillista", "estilista"), oficios tradicionales (plomero, electricista, albañil), profesiones (dentista, contador), trabajadores independientes ("trabajador independiente", "freelancer"), comerciantes ("vendedor de tamales", "comerciante"), creativos ("diseñador", "fotógrafo"), etc.
 
 Reglas:
 - Si la respuesta es genérica pero honesta (ej. "trabajador independiente", "freelancer", "ama de casa", "comerciante"), DEVUÉLVELA tal cual normalizada en minúsculas.
-- Si menciona oficio específico ("soy plomero", "yo me dedico a la electricidad"), extrae el oficio limpio ("plomero", "electricista").
-- Si la transcripción tiene ruido pero hay un oficio claro, extráelo.
+- Si menciona una actividad específica ("soy plomero", "yo me dedico a la electricidad", "hago uñas en casa"), extrae la actividad limpia ("plomero", "electricista", "manicurista").
+- Si la transcripción tiene ruido pero hay una actividad clara, extráela.
 - Devuelve {"trade": null} SOLO si el mensaje no contiene ninguna actividad reconocible (ej. "no sé", "hola", "qué tal", "?", "un mensaje al azar sin contexto").
 
 Ejemplos:
 - "soy plomero" → {"trade": "plomero"}
+- "hago uñas en casa" → {"trade": "manicurista"}
+- "pongo extensiones de pestañas" → {"trade": "lashista"}
+- "soy maquillista para eventos" → {"trade": "maquillista"}
 - "trabajador independiente" → {"trade": "trabajador independiente"}
 - "soy trabajador independiente" → {"trade": "trabajador independiente"}
 - "vendedor de tacos" → {"trade": "vendedor de tacos"}
@@ -328,7 +331,7 @@ Responde SOLO con JSON.`,
 
       await this.sendAndLog(
         phone,
-        `No te entendí bien. Dime en pocas palabras a qué te dedicas — puede ser cualquier oficio, profesión o actividad.`,
+        `No te entendí bien. Dime en pocas palabras a qué te dedicas — puede ser cualquier actividad, profesión o negocio.`,
       );
       return;
     }

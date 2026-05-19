@@ -49,7 +49,7 @@ describe('looksLikeFinancialClarificationQuestion', () => {
   describe('amount questions (positive)', () => {
     const cases = [
       '¿De cuánto fue?',
-      '¿De cuánto fue, maestro?',
+      '¿Cuánto fue?',
       '¿Cuánto cobraste?',
       '¿Cuánto te pagaron?',
       '¿De cuánto?',

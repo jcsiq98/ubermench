@@ -3742,7 +3742,7 @@ export class WhatsAppProviderHandler {
   private async sendFallbackPrompt(phone: string) {
     await this.whatsapp.sendTextMessage(
       phone,
-      `No te cacé esa, maestro. Dime qué necesitas — por texto o audio.`,
+      `No te cacé esa. Dime qué necesitas — por texto o audio.`,
     );
   }
 
@@ -4376,7 +4376,7 @@ export class WhatsAppProviderHandler {
    */
   private featureGapMessage(): string {
     return (
-      'Ese detalle todavía no lo puedo sacar, maestro. Por ahora puedo ' +
+      'Ese detalle todavía no lo puedo sacar. Por ahora puedo ' +
       'darte el resumen general si me dices "resumen". Estamos trabajando ' +
       'para soportar consultas más específicas.'
     );
@@ -4391,7 +4391,7 @@ export class WhatsAppProviderHandler {
   ): string {
     switch (razon) {
       case 'falta_monto':
-        return '¿De cuánto fue, maestro?';
+        return '¿De cuánto fue?';
       case 'falta_tipo':
         return '¿Eso fue un gasto o un cobro?';
       case 'mensaje_ambiguo':

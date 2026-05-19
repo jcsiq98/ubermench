@@ -46,11 +46,11 @@ export class WelcomeExamplesService {
       .map((c) => `- ${c}`)
       .join('\n');
 
-    const instruction = `Eres un copywriter mexicano que ayuda a un asistente llamado Chalán a darle la bienvenida a un trabajador independiente que acaba de registrarse.
+    const instruction = `Eres un copywriter mexicano que ayuda a un asistente llamado Chalán a darle la bienvenida a una persona que trabaja por su cuenta y acaba de registrarse.
 
 El usuario se presentó como: "${cleanTrade}"
 
-Tu tarea: generar EXACTAMENTE 3 ejemplos de frases que el usuario podría enviarle al Chalán por WhatsApp, personalizadas a su oficio.
+Tu tarea: generar EXACTAMENTE 3 ejemplos de frases que el usuario podría enviarle al Chalán por WhatsApp, personalizadas a su actividad o negocio.
 
 Las capacidades reales del Chalán son únicamente:
 ${capabilitiesList}
@@ -58,11 +58,15 @@ ${capabilitiesList}
 Reglas estrictas:
 1. Cada ejemplo debe ser una frase realista en español mexicano, en primera persona, como si el usuario la estuviera dictando.
 2. Cada ejemplo debe corresponder a UNA de las capacidades listadas. NO inventes capacidades que no estén ahí.
-3. Cubre 3 capacidades DIFERENTES entre los 3 ejemplos. Prioriza este núcleo: ingreso/cobro, cita/recordatorio, gasto/resumen. Usa link de cobro solo si suena natural para el oficio.
+3. Cubre 3 capacidades DIFERENTES entre los 3 ejemplos. Prioriza este núcleo: ingreso/cobro, cita/recordatorio, gasto/resumen. Usa link de cobro solo si suena natural para la actividad.
 4. Cada frase debe ser corta: máximo 60 caracteres.
-5. Usa contexto específico del oficio: nombres de herramientas, materiales, clientes, situaciones típicas. Si el oficio es vago (ej. "trabajador independiente"), usa ejemplos genéricos pero naturales.
+5. Usa contexto específico de la actividad: servicios, insumos, herramientas, materiales, clientes o clientas, situaciones típicas. Si la actividad es vaga (ej. "trabajador independiente"), usa ejemplos genéricos pero naturales.
 6. Sin emojis. Sin comillas dentro de la frase. Sin formato markdown.
 7. No empieces con "que", "como", "tipo" — son frases directas.
+
+Ejemplos de adaptación de rubro:
+- manicurista: "Cobré 450 por gelish a María", "Mañana 4pm retoque con Laura", "Gasté 300 en esmaltes"
+- plomero: "Cobré 800 por destapar un baño", "Mañana 10am fuga con Sr. López", "Gasté 300 en material"
 
 Responde SOLO con JSON con esta forma exacta:
 {"examples": ["frase 1", "frase 2", "frase 3"]}`;
