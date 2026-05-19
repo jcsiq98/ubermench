@@ -261,7 +261,7 @@ export class PaymentsService {
       };
     }
 
-    let session: Stripe.Checkout.Session;
+    let session;
     try {
       session = await this.stripe.checkout.sessions.create(
         sessionParams,
