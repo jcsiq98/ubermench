@@ -26,6 +26,7 @@ import { PersonalReminderJobData } from '../../common/queues/processors/personal
 import { RemindersService } from '../reminders/reminders.service';
 import { PaymentsService } from '../payments/payments.service';
 import { ContactsService } from '../contacts/contacts.service';
+import { AttributionQueue } from './attribution-queue';
 import {
   formatTime,
   formatDate,
@@ -179,6 +180,7 @@ export class WhatsAppProviderHandler {
     private remindersService: RemindersService,
     private paymentsService: PaymentsService,
     private contactsService: ContactsService,
+    private attributionQueue: AttributionQueue,
   ) {}
 
   // ─── Session management ──────────────────────────────────
@@ -1225,7 +1227,14 @@ export class WhatsAppProviderHandler {
     intent?: string,
     metadata?: Record<string, unknown>,
   ): Promise<void> {
-    const clean = sanitizeForWhatsApp(message);
+    // AttributionQueue (§13.2 del doc UNIVERSO_NEGOCIO.md):
+    // si hay atribuciones encoladas para este proveedor, se concatenan
+    // al final de este mensaje, garantizando posición `final` o `sole`
+    // del attribution dentro del burst para maximizar el signal de
+    // `no_objection`. Sin producers reales todavía (Sprint 1 no genera
+    // atribuciones), esta llamada es no-op hasta Sprint 2+.
+    const withAttribution = this.attributionQueue.appendTo(phone, message);
+    const clean = sanitizeForWhatsApp(withAttribution);
     await this.whatsapp.sendTextMessage(phone, clean);
     await this.aiContextService.addMessage(
       phone,

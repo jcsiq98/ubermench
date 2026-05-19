@@ -8,6 +8,7 @@ import { WhatsAppAdminListener } from './whatsapp-admin.listener';
 import { WhatsAppNotificationQueueService } from './whatsapp-notification-queue.service';
 import { WhatsAppWeeklySummaryService } from './whatsapp-weekly-summary.service';
 import { WelcomeExamplesService } from './welcome-examples.service';
+import { AttributionQueue } from './attribution-queue';
 import { BookingsModule } from '../_marketplace/bookings/bookings.module';
 import { MessagesModule } from '../_marketplace/messages/messages.module';
 import { RatingsModule } from '../_marketplace/ratings/ratings.module';
@@ -34,7 +35,8 @@ import { RatingsModule } from '../_marketplace/ratings/ratings.module';
     WhatsAppNotificationQueueService,
     WhatsAppWeeklySummaryService,
     WelcomeExamplesService,
+    AttributionQueue,
   ],
-  exports: [WhatsAppService, WhatsAppProviderHandler],
+  exports: [WhatsAppService, WhatsAppProviderHandler, AttributionQueue],
 })
 export class WhatsAppModule {}
