@@ -55,7 +55,10 @@ import {
   shouldPlantPending,
   classifyPendingResolution,
 } from './whatsapp-provider.pending-financial';
-import { buildActivationHelpMessage } from './trade-examples';
+import {
+  buildActivationHelpMessage,
+  buildStripeOnboardingMessage,
+} from './trade-examples';
 
 const JUNK_CLIENT_NAMES = new Set([
   'ninguno', 'ninguna', 'no', 'n/a', 'na', 'nada',
@@ -1220,7 +1223,10 @@ export class WhatsAppProviderHandler {
     }
 
     try {
-      const status = await this.paymentsService.getProviderStripeStatus(providerProfileId);
+      let status = await this.paymentsService.getProviderStripeStatus(providerProfileId);
+      if (status?.stripeAccountId && status.stripeOnboardingStatus !== 'ACTIVE') {
+        status = await this.paymentsService.refreshProviderStripeStatus(providerProfileId);
+      }
 
       if (status?.stripeOnboardingStatus === 'ACTIVE') {
         await this.sendAndRecord(
@@ -1235,10 +1241,7 @@ export class WhatsAppProviderHandler {
 
       await this.sendAndRecord(
         phone,
-        `🏦 *Activa tus cobros con link*\n\n` +
-        `Registra tu cuenta bancaria en este formulario seguro de Stripe (~5 min):\n\n` +
-        `🔗 ${result.url}\n\n` +
-        `Una vez que lo completes, podrás cobrarle a tus clientes con tarjeta, OXXO o SPEI.`,
+        buildStripeOnboardingMessage(result.url),
         AiIntent.ACTIVAR_COBROS,
       );
     } catch (error: any) {
@@ -1541,11 +1544,14 @@ export class WhatsAppProviderHandler {
       return;
     }
 
-    const stripeStatus = await this.paymentsService.getProviderStripeStatus(providerProfileId);
+    let stripeStatus = await this.paymentsService.getProviderStripeStatus(providerProfileId);
+    if (stripeStatus?.stripeAccountId && stripeStatus.stripeOnboardingStatus !== 'ACTIVE') {
+      stripeStatus = await this.paymentsService.refreshProviderStripeStatus(providerProfileId);
+    }
     if (stripeStatus?.stripeOnboardingStatus !== 'ACTIVE') {
       await this.sendAndRecord(
         phone,
-        'Para cobrar con link necesitas activar tu cuenta primero.\n\nDime *"activar cobros"* y te mando el link para configurarla (~5 min).',
+        'Para cobrar con link necesitas activar tu cuenta primero.\n\nDime *"activar cobros"* y te mando el link con lo que necesitas tener a la mano (~5 min).',
         AiIntent.CREAR_LINK_COBRO,
       );
       return;
@@ -1556,6 +1562,16 @@ export class WhatsAppProviderHandler {
       await this.sendAndRecord(
         phone,
         '🤔 No pude detectar el monto. ¿Cuánto quieres cobrar?\n\nEjemplo: *"Cóbrale 1,200 al señor Ramírez por instalación eléctrica"*',
+      );
+      return;
+    }
+
+    const MIN_PAYMENT_LINK_MXN = 10;
+    if (amount < MIN_PAYMENT_LINK_MXN) {
+      await this.sendAndRecord(
+        phone,
+        `El monto mínimo para link de cobro es *$${MIN_PAYMENT_LINK_MXN} MXN*. ¿Con cuánto quieres cobrarle?`,
+        AiIntent.CREAR_LINK_COBRO,
       );
       return;
     }
@@ -1619,6 +1635,21 @@ export class WhatsAppProviderHandler {
         await this.sendAndRecord(
           phone,
           '⚠️ Los links de cobro aún no están habilitados. Estamos configurando el sistema de pagos.',
+        );
+      } else if (error.message === 'Provider has no active Stripe account') {
+        await this.sendAndRecord(
+          phone,
+          'Para cobrar con link necesitas activar tu cuenta primero.\n\nDime *"activar cobros"* y te mando el link con lo que necesitas tener a la mano (~5 min).',
+          AiIntent.CREAR_LINK_COBRO,
+        );
+      } else if (
+        error.message?.includes('amount_too_small') ||
+        error.message?.includes('at least $10.00 mxn')
+      ) {
+        await this.sendAndRecord(
+          phone,
+          'El monto mínimo para link de cobro es *$10 MXN*. ¿Con cuánto quieres cobrarle?',
+          AiIntent.CREAR_LINK_COBRO,
         );
       } else {
         await this.sendAndRecord(

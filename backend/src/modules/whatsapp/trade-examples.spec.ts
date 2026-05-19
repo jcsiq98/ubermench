@@ -3,6 +3,7 @@ import {
   buildExamplesBlock,
   buildWelcomeMessage,
   buildActivationHelpMessage,
+  buildStripeOnboardingMessage,
 } from './trade-examples';
 
 describe('trade-examples — buildShortGreeting', () => {
@@ -46,6 +47,17 @@ describe('trade-examples — buildExamplesBlock', () => {
     // Defensive: if upstream sanitization changes, we don't want crashes.
     const block = buildExamplesBlock(['solo uno']);
     expect(block).toContain('• "solo uno"');
+  });
+});
+
+describe('trade-examples — buildStripeOnboardingMessage', () => {
+  it('lists RFC, CLABE, and social/web prep before the Stripe URL', () => {
+    const msg = buildStripeOnboardingMessage('https://connect.stripe.com/setup/test');
+    expect(msg).toContain('RFC');
+    expect(msg).toContain('CLABE');
+    expect(msg).toContain('Instagram, Facebook o LinkedIn');
+    expect(msg).toContain('https://connect.stripe.com/setup/test');
+    expect(msg).toContain('tarjeta, OXXO o SPEI');
   });
 });
 

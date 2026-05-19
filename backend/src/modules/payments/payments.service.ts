@@ -33,7 +33,8 @@ interface StripeAccountData {
   };
 }
 
-const CHECKOUT_EXPIRY_HOURS = 72;
+// Stripe Checkout Session expires_at must be <24h from creation (23h is safe).
+const CHECKOUT_EXPIRY_HOURS = 23;
 
 // 0% during testing — change to 0.02 (2%) when ready to monetize
 const APPLICATION_FEE_RATE = 0;
@@ -260,10 +261,22 @@ export class PaymentsService {
       };
     }
 
-    const session = await this.stripe.checkout.sessions.create(
-      sessionParams,
-      { stripeAccount: provider.stripeAccountId },
-    );
+    let session: Stripe.Checkout.Session;
+    try {
+      session = await this.stripe.checkout.sessions.create(
+        sessionParams,
+        { stripeAccount: provider.stripeAccountId },
+      );
+    } catch (err) {
+      await this.prisma.paymentLink
+        .delete({ where: { id: paymentLink.id } })
+        .catch((deleteErr) =>
+          this.logger.warn(
+            `Could not delete orphan payment link ${paymentLink.id}: ${deleteErr.message}`,
+          ),
+        );
+      throw err;
+    }
 
     const updated = await this.prisma.paymentLink.update({
       where: { id: paymentLink.id },
@@ -422,6 +435,40 @@ export class PaymentsService {
       },
     });
     return provider;
+  }
+
+  /**
+   * Pull live status from Stripe when DB may be stale (webhook missed/delayed).
+   */
+  async refreshProviderStripeStatus(providerId: string) {
+    const provider = await this.prisma.providerProfile.findUnique({
+      where: { id: providerId },
+      select: {
+        stripeAccountId: true,
+        stripeOnboardingStatus: true,
+      },
+    });
+
+    if (!provider?.stripeAccountId || !this.stripe) {
+      return provider;
+    }
+
+    if (provider.stripeOnboardingStatus === StripeOnboardingStatus.ACTIVE) {
+      return provider;
+    }
+
+    try {
+      const account = await this.stripe.accounts.retrieve(
+        provider.stripeAccountId,
+      );
+      await this.handleAccountUpdated(account as StripeAccountData);
+    } catch (err: any) {
+      this.logger.warn(
+        `Could not refresh Stripe status for provider ${providerId}: ${err.message}`,
+      );
+    }
+
+    return this.getProviderStripeStatus(providerId);
   }
 
   // ─── Webhook verification ──────────────────────────────────

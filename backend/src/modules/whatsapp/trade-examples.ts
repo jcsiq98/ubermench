@@ -67,3 +67,19 @@ export function buildActivationHelpMessage(): string {
     `Mándamelo normal, por texto o audio. Yo lo voy acomodando.`
   );
 }
+
+/**
+ * One-shot prep message before Stripe Connect Express onboarding.
+ * External form — user needs RFC, bank account, and a web/social URL.
+ */
+export function buildStripeOnboardingMessage(onboardingUrl: string): string {
+  return (
+    `Para activar tus cobros, Stripe te va a pedir unos datos. Tenlos a la mano:\n\n` +
+    `• RFC\n` +
+    `• CLABE de tu cuenta bancaria\n` +
+    `• Sitio web — si no tienes página, pon tu Instagram, Facebook o LinkedIn donde se vea tu negocio\n\n` +
+    `Formulario seguro (~5 min):\n` +
+    `${onboardingUrl}\n\n` +
+    `Cuando lo completes, podrás cobrar con tarjeta, OXXO o SPEI.`
+  );
+}
