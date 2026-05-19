@@ -93,6 +93,7 @@ model ProviderProfile {
   appointments     Appointment[]
   reminders        Reminder[]
   paymentLinks     PaymentLink[]
+  contacts         Contact[]
   serviceZones     ProviderServiceZone[]
   trustScore       TrustScore?
   location         ProviderLocation?
@@ -158,13 +159,16 @@ model Income {
   description   String?
   paymentMethod PaymentMethod @default(CASH) @map("payment_method")
   clientName    String?       @map("client_name")
+  contactId     String?       @map("contact_id")
   date          DateTime      @default(now())
   createdAt     DateTime      @default(now()) @map("created_at")
 
   provider    ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  contact     Contact?        @relation(fields: [contactId], references: [id], onDelete: SetNull)
   paymentLink PaymentLink?
 
   @@index([providerId])
+  @@index([providerId, contactId])
   @@index([providerId, date])
   @@index([date])
   @@map("incomes")
@@ -188,6 +192,7 @@ model PaymentLink {
   description      String?
   clientName       String?           @map("client_name")
   clientPhone      String?           @map("client_phone")
+  contactId        String?           @map("contact_id")
   status           PaymentLinkStatus @default(PENDING)
   stripeSessionId  String?           @unique @map("stripe_session_id")
   stripePaymentUrl String?           @map("stripe_payment_url")
@@ -197,9 +202,11 @@ model PaymentLink {
   createdAt        DateTime          @default(now()) @map("created_at")
 
   provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  contact  Contact?        @relation(fields: [contactId], references: [id], onDelete: SetNull)
   income   Income?         @relation(fields: [incomeId], references: [id])
 
   @@index([providerId])
+  @@index([providerId, contactId])
   @@index([stripeSessionId])
   @@index([status])
   @@map("payment_links")
@@ -263,6 +270,7 @@ model Appointment {
   providerId      String            @map("provider_id")
   clientName      String?           @map("client_name")
   clientPhone     String?           @map("client_phone")
+  contactId       String?           @map("contact_id")
   description     String?
   address         String?
   locationLat     Float?            @map("location_lat")
@@ -275,12 +283,46 @@ model Appointment {
   updatedAt       DateTime          @updatedAt @map("updated_at")
 
   provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  contact  Contact?        @relation(fields: [contactId], references: [id], onDelete: SetNull)
 
   @@index([providerId])
+  @@index([providerId, contactId])
   @@index([providerId, scheduledAt])
   @@index([scheduledAt])
   @@index([status])
   @@map("appointments")
+}
+
+// ──────────────────────────────────────────────
+// Contacts (provider CRM — Sprint 1)
+// ──────────────────────────────────────────────
+model Contact {
+  id          String        @id @default(uuid())
+  providerId  String        @map("provider_id")
+  name        String
+  phone       String?
+  notes       String?
+  source      ContactSource @default(MANUAL)
+  lastUsedAt  DateTime?     @map("last_used_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  provider      ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  incomes       Income[]
+  appointments  Appointment[]
+  paymentLinks  PaymentLink[]
+
+  @@unique([providerId, phone])
+  @@index([providerId])
+  @@index([providerId, name])
+  @@map("contacts")
+}
+
+enum ContactSource {
+  MANUAL
+  INCOME
+  APPOINTMENT
+  PAYMENT_LINK
 }
 
 enum AppointmentStatus {

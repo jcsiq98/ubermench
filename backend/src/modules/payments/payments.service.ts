@@ -17,6 +17,7 @@ export interface CreatePaymentLinkDto {
   description?: string;
   clientName?: string;
   clientPhone?: string;
+  contactId?: string;
 }
 
 interface CheckoutSessionData {
@@ -218,6 +219,7 @@ export class PaymentsService {
         description: dto.description,
         clientName: dto.clientName,
         clientPhone: dto.clientPhone,
+        contactId: dto.contactId,
         expiresAt,
       },
     });

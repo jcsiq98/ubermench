@@ -94,6 +94,12 @@ export const TOOL_TO_INTENT: Record<
   crear_link_cobro: {
     intent: AiIntent.CREAR_LINK_COBRO,
   },
+  guardar_contacto: {
+    intent: AiIntent.GUARDAR_CONTACTO,
+  },
+  buscar_contactos: {
+    intent: AiIntent.BUSCAR_CONTACTOS,
+  },
   activar_cobros: {
     intent: AiIntent.ACTIVAR_COBROS,
   },
@@ -746,7 +752,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'crear_link_cobro',
       description:
-        'Generar un link de cobro/pago para enviar a un cliente. El cliente puede pagar con tarjeta, OXXO o transferencia SPEI. Usar cuando el usuario dice "cóbrale", "mándale el cobro", "genera link de pago", "envíale el cobro". NO usar registrar_ingreso — eso es para cobros ya recibidos en mano.',
+        'Generar un link de cobro/pago. Usar cuando el usuario dice "cóbrale", "mándale el cobro", "genera link de pago", "envíale el cobro". NO usar registrar_ingreso — eso es para cobros ya recibidos. Si el usuario pide mandárselo al cliente ("mándale a Mariana"), poner sendToClient=true. Si solo pide el link sin enviar, sendToClient=false.',
       parameters: {
         type: 'object',
         properties: {
@@ -764,10 +770,60 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           clientPhone: {
             type: 'string',
-            description: 'Teléfono del cliente para enviarle el link directamente por WhatsApp. Solo incluir si el usuario lo proporciona explícitamente.',
+            description: 'Teléfono del cliente. Solo si el usuario lo da explícitamente en este mensaje.',
+          },
+          sendToClient: {
+            type: 'boolean',
+            description:
+              'true si el usuario quiere que Chalán envíe el link al cliente por WhatsApp (ej: "mándale", "envíale"). false si solo quiere el link para reenviarlo él mismo.',
           },
         },
         required: ['amount'],
+      },
+    },
+  },
+
+  {
+    type: 'function',
+    function: {
+      name: 'guardar_contacto',
+      description:
+        'Guardar o actualizar un cliente/contacto con nombre y teléfono. Usar cuando dice "guarda a...", "el teléfono de X es...", "apunta el número de...".',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Nombre del cliente.',
+          },
+          phone: {
+            type: 'string',
+            description: 'Teléfono del cliente.',
+          },
+          notes: {
+            type: 'string',
+            description: 'Notas opcionales sobre el cliente.',
+          },
+        },
+        required: ['name'],
+      },
+    },
+  },
+
+  {
+    type: 'function',
+    function: {
+      name: 'buscar_contactos',
+      description:
+        'Listar o buscar clientes guardados. Usar cuando pregunta "¿quiénes son mis clientes?", "busca a Mariana", "tengo guardado a Pedro?".',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Nombre o parte del nombre a buscar. Vacío para listar todos.',
+          },
+        },
       },
     },
   },

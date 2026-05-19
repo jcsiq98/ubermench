@@ -18,6 +18,8 @@ export enum AiIntent {
   COMPLETAR_RECORDATORIO = 'completar_recordatorio',
   CONFIGURAR_PERFIL = 'configurar_perfil',
   CREAR_LINK_COBRO = 'crear_link_cobro',
+  GUARDAR_CONTACTO = 'guardar_contacto',
+  BUSCAR_CONTACTOS = 'buscar_contactos',
   ACTIVAR_COBROS = 'activar_cobros',
   CONFIGURAR_ZONA_HORARIA = 'configurar_zona_horaria',
   VER_INGRESOS_PROYECTADOS = 'ver_ingresos_proyectados',

@@ -19,6 +19,7 @@ export interface CreateIncomeDto {
   description?: string;
   paymentMethod?: PaymentMethod;
   clientName?: string;
+  contactId?: string;
   date?: Date;
   /**
    * Hash of the user message that triggered this write (Cap. 45 — M0).
@@ -67,6 +68,7 @@ export class IncomeService {
           description: dto.description,
           paymentMethod: dto.paymentMethod || PaymentMethod.CASH,
           clientName: dto.clientName,
+          contactId: dto.contactId,
           date: dto.date || new Date(),
         },
       });

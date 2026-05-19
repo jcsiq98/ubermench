@@ -16,6 +16,7 @@ export interface CreateAppointmentDto {
   providerId: string;
   clientName?: string;
   clientPhone?: string;
+  contactId?: string;
   description?: string;
   address?: string;
   scheduledAt: Date;
@@ -45,6 +46,7 @@ export class AppointmentsService {
         providerId: dto.providerId,
         clientName: dto.clientName,
         clientPhone: dto.clientPhone,
+        contactId: dto.contactId,
         description: dto.description,
         address: dto.address,
         scheduledAt: dto.scheduledAt,

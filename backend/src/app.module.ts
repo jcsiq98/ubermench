@@ -38,6 +38,7 @@ import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { ProviderModelModule } from './modules/provider-model/provider-model.module';
 import { RemindersModule } from './modules/reminders/reminders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { ContactsModule } from './modules/contacts/contacts.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -110,6 +111,9 @@ const isProd = process.env.NODE_ENV === 'production';
 
     // Payments — Stripe payment links (global)
     PaymentsModule,
+
+    // Contacts — provider CRM (global)
+    ContactsModule,
 
     // WhatsApp (global)
     WhatsAppModule,
