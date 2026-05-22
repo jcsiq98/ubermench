@@ -127,6 +127,15 @@ export class WhatsAppController {
         const text = await this.extractTextContent(message, senderPhone);
         if (!text) continue;
 
+        if (process.env.WHATSAPP_DEBOUNCE_ENABLED !== 'true') {
+          await this.providerHandler.handleBufferedMessage(
+            senderPhone,
+            senderName,
+            text,
+          );
+          continue;
+        }
+
         // Push to Redis buffer (RPUSH is atomic — safe against concurrent webhooks)
         const bufKey = `${BUFFER_PREFIX}${senderPhone}`;
         await this.redis.rpush(bufKey, text);
