@@ -18,6 +18,8 @@ import { RedisService } from '../../config/redis.service';
 import { AiService } from '../ai/ai.service';
 import { QueueService } from '../../common/queues/queue.service';
 import { QUEUE_NAMES } from '../../common/queues/queue.constants';
+import { PrismaService } from '../../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 
 const WEBHOOK_DEDUP_TTL = 24 * 60 * 60; // 24 hours
 const DEBOUNCE_DELAY_MS = 3_000;
@@ -35,6 +37,7 @@ export class WhatsAppController {
     private redis: RedisService,
     private aiService: AiService,
     private queueService: QueueService,
+    private prisma: PrismaService,
   ) {}
 
   @Get()
@@ -169,15 +172,31 @@ export class WhatsAppController {
     }
 
     if (message.type === 'audio' && message.audio?.id) {
+      await this.logAudioEvent(senderPhone, {
+        event: 'audio_received',
+        mediaId: message.audio.id,
+        mimeType: message.audio.mime_type,
+      });
+
       const mediaUrl = await this.whatsappService.getMediaUrl(message.audio.id);
       if (!mediaUrl) {
         this.logger.warn(`Could not resolve media URL for audio ${message.audio.id}`);
+        await this.logAudioEvent(senderPhone, {
+          event: 'audio_media_url_failed',
+          mediaId: message.audio.id,
+        });
+        await this.sendAudioFailureMessage(senderPhone);
         return '';
       }
 
       const audioBuffer = await this.whatsappService.downloadMedia(mediaUrl);
       if (!audioBuffer) {
         this.logger.warn(`Could not download audio ${message.audio.id}`);
+        await this.logAudioEvent(senderPhone, {
+          event: 'audio_download_failed',
+          mediaId: message.audio.id,
+        });
+        await this.sendAudioFailureMessage(senderPhone);
         return '';
       }
 
@@ -185,6 +204,12 @@ export class WhatsAppController {
       const transcript = await this.aiService.transcribeAudio(audioBuffer, mimeType);
 
       if (!transcript) {
+        await this.logAudioEvent(senderPhone, {
+          event: 'audio_transcription_failed',
+          mediaId: message.audio.id,
+          mimeType,
+          bytes: audioBuffer.length,
+        });
         await this.whatsappService.sendTextMessage(
           senderPhone,
           '🤔 No pude entender tu nota de voz. ¿Podrías intentar de nuevo o escribir tu mensaje?',
@@ -196,6 +221,31 @@ export class WhatsAppController {
     }
 
     return '';
+  }
+
+  private async sendAudioFailureMessage(phone: string): Promise<void> {
+    await this.whatsappService.sendTextMessage(
+      phone,
+      'No pude abrir tu nota de voz. Mándamela otra vez o escríbeme el mensaje.',
+    );
+  }
+
+  private async logAudioEvent(
+    phone: string,
+    metadata: Record<string, unknown>,
+  ): Promise<void> {
+    await this.prisma.conversationLog
+      .create({
+        data: {
+          phone,
+          role: 'system',
+          content: '[audio webhook event]',
+          metadata: metadata as Prisma.InputJsonValue,
+        },
+      })
+      .catch((err) => {
+        this.logger.warn(`Failed to log audio event for ${phone}: ${err.message}`);
+      });
   }
 
   /**

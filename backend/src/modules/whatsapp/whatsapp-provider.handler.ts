@@ -17,7 +17,7 @@ import { AppointmentsService } from '../appointments/appointments.service';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { TimezoneMigrationService } from '../workspace/timezone-migration.service';
 import { ProviderModelService } from '../provider-model/provider-model.service';
-import { BookingStatus, ContactSource, PaymentMethod } from '@prisma/client';
+import { BookingStatus, ContactSource, PaymentMethod, Prisma } from '@prisma/client';
 import { QueueService } from '../../common/queues/queue.service';
 import { QUEUE_NAMES } from '../../common/queues/queue.constants';
 import { AppointmentFollowupJobData } from '../../common/queues/processors/appointment-followup.processor';
@@ -4748,15 +4748,41 @@ export class WhatsAppProviderHandler {
     }
 
     if (message.type === 'audio' && message.audio?.id) {
+      await this.logAudioEvent(senderPhone, {
+        event: 'audio_received_direct_handler',
+        mediaId: message.audio.id,
+        mimeType: message.audio.mime_type,
+      });
+
       const mediaUrl = await this.whatsapp.getMediaUrl(message.audio.id);
       if (!mediaUrl) {
         this.logger.warn(`Could not resolve media URL for audio ${message.audio.id}`);
+        await this.logAudioEvent(senderPhone, {
+          event: 'audio_media_url_failed_direct_handler',
+          mediaId: message.audio.id,
+        });
+        if (senderPhone) {
+          await this.whatsapp.sendTextMessage(
+            senderPhone,
+            'No pude abrir tu nota de voz. Mándamela otra vez o escríbeme el mensaje.',
+          );
+        }
         return '';
       }
 
       const audioBuffer = await this.whatsapp.downloadMedia(mediaUrl);
       if (!audioBuffer) {
         this.logger.warn(`Could not download audio ${message.audio.id}`);
+        await this.logAudioEvent(senderPhone, {
+          event: 'audio_download_failed_direct_handler',
+          mediaId: message.audio.id,
+        });
+        if (senderPhone) {
+          await this.whatsapp.sendTextMessage(
+            senderPhone,
+            'No pude abrir tu nota de voz. Mándamela otra vez o escríbeme el mensaje.',
+          );
+        }
         return '';
       }
 
@@ -4764,6 +4790,12 @@ export class WhatsAppProviderHandler {
       const transcript = await this.aiService.transcribeAudio(audioBuffer, mimeType);
 
       if (!transcript) {
+        await this.logAudioEvent(senderPhone, {
+          event: 'audio_transcription_failed_direct_handler',
+          mediaId: message.audio.id,
+          mimeType,
+          bytes: audioBuffer.length,
+        });
         if (senderPhone) {
           await this.whatsapp.sendTextMessage(
             senderPhone,
@@ -4777,6 +4809,26 @@ export class WhatsAppProviderHandler {
     }
 
     return '';
+  }
+
+  private async logAudioEvent(
+    phone: string | undefined,
+    metadata: Record<string, unknown>,
+  ): Promise<void> {
+    if (!phone) return;
+
+    await this.prisma.conversationLog
+      .create({
+        data: {
+          phone,
+          role: 'system',
+          content: '[audio webhook event]',
+          metadata: metadata as Prisma.InputJsonValue,
+        },
+      })
+      .catch((err) => {
+        this.logger.warn(`Failed to log audio event for ${phone}: ${err.message}`);
+      });
   }
 
   private extractButtonReply(
