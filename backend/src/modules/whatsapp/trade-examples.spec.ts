@@ -57,7 +57,13 @@ describe('trade-examples — buildStripeOnboardingMessage', () => {
     expect(msg).toContain('CLABE');
     expect(msg).toContain('Instagram, Facebook o LinkedIn');
     expect(msg).toContain('https://connect.stripe.com/setup/test');
-    expect(msg).toContain('tarjeta, OXXO o SPEI');
+    expect(msg).toContain('cobrar con tarjeta');
+  });
+
+  it('does not promise payment methods that are not enabled in checkout (OXXO/SPEI)', () => {
+    const msg = buildStripeOnboardingMessage('https://connect.stripe.com/setup/test');
+    expect(msg).not.toContain('OXXO');
+    expect(msg).not.toContain('SPEI');
   });
 });
 

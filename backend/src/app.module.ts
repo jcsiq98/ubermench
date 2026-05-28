@@ -10,11 +10,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './config/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
-import { ServicesModule } from './modules/_marketplace/services/services.module';
 import { ProvidersModule } from './modules/providers/providers.module';
-import { BookingsModule } from './modules/_marketplace/bookings/bookings.module';
-import { MessagesModule } from './modules/_marketplace/messages/messages.module';
-import { RatingsModule } from './modules/_marketplace/ratings/ratings.module';
 import { ZonesModule } from './modules/zones/zones.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { AiModule } from './modules/ai/ai.module';
@@ -27,10 +23,7 @@ import { ProviderDashboardModule } from './modules/provider-dashboard/provider-d
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AdminModule } from './modules/admin/admin.module';
-import { TrustScoreModule } from './modules/_marketplace/trust-score/trust-score.module';
-import { ReportsModule } from './modules/_marketplace/reports/reports.module';
 import { VerificationModule } from './modules/verification/verification.module';
-import { SafetyModule } from './modules/_marketplace/safety/safety.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { QueueModule } from './common/queues/queue.module';
 import { CryptoModule } from './common/crypto/crypto.module';
@@ -123,20 +116,13 @@ const isProd = process.env.NODE_ENV === 'production';
 
     // Feature modules
     UsersModule,
-    ServicesModule,
     ProvidersModule,
-    BookingsModule,
-    MessagesModule,
-    RatingsModule,
     ZonesModule,
     OnboardingModule,
     AddressesModule,
     ProviderDashboardModule,
     AdminModule,
-    TrustScoreModule,
-    ReportsModule,
     VerificationModule,
-    SafetyModule,
     NotificationsModule,
   ],
   controllers: [AppController],

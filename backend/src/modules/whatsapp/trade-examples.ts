@@ -80,6 +80,6 @@ export function buildStripeOnboardingMessage(onboardingUrl: string): string {
     `• Sitio web — si no tienes página, pon tu Instagram, Facebook o LinkedIn donde se vea tu negocio\n\n` +
     `Formulario seguro (~5 min):\n` +
     `${onboardingUrl}\n\n` +
-    `Cuando lo completes, podrás cobrar con tarjeta, OXXO o SPEI.`
+    `Cuando lo completes, podrás cobrar con tarjeta.`
   );
 }

@@ -43,7 +43,7 @@ export class ChalanSelfModelService {
       id: 'payment_links',
       label: 'links de cobro',
       status: 'live',
-      notes: 'genera links para tarjeta, OXXO o SPEI cuando el usuario los pida',
+      notes: 'genera links de cobro con tarjeta cuando el usuario los pida',
     },
     {
       id: 'memory',

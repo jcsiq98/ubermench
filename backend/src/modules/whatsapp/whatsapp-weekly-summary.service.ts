@@ -16,9 +16,8 @@ export class WhatsAppWeeklySummaryService {
   @Cron('0 * * * 0') // Every hour on Sundays
   async sendWeeklySummaries() {
     const providers = await this.prisma.providerProfile.findMany({
-      where: { isAvailable: true },
       include: {
-        user: { select: { phone: true, name: true, ratingAverage: true, ratingCount: true } },
+        user: { select: { phone: true, name: true } },
         workspaceProfile: { select: { timezone: true } },
       },
     });
@@ -36,43 +35,33 @@ export class WhatsAppWeeklySummaryService {
         startOfWeek.setDate(now.getDate() - 7);
         startOfWeek.setHours(0, 0, 0, 0);
 
-        const weekJobs = await this.prisma.booking.findMany({
+        const weekIncomes = await this.prisma.income.findMany({
           where: {
             providerId: provider.id,
-            status: { in: ['COMPLETED', 'RATED'] },
-            completedAt: { gte: startOfWeek },
+            date: { gte: startOfWeek },
           },
-          select: { price: true, completedAt: true },
+          select: { amount: true, date: true },
         });
 
-        if (weekJobs.length === 0) continue;
+        if (weekIncomes.length === 0) continue;
 
-        const totalEarnings = weekJobs.reduce((sum, j) => sum + (j.price || 0), 0);
+        const total = weekIncomes.reduce((sum, i) => sum + Number(i.amount), 0);
 
         const byDay: Record<string, number> = {};
-        for (const job of weekJobs) {
-          if (job.completedAt) {
-            const day = job.completedAt.toLocaleDateString('es-MX', { weekday: 'long', timeZone: tz });
-            byDay[day] = (byDay[day] || 0) + (job.price || 0);
-          }
+        for (const income of weekIncomes) {
+          const day = income.date.toLocaleDateString('es-MX', { weekday: 'long', timeZone: tz });
+          byDay[day] = (byDay[day] || 0) + Number(income.amount);
         }
         const bestDay = Object.entries(byDay).sort((a, b) => b[1] - a[1])[0];
 
-        const rating = provider.user.ratingAverage?.toFixed(1) || '0.0';
-
         let msg =
-          `💰 *Resumen Semanal*\n\n` +
-          `Trabajos: ${weekJobs.length}\n` +
-          `Rating: ${rating} ⭐\n`;
+          `📊 *Tu semana*\n\n` +
+          `Cobros: ${weekIncomes.length}\n` +
+          `Total: *$${total.toLocaleString('es-MX')}*`;
 
-        if (totalEarnings > 0) {
-          msg += `Ganancias: $${totalEarnings.toLocaleString('es-MX')} MXN\n`;
-        }
         if (bestDay && bestDay[1] > 0) {
-          msg += `Mejor día: ${bestDay[0]} ($${bestDay[1].toLocaleString('es-MX')})\n`;
+          msg += `\nMejor día: ${bestDay[0]} ($${bestDay[1].toLocaleString('es-MX')})`;
         }
-
-        msg += `\n¡Sigue así, ${provider.user.name || 'proveedor'}! 💪`;
 
         await this.whatsapp.sendTextMessage(provider.user.phone, msg);
         sent++;
