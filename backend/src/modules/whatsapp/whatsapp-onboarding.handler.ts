@@ -176,7 +176,9 @@ export class WhatsAppOnboardingHandler {
       ? initialText?.trim()
       : undefined;
 
-    if (name) {
+    const hasRealName = !!name && name.trim().toLowerCase() !== 'unknown';
+
+    if (hasRealName) {
       const capitalizedName = name
         .split(' ')
         .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
@@ -192,7 +194,7 @@ export class WhatsAppOnboardingHandler {
         phone,
         `👋 ¡Hola, *${capitalizedName}*! Soy tu Chalán.\n\n` +
           `${pendingInitialRequest ? 'Sí puedo ayudarte con eso. Para hacerlo bien, primero te dejo registrado.\n\n' : 'Te ayudo a llevar el control de tus ingresos, tu agenda y tu negocio — todo por aquí, por WhatsApp.\n\n'}` +
-          `*¿A qué te dedicas?*\n_(uñas, pestañas, maquillaje, estilista, plomero, lo que sea)_`,
+          `*¿A qué te dedicas?*\n_(plomero, electricista, estilista, uñas, lo que sea)_`,
       );
     } else {
       await this.setSession(phone, { step: OnboardingStep.NAME, pendingInitialRequest });
@@ -246,7 +248,7 @@ Responde con JSON: {"name": "Nombre Extraído"} o {"name": null}`,
     await this.sendAndLog(
       phone,
       `Mucho gusto, *${session.name}* 👋\n\n` +
-        `*¿A qué te dedicas?*\n_(uñas, pestañas, maquillaje, estilista, plomero, lo que sea)_`,
+        `*¿A qué te dedicas?*\n_(plomero, electricista, estilista, uñas, lo que sea)_`,
     );
   }
 
