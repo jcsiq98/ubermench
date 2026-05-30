@@ -71,9 +71,16 @@ All project documentation, organized by function:
 - `GET /api/internal/users/:phone/conversation?limit=50` — Full conversation, profile, appointments for any phone. Handles all Mexican phone format variants
 - `PATCH /api/internal/users/by-phone/:phone` — Fix user data (name, etc.)
 
-## Legacy Modules (`backend/src/modules/_marketplace/`)
+## Legacy Marketplace ("Handy") — retirado del runtime (Cap. 54, Mayo 28, 2026)
 
-Marketplace model modules preserved but NOT active in the pivot roadmap: bookings, messages, ratings, reports, safety, services, trust-score. Still registered in app.module.ts. Do NOT build new features on these.
+El código marketplace **ya no vive en este repo**. Fue archivado en `/home/jcsiq98/handy-legacy/` (fuera de git). Chalán ya no importa ni ejecuta bookings/messages/ratings.
+
+**Aún presente pero dormido:**
+- Tablas Prisma (`Booking`, `Message`, `Rating`, etc.) — schema intacto, Etapa B pendiente
+- Módulos marketplace-adjacentes aún registrados: `providers/`, `zones/`, `addresses/`, `provider-dashboard/`, `onboarding/` (web flow), `verification/`, `notifications/`
+- Frontend `web/` con UI marketplace y cookies `handy_*`
+
+Do NOT reactivar marketplace sin decisión explícita documentada en `HISTORIA_DECISIONES.md`.
 
 ## Bot Identity: Chalán
 
