@@ -1,0 +1,10 @@
+# Production Incident Protocol
+
+When the user reports that Chalán or WhatsApp failed in production, treat it as a production incident first.
+
+- Do **not** default to local reproduction, local logs, or local tests unless production evidence points to a code path that needs local verification.
+- Start with production observability: deployed logs, internal verify-token endpoints, provider conversation history, webhook delivery status, queue/process health, DB state, and external provider dashboards when available.
+- For founder numbers, check the known accounts in `project-context.md` before asking for the phone number.
+- Report what is known, unknown, and the next production check. Avoid saying the product "works locally" as evidence that production is healthy.
+- If a fix is needed, keep it scoped to the production failure and say explicitly what must be deployed or restarted for users to feel the fix.
+- Local commands are allowed only as support: reading code, confirming expected behavior, preparing a patch, or validating a suspected root cause after production evidence has been gathered.

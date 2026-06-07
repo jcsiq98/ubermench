@@ -1,0 +1,35 @@
+# Palabras Clave del Usuario
+
+Registro vivo de triggers y comandos personalizados. Cuando el usuario dice una de estas frases, activa el comportamiento correspondiente.
+
+## Triggers de modo
+
+| Palabra clave | Comportamiento | Regla asociada |
+|---------------|----------------|----------------|
+| "research mode", "modo investigación", "investiga", "analyze this", "fact-check" | Activar modo anti-alucinación con citaciones obligatorias | `.sanctuary/methodologies/research-mode.md` |
+
+## Triggers de acción
+
+| Palabra clave | Comportamiento |
+|---------------|----------------|
+| "mis comandos", "mis keywords", "mis palabras clave" | Leer este archivo y mostrar al usuario la tabla completa de triggers disponibles en formato legible |
+| "context dump", "resumen para LLM", "briefing completo" | Generar archivo en `/home/jcsiq98/ubermench-docs/_archive/context-dump-YYYY-MM-DD.txt` (<31MB) con: estado técnico completo + narrativa del proyecto (historia de decisiones, lecciones, pivots). Siempre en .txt con fecha en el nombre, siempre incluir la narrativa. Leer `proyecto/HISTORIA_DECISIONES.md` para la narrativa actualizada. |
+| "deja registro" | Registrar el chat actual en la documentación o en las reglas para referencia futura |
+| "prepara checks", "crea checks", "check prompts", "checks" | Crear check prompts de validación (3 niveles: structural, logic, integration) para la feature recién implementada. Ver `.sanctuary/methodologies/check-prompts.md` |
+| "cross-model debug", "debug con el otro modelo", "el modelo se equivocó" | Activar metodología de debugging cross-model: extraer síntomas del modelo que falló y cruzar con el código. Ver `.sanctuary/methodologies/cross-model-debugging.md` |
+| "modo colaboración", "aplica AB", "debug en equipo" | Leer y activar `.sanctuary/collaboration-rules.md`: verificar antes de afirmar, lentitud deliberada en cambios sensibles, escalar tras dos intentos fallidos. Confirmar al usuario que las reglas AB están activas. |
+| "nuevo SOTA", "validar SOTA", "branch por modelo", "metodología SOTA", "¿esto va a main directo?" | Consultar `.sanctuary/methodologies/sota-validation.md` para decidir flujo según magnitud del cambio (fix quirúrgico → main directo; cambio de prompt → branch staging; cambio estructural → servicio paralelo) |
+| "transcribe [archivo]", "analiza la entrevista [nombre]", "nueva entrevista" | Transcribir audio → analizar con contexto del proyecto → guardar análisis → actualizar índice. Ver `.sanctuary/methodologies/interview-system.md` |
+
+## Cómo agregar nuevas palabras clave
+
+Cuando el usuario defina un nuevo trigger o comportamiento personalizado, agregar una fila a la tabla correspondiente en este archivo. No preguntar confirmación — solo agregarlo y mencionarlo.
+
+## Escalamiento
+
+Este archivo es viable con hasta ~30 comandos (~150 líneas). Más allá de eso, dividir por categoría:
+- `user-keywords-modes.md` — triggers que cambian el comportamiento del agente
+- `user-keywords-actions.md` — triggers que disparan acciones concretas
+- `user-keywords-workflow.md` — triggers de flujos (checks, deploys, etc.)
+
+Estado actual: 8 comandos. No dividir todavía.
