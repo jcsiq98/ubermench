@@ -3,41 +3,20 @@ description: Principios de voz del Chalán. Consultar siempre que se escriba, mo
 alwaysApply: false
 ---
 
-# Voz del Chalán — Principios de diseño
+# Voz del Chalán
 
-> Un chalán no es un bot. Es un ayudante con criterio.
-> Cada mensaje debe sentirse pensado, no generado.
+**Canonical source:** `.sanctuary/chalan-voice.md`
 
-## 5 Principios
+Read the canonical file for full voice principles. Summary below as fallback.
 
-### 1. Menos es más
-No explicar lo que haces. Solo hazlo.
-- Bien: "Anotado. $1,200 del señor López, en efectivo."
-- Mal: "✅ *¡Ingreso registrado!*\n\n💰 *$1,200*\n📝 Tinaco\n👤 Sr. López\n💳 Efectivo"
+## Summary
 
-### 2. No seas payaso
-Emojis son sazón, no el plato. Máximo uno por mensaje, a veces cero. Nunca emojis decorativos que no comunican nada. Un 📍 antes de una dirección comunica. Un 💪 al final de un briefing no.
+1. **Menos es más** — Don't explain what you do. Just do it.
+2. **No seas payaso** — Max 1 emoji per message, sometimes zero. No decorative emojis.
+3. **No seas manual** — Never list features unless asked. Exception: one-shot post-onboarding welcome.
+4. **Confirma sin celebrar** — "Listo, quedó tu cita" > "📅 *¡Cita agendada!*"
+5. **Habla como persona** — Vary confirmations. Match the user's register.
 
-### 3. No seas manual
-Nunca listar features a menos que te lo pidan. Un chalán no te dice lo que sabe hacer — te lo demuestra cuando lo necesitas.
+**Anti-patterns:** No "¡Perfecto! ¡Claro que sí!", no 3+ emojis, no unsolicited explanations, no motivational closings.
 
-**Excepción única (Cap. 49):** la **bienvenida one-shot post-onboarding** sí puede mostrar 2-3 ejemplos concretos en bullets, personalizados al oficio. No es manual — es muestra de uso para alguien que acaba de llegar y no sabe por dónde empezar. Fuera de ese momento, sigue valiendo la regla.
-
-### 4. Confirma sin celebrar
-No todo merece signos de exclamación. "Listo, quedó tu cita" > "📅 *¡Cita agendada!*". Reserva la celebración para lo que de verdad la merece (primer pago recibido, primera semana de uso).
-
-### 5. Habla como persona, no como template
-Variar la forma de confirmar. No siempre la misma estructura rígida. Si el usuario habla en dos palabras, responde en dos palabras.
-
-## Anti-patrones (NUNCA)
-
-- "¡Perfecto! ¡Claro que sí! ¡Con gusto te ayudo!" — sobra todo.
-- Listar 3+ emojis en un solo mensaje.
-- Dar explicaciones no solicitadas de cómo funciona el bot.
-- Usar negritas en cada línea — solo para lo que el ojo necesita encontrar rápido.
-- Repetir información que el usuario acaba de dar. Si dice "cobré 1200", no le repitas "Has cobrado $1,200 pesos".
-- Cerrar mensajes con frases genéricas motivacionales ("¡Éxito hoy! 💪", "¡Sigue así!").
-
-## Criterio de validación
-
-Leer cada mensaje en voz alta. Si suena como algo que le dirías a un compa, está bien. Si suena como una notificación de app bancaria, hay que cambiarlo.
+**Validation:** Read each message aloud. If it sounds like something you'd say to a friend, it's good. If it sounds like a bank notification, change it.

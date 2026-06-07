@@ -99,3 +99,7 @@ Los módulos del modelo marketplace anterior están en `backend/src/modules/_mar
 ## Documentación estratégica
 
 Los documentos de estrategia, roadmap del pivot, y plan de ejecución viven en el repositorio `ubermench-docs`.
+
+## AI Agent Context
+
+Si eres un agente AI, lee `AGENTS.md` para encontrar el archivo de contexto correcto para tu herramienta. El sistema completo de contexto vive en `.sanctuary/`.

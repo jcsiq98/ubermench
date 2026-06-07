@@ -5,11 +5,17 @@ alwaysApply: true
 
 # Production Incident Protocol
 
-When the user reports that Chalán or WhatsApp failed in production, treat it as a production incident first.
+**Canonical source:** `.sanctuary/methodologies/production-incident-protocol.md`
 
-- Do **not** default to local reproduction, local logs, or local tests unless production evidence points to a code path that needs local verification.
-- Start with production observability: deployed logs, internal verify-token endpoints, provider conversation history, webhook delivery status, queue/process health, DB state, and external provider dashboards when available.
-- For founder numbers, check the known accounts in `project-context.mdc` before asking for the phone number.
-- Report what is known, unknown, and the next production check. Avoid saying the product "works locally" as evidence that production is healthy.
-- If a fix is needed, keep it scoped to the production failure and say explicitly what must be deployed or restarted for users to feel the fix.
-- Local commands are allowed only as support: reading code, confirming expected behavior, preparing a patch, or validating a suspected root cause after production evidence has been gathered.
+Read the canonical file for full protocol. Summary below as fallback.
+
+## Summary
+
+When Chalán or WhatsApp fails in production:
+
+- **Start with production observability** — deployed logs, internal endpoints, conversation history, webhook status, queue health, DB state.
+- **Do NOT default to local reproduction** unless production evidence points to a specific code path.
+- For founder numbers, check known accounts in `.sanctuary/project-context.md`.
+- Report: what is known, what is unknown, next production check.
+- Never claim "works locally" as evidence of production health.
+- Fixes must be scoped to the failure. Say what must be deployed/restarted.

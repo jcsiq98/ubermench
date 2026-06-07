@@ -3,108 +3,26 @@ description: Core project context - what Ubermench is, current state, and archit
 alwaysApply: true
 ---
 
-# Ubermench — Project Context
+# Project Context
 
-AI Business Assistant for independent trades workers (plomeros, electricistas, albañiles) in Mexico. WhatsApp-based business assistant powered by LLM: income tracking, scheduling, invoicing, CRM.
+**Canonical source:** `.sanctuary/project-context.md` + `.sanctuary/architecture.md`
 
-## Philosophy
+Read the canonical files for full context. Summary below as fallback.
 
-This project exists to empower, not to extract. The trades workers we serve — plomeros, electricistas, albañiles — are people who build the world with their hands. They don't need another platform taking a cut. They need tools that make them stronger.
+## Summary
 
-Core principles that guide every decision:
+Ubermench: AI Business Assistant for trades workers in Mexico via WhatsApp. Bot name: **Chalán**.
 
-- **Flexibility over rigidity.** We pivoted once, we'll pivot again if the data says so. Plans serve us, we don't serve plans. History matters — read `ubermench-docs/proyecto/HISTORIA_DECISIONES.md` before proposing big changes.
-- **Fairness in giving and receiving.** We pay people justly. We charge users fairly. The 50/50 partnership behind this project exists because both sides bring real value, and both sides are respected equally. That standard extends to every relationship — with developers, with users, with partners.
-- **Build only what's proven.** No feature ships because we imagined someone needs it. It ships because a real plomero asked for it, or the data showed it. Launch small, measure, iterate.
-- **Honesty over impressiveness.** A simple solution that works beats an elaborate one that looks good. We'd rather say "we don't know yet" than pretend we do.
-- **Know your history.** Every decision, pivot, and lesson is documented. Not for bureaucracy — so we never repeat the mistakes we already paid for.
+**Stack:** NestJS + PostgreSQL + Prisma + Redis + BullMQ (backend), Next.js (web). Deployed on Railway.
 
-## Project Knowledge Base
+**3 repos:** `~/ubermench/` (code), `~/ubermench-docs/` (docs), `~/ubermench-strategy/` (strategy).
 
-**History is our most valuable asset** — always consult these sources before proposing changes, making strategic claims, or planning features.
+**Key modules:** `ai/` (OpenAI function calling, 26 tools in `ai.tools.ts`), `workspace/` (provider profile, cache-first), `income/`, `expense/` (puntual + recurring), `appointments/` (CRUD + timezone-aware), `whatsapp/` (webhook, dedup via setNX), `reminders/`, `contacts/` (CRM), `payments/` (Stripe Connect Express).
 
-### 1. Main Codebase — `/home/jcsiq98/ubermench/` (this workspace)
-Source of truth for what exists today.
-- `backend/` — NestJS + TypeScript + Prisma + PostgreSQL + Redis + BullMQ
-- `web/` — Next.js (App Router) — provider dashboard, being reconverted from marketplace UI
-- `scripts/` — Utilities (start-db.js for embedded PostgreSQL)
-- `_archive/` — Old marketplace code and research preserved for reference (do NOT modify)
+**Design decisions:** Intent classification via function calling (not prompt rules). All dates timezone-aware. Sanitize LLM-extracted optional fields server-side. Never push without explicit user approval.
 
-### 2. Documentation — `/home/jcsiq98/ubermench-docs/`
-All project documentation, organized by function:
-- `proyecto/` — Foundational docs: `HISTORIA_DECISIONES.md`, `PIVOT_ESTRATEGICO.md`, `PIVOT_MILESTONES.md`
-- `operacion/` — Execution: `PLAN_PRUEBAS_FOUNDER.md`, `META_WHATSAPP_CHECKLIST.md`, `GUION_PRIMEROS_5_USUARIOS.md`, `PRESUPUESTO.md`
-- `research/` — Customer discovery: `GUION_ENTREVISTAS.md`, `WORKANA_POST_RESEARCHER.md`, `tools/`
-- `sesiones/` — Deep thinking sessions (e.g. `2026-04-10-sesion-densa.md`)
-- `arquitectura/` — ADRs (Architecture Decision Records)
-- `_archive/` — Historical docs no longer actionable
+**Testing accounts:** José Carlos (+526565884840, America/Mexico_City), Oscar Perez (+526563954480, America/New_York).
 
-### How to use these sources
-- **Before proposing big changes:** Read `proyecto/HISTORIA_DECISIONES.md` and `proyecto/PIVOT_ESTRATEGICO.md`.
-- **Before planning features:** Check `proyecto/PIVOT_MILESTONES.md` for current roadmap state.
-- **Before making market claims:** Consult `/home/jcsiq98/ubermench/_archive/handy-docs/` for LATAM market data (costs, DB access notes, research PDFs).
-- **When in doubt about a past decision:** The answer is probably documented. Search docs first.
+**Legacy marketplace ("Handy"):** archived to `~/handy-legacy/`, do NOT reactivate without documented decision.
 
-## Active Backend Modules (`backend/src/modules/`)
-
-- `ai/` — LLM integration (OpenAI) via **function calling** (26 typed tools in `ai.tools.ts`), conversation context (Redis). Intent classification uses tool selection, NOT prompt-based rules. System prompt is minimal (personality + context only)
-- `workspace/` — Provider business profile via chat (services, prices, schedule, auto-reply, notes, **structured learned facts**, **timezone**). Cache-first (Redis → DB). Injected into LLM system prompt for personalized responses. `timezone` field (IANA string, default `America/Mexico_City`) drives all date/time logic — parsing, formatting, system prompt clock, cron jobs, BullMQ processors (Cap. 37). Learned facts are `StructuredFact[]` with `{fact, category, firstSeen, lastSeen}` — categories: personal/negocio/clientes/preferencias/patrones. Max 100 facts. Auto-decay at 60 days. Extracted every ~10 messages via LLM (Cap. 29)
-- `income/` — Income tracking, weekly/monthly summaries
-- `expense/` — Expense tracking (puntual + recurring). 7 LLM tools: `registrar_gasto`, `borrar_ultimo_gasto`, `borrar_gasto_por_descripcion`, `corregir_ultimo_gasto`, `crear_gasto_recurrente`, `cancelar_gasto_recurrente`, `modificar_gasto_recurrente`, `listar_gastos_recurrentes`. `RecurringExpense` model with cron-based auto-creation. See Cap. 36 for "cobro" vs gasto disambiguation.
-- `appointments/` — Scheduling, Spanish date parsing, reminders, **modify/cancel/followup (full CRUD)**. All date/time logic timezone-aware via shared `timezone.utils.ts` (Cap. 37). BullMQ jobs: "¿Se hizo?" 30min post-appointment + configurable pre-appointment reminder (`reminderMinutes`). Cron safety net marks stale PENDING and CONFIRMED appointments as NO_SHOW every 30 min. **BullMQ active in production since Cap. 26**.
-- `whatsapp/` — Core: webhook handler (atomic dedup via `setNX` — Cap. 30), message sending, provider handler (hybrid commands + LLM routing). **Rule:** BullMQ processors must `.catch()` non-critical steps after `sendTextMessage` to prevent retries that duplicate messages (Cap. 30)
-- `onboarding/` — Provider registration via WhatsApp. Messages now logged to conversation_logs (Cap. 27)
-- `reminders/` — Standalone personal reminders separate from work appointments (Cap. 28). CRUD completo via 5 LLM tools (`crear_recordatorio`, `ver_recordatorios`, `modificar_recordatorio`, `cancelar_recordatorio`, `completar_recordatorio`). Prisma model `Reminder` (id, providerId, description, remindAt, status). BullMQ queue `PERSONAL_REMINDER` sends WhatsApp notification at remind time. Cron safety net marks stale PENDING as SENT every 30 min. System prompt rule 16 disambiguates: no client = recordatorio, not cita.
-- `contacts/` — Provider CRM (Sprint 1 — Universo de negocio). Global module. `Contact` model (name, phone E.164, notes, source). Tools: `guardar_contacto`, `buscar_contactos`. `crear_link_cobro` uses `sendToClient` + delegated send with explicit confirmation (no auto-send to third parties). Sync on income/appointment when phone present.
-- `payments/` — Stripe Connect Express integration (Cap. 32, live validated Cap. 50). Global module. 2 LLM tools (`crear_link_cobro`, `activar_cobros`). Provider onboarding creates Express account → hosted form → webhook `account.updated` activates (requires Connect-scoped webhook). Payment links create Checkout Sessions on connected account (`CHECKOUT_EXPIRY_HOURS=23`, Stripe max <24h). Min $10 MXN. `refreshProviderStripeStatus()` when DB stale. Webhook `checkout.session.completed` should auto-create Income with `paymentMethod: PAYMENT_LINK` — **pending Connect webhook config** (Cap. 50). Checkout currently card-only; OXXO/SPEI promised in copy but not enabled on connected account yet.
-- `provider-model/` — Structured provider model (`ProviderModelService`). Builds a living representation of the provider from workspace data, appointments, income patterns, and learned facts. Used for contextual touchpoints (Cap. 34).
-- `providers/`, `users/`, `auth/`, `admin/`, `notifications/`, `verification/`, `zones/`, `addresses/`, `provider-dashboard/`
-
-## Founder Testing Accounts
-
-- **José Carlos (founder):** +526565884840 — personal number used for testing. User "José Carlos", role PROVIDER, trade "trabajador independiente." Timezone: America/Mexico_City (default).
-- **Oscar Perez (co-founder):** +526563954480 — active user in Miami. User "Oscar Perez", role PROVIDER, trade "electricista." Timezone: America/New_York. First non-CDMX user — triggered timezone implementation (Cap. 37).
-
-## Internal Observability Endpoints (verify-token protected)
-
-- `GET /api/internal/users` — List all users with message counts
-- `GET /api/internal/users/:phone/conversation?limit=50` — Full conversation, profile, appointments for any phone. Handles all Mexican phone format variants
-- `PATCH /api/internal/users/by-phone/:phone` — Fix user data (name, etc.)
-
-## Legacy Marketplace ("Handy") — retirado del runtime (Cap. 54, Mayo 28, 2026)
-
-El código marketplace **ya no vive en este repo**. Fue archivado en `/home/jcsiq98/handy-legacy/` (fuera de git). Chalán ya no importa ni ejecuta bookings/messages/ratings.
-
-**Aún presente pero dormido:**
-- Tablas Prisma (`Booking`, `Message`, `Rating`, etc.) — schema intacto, Etapa B pendiente
-- Módulos marketplace-adjacentes aún registrados: `providers/`, `zones/`, `addresses/`, `provider-dashboard/`, `onboarding/` (web flow), `verification/`, `notifications/`
-- Frontend `web/` con UI marketplace y cookies `handy_*`
-
-Do NOT reactivar marketplace sin decisión explícita documentada en `HISTORIA_DECISIONES.md`.
-
-## Bot Identity: Chalán
-
-The bot's name is **Chalán** — the trade worker's helper. In Mexican trades culture, a chalán is the maestro's assistant: carries materials, mixes cement, passes tools. The bot assumes that role for administrative work (accounts, appointments, billing) so the maestro focuses on his craft.
-
-- **Tone:** Mexican Spanish, direct, serviceable, professional without being formal. Speaks like someone from the trade, not a corporate suit. No forced slang.
-- **Power dynamic:** The bot is positioned *below* the user. The maestro commands, the Chalán executes.
-- **Calibration:** The bot doesn't impose personality — it calibrates to the user's register over time.
-- **Brand vs identity:** "Ubermench" is the product/company. "Chalán" is the bot's identity. Different layers.
-
-See `proyecto/HISTORIA_DECISIONES.md` Chapter 20 for the full rationale.
-
-## Key Design Decisions
-
-- Providers interact primarily via WhatsApp (93% penetration in Mexico). The LLM handles natural language + voice notes.
-- The product does NOT intermediate transactions — it empowers providers to run their own business.
-- Cash payments are tracked, not replaced. Digital payments are optional via payment links.
-- **Intent classification uses OpenAI function calling (tools), not prompt-based rules.** Each action is a typed tool definition in `ai.tools.ts`. The system prompt contains only personality and workspace context — no classification rules. Adding a new action = adding a tool, not editing the prompt. See `proyecto/HISTORIA_DECISIONES.md` Chapter 16 for the full rationale.
-- **Always sanitize LLM-extracted optional fields server-side** before using them in DB queries. The LLM will fill optional fields with nonsense from colloquial speech (e.g. `clientName: "ninguna"` from "No, ninguna"). See Cap. 30.
-- **All date/time logic uses the provider's timezone**, stored in `WorkspaceProfile.timezone` (IANA string, default `America/Mexico_City`). Shared utility: `backend/src/common/utils/timezone.utils.ts`. Never hardcode `America/Mexico_City` or UTC offsets — always use the utility functions. Cron jobs run hourly and filter by provider's local hour. See Cap. 37.
-
-## Git Protocol
-
-- **Never push to remote without explicit user approval.** Commits are fine when requested; pushing requires the user to say "push", "sube", "despliega", or equivalent.
-- **Always commit with descriptive messages** following the project convention: `type: concise description with intent` (e.g. `fix: onboarding crash when Cloudinary is not configured in dev`).
-- **Never force push to main/master.** Warn if the user requests it.
-- **After committing, show git status** so the user can decide whether to push.
+**Full context system:** `.sanctuary/ONBOARDING.md` → maps the entire knowledge base.
