@@ -15,34 +15,34 @@ datasource db {
 // Users (both customers and providers share this table)
 // ──────────────────────────────────────────────
 model User {
-  id            String   @id @default(uuid())
-  phone         String   @unique
-  name          String?
-  email         String?  @unique
-  avatarUrl     String?  @map("avatar_url")
-  role          Role     @default(CUSTOMER)
-  ratingAverage Float    @default(0) @map("rating_average")
-  ratingCount   Int      @default(0) @map("rating_count")
-  pushToken     String?  @map("push_token")
-  isActive      Boolean  @default(true) @map("is_active")
+  id             String    @id @default(uuid())
+  phone          String    @unique
+  name           String?
+  email          String?   @unique
+  avatarUrl      String?   @map("avatar_url")
+  role           Role      @default(CUSTOMER)
+  ratingAverage  Float     @default(0) @map("rating_average")
+  ratingCount    Int       @default(0) @map("rating_count")
+  pushToken      String?   @map("push_token")
+  isActive       Boolean   @default(true) @map("is_active")
   lastActivityAt DateTime? @map("last_activity_at")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   // Relations
   providerProfile    ProviderProfile?
-  bookingsAsCustomer Booking[]          @relation("CustomerBookings")
-  sentMessages       Message[]          @relation("SentMessages")
-  ratingsGiven       Rating[]           @relation("RatingsGiven")
-  ratingsReceived    Rating[]           @relation("RatingsReceived")
+  bookingsAsCustomer Booking[]                @relation("CustomerBookings")
+  sentMessages       Message[]                @relation("SentMessages")
+  ratingsGiven       Rating[]                 @relation("RatingsGiven")
+  ratingsReceived    Rating[]                 @relation("RatingsReceived")
   otpCodes           OtpCode[]
   refreshTokens      RefreshToken[]
   savedAddresses     SavedAddress[]
-  reportsGiven       Report[]           @relation("ReportsGiven")
-  reportsReceived    Report[]           @relation("ReportsReceived")
-  servicePhotos      ServicePhoto[]     @relation("ServicePhotos")
+  reportsGiven       Report[]                 @relation("ReportsGiven")
+  reportsReceived    Report[]                 @relation("ReportsReceived")
+  servicePhotos      ServicePhoto[]           @relation("ServicePhotos")
   emergencyContacts  EmergencyContact[]
-  sosAlerts          SosAlert[]         @relation("SosAlerts")
+  sosAlerts          SosAlert[]               @relation("SosAlerts")
   deviceTokens       DeviceToken[]
   notifications      Notification[]
   notificationPrefs  NotificationPreference[]
@@ -67,37 +67,37 @@ enum StripeOnboardingStatus {
 // Provider Profiles (extends User for providers)
 // ──────────────────────────────────────────────
 model ProviderProfile {
-  id            String   @id @default(uuid())
-  userId        String   @unique @map("user_id")
-  bio           String?
-  serviceTypes  Json     @default("[]") @map("service_types")
-  totalJobs     Int      @default(0) @map("total_jobs")
-  totalMessages Int      @default(0) @map("total_messages")
-  tier          Int      @default(1)
-  isVerified    Boolean  @default(false) @map("is_verified")
-  isAvailable   Boolean  @default(true) @map("is_available")
-  locationLat   Float?   @map("location_lat")
-  locationLng   Float?   @map("location_lng")
-  coverageRadius Float?  @map("coverage_radius")
+  id                     String                 @id @default(uuid())
+  userId                 String                 @unique @map("user_id")
+  bio                    String?
+  serviceTypes           Json                   @default("[]") @map("service_types")
+  totalJobs              Int                    @default(0) @map("total_jobs")
+  totalMessages          Int                    @default(0) @map("total_messages")
+  tier                   Int                    @default(1)
+  isVerified             Boolean                @default(false) @map("is_verified")
+  isAvailable            Boolean                @default(true) @map("is_available")
+  locationLat            Float?                 @map("location_lat")
+  locationLng            Float?                 @map("location_lng")
+  coverageRadius         Float?                 @map("coverage_radius")
   stripeAccountId        String?                @unique @map("stripe_account_id")
   stripeOnboardingStatus StripeOnboardingStatus @default(NONE) @map("stripe_onboarding_status")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  createdAt              DateTime               @default(now()) @map("created_at")
+  updatedAt              DateTime               @updatedAt @map("updated_at")
 
   // Relations
-  user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bookings         Booking[]             @relation("ProviderBookings")
-  incomes          Income[]
-  expenses           Expense[]
-  recurringExpenses  RecurringExpense[]
-  appointments     Appointment[]
-  reminders        Reminder[]
-  paymentLinks     PaymentLink[]
-  contacts         Contact[]
-  serviceZones     ProviderServiceZone[]
-  trustScore       TrustScore?
-  location         ProviderLocation?
-  workspaceProfile WorkspaceProfile?
+  user              User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings          Booking[]             @relation("ProviderBookings")
+  incomes           Income[]
+  expenses          Expense[]
+  recurringExpenses RecurringExpense[]
+  appointments      Appointment[]
+  reminders         Reminder[]
+  paymentLinks      PaymentLink[]
+  contacts          Contact[]
+  serviceZones      ProviderServiceZone[]
+  trustScore        TrustScore?
+  location          ProviderLocation?
+  workspaceProfile  WorkspaceProfile?
 
   @@index([tier])
   @@map("provider_profiles")
@@ -107,24 +107,24 @@ model ProviderProfile {
 // Workspace Profile (provider business config via chat)
 // ──────────────────────────────────────────────
 model WorkspaceProfile {
-  id         String   @id @default(uuid())
-  providerId String   @unique @map("provider_id")
+  id         String @id @default(uuid())
+  providerId String @unique @map("provider_id")
 
-  services   Json     @default("[]")
-  schedule   Json     @default("{}")
-  autoReply     Json     @default("{\"enabled\":false,\"message\":\"\"}") @map("auto_reply")
-  notes         String?
-  learnedFacts  Json     @default("[]") @map("learned_facts")
-  timezone      String   @default("America/Mexico_City")
+  services          Json    @default("[]")
+  schedule          Json    @default("{}")
+  autoReply         Json    @default("{\"enabled\":false,\"message\":\"\"}") @map("auto_reply")
+  notes             String?
+  learnedFacts      Json    @default("[]") @map("learned_facts")
+  timezone          String  @default("America/Mexico_City")
   // Confidence System (Cap. 46) — distinguish "default by inertia" from
   // "default because the provider really works in CDMX". See HISTORIA_DECISIONES.
   timezoneConfirmed Boolean @default(false) @map("timezone_confirmed")
   timezoneSource    String? @map("timezone_source")
 
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  provider   ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
 
   @@index([providerId])
   @@map("workspace_profiles")
@@ -136,10 +136,10 @@ model WorkspaceProfile {
 model ConversationLog {
   id        String   @id @default(uuid())
   phone     String
-  role      String   // "user" | "assistant" | "system"
+  role      String // "user" | "assistant" | "system"
   content   String   @db.Text
-  intent    String?  // detected intent (registrar_ingreso, agendar_cita, etc.)
-  metadata  Json?    // extra context: voice note, error, etc.
+  intent    String? // detected intent (registrar_ingreso, agendar_cita, etc.)
+  metadata  Json? // extra context: voice note, error, etc.
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([phone])
@@ -243,17 +243,17 @@ model Expense {
 // Recurring Expenses (automatic monthly/weekly)
 // ──────────────────────────────────────────────
 model RecurringExpense {
-  id              String   @id @default(uuid())
-  providerId      String   @map("provider_id")
-  amount          Decimal  @db.Decimal(12, 2)
+  id              String    @id @default(uuid())
+  providerId      String    @map("provider_id")
+  amount          Decimal   @db.Decimal(12, 2)
   category        String?
   description     String
-  frequency       String   @default("monthly") // "monthly" | "weekly"
-  dayOfMonth      Int?     @default(1) @map("day_of_month")
-  isActive        Boolean  @default(true) @map("is_active")
-  nextDueDate     DateTime @map("next_due_date")
+  frequency       String    @default("monthly") // "monthly" | "weekly"
+  dayOfMonth      Int?      @default(1) @map("day_of_month")
+  isActive        Boolean   @default(true) @map("is_active")
+  nextDueDate     DateTime  @map("next_due_date")
   lastProcessedAt DateTime? @map("last_processed_at")
-  createdAt       DateTime @default(now()) @map("created_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
 
   provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
 
@@ -297,20 +297,20 @@ model Appointment {
 // Contacts (provider CRM — Sprint 1)
 // ──────────────────────────────────────────────
 model Contact {
-  id          String        @id @default(uuid())
-  providerId  String        @map("provider_id")
-  name        String
-  phone       String?
-  notes       String?
-  source      ContactSource @default(MANUAL)
-  lastUsedAt  DateTime?     @map("last_used_at")
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
+  id         String        @id @default(uuid())
+  providerId String        @map("provider_id")
+  name       String
+  phone      String?
+  notes      String?
+  source     ContactSource @default(MANUAL)
+  lastUsedAt DateTime?     @map("last_used_at")
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
 
-  provider      ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
-  incomes       Income[]
-  appointments  Appointment[]
-  paymentLinks  PaymentLink[]
+  provider     ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  incomes      Income[]
+  appointments Appointment[]
+  paymentLinks PaymentLink[]
 
   @@unique([providerId, phone])
   @@index([providerId])
@@ -365,11 +365,11 @@ enum ReminderStatus {
 // ──────────────────────────────────────────────
 model ServiceZone {
   id        String   @id @default(uuid())
-  name      String                          // "Condesa", "Roma Norte", etc.
-  city      String                          // "Ciudad de México"
-  state     String                          // "CDMX"
+  name      String // "Condesa", "Roma Norte", etc.
+  city      String // "Ciudad de México"
+  state     String // "CDMX"
   country   String   @default("MX")
-  lat       Float?                          // Centro de la zona
+  lat       Float? // Centro de la zona
   lng       Float?
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
@@ -420,23 +420,23 @@ model ServiceCategory {
 // Bookings (Service Requests)
 // ──────────────────────────────────────────────
 model Booking {
-  id            String        @id @default(uuid())
-  customerId    String        @map("customer_id")
-  providerId    String?       @map("provider_id")
-  categoryId    String        @map("category_id")
-  status        BookingStatus @default(PENDING)
-  description   String
-  address       String?
-  locationLat   Float?        @map("location_lat")
-  locationLng   Float?        @map("location_lng")
-  scheduledAt   DateTime?     @map("scheduled_at")
-  price         Float?
-  paidAt        DateTime?     @map("paid_at")
-  completedAt   DateTime?     @map("completed_at")
-  cancelledAt   DateTime?     @map("cancelled_at")
-  cancelReason  String?       @map("cancel_reason")
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @updatedAt @map("updated_at")
+  id           String        @id @default(uuid())
+  customerId   String        @map("customer_id")
+  providerId   String?       @map("provider_id")
+  categoryId   String        @map("category_id")
+  status       BookingStatus @default(PENDING)
+  description  String
+  address      String?
+  locationLat  Float?        @map("location_lat")
+  locationLng  Float?        @map("location_lng")
+  scheduledAt  DateTime?     @map("scheduled_at")
+  price        Float?
+  paidAt       DateTime?     @map("paid_at")
+  completedAt  DateTime?     @map("completed_at")
+  cancelledAt  DateTime?     @map("cancelled_at")
+  cancelReason String?       @map("cancel_reason")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
 
   // Relations
   customer      User             @relation("CustomerBookings", fields: [customerId], references: [id])
@@ -472,15 +472,15 @@ enum BookingStatus {
 // Messages (Chat — bridges App ↔ WhatsApp)
 // ──────────────────────────────────────────────
 model Message {
-  id          String        @id @default(uuid())
-  bookingId   String        @map("booking_id")
-  senderId    String        @map("sender_id")
-  senderType  SenderType    @map("sender_type")
+  id          String         @id @default(uuid())
+  bookingId   String         @map("booking_id")
+  senderId    String         @map("sender_id")
+  senderType  SenderType     @map("sender_type")
   content     String
   channel     MessageChannel @default(APP)
-  waMessageId String?       @map("wa_message_id")
-  readAt      DateTime?     @map("read_at")
-  createdAt   DateTime      @default(now()) @map("created_at")
+  waMessageId String?        @map("wa_message_id")
+  readAt      DateTime?      @map("read_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
 
   // Relations
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
@@ -529,13 +529,13 @@ model Rating {
 // Provider Applications (onboarding via WhatsApp)
 // ──────────────────────────────────────────────
 model ProviderApplication {
-  id                 String             @id @default(uuid())
-  phone              String             @unique
-  name               String?
-  bio                String?
-  yearsExperience    Int                @default(0) @map("years_experience")
-  categories         String[]           // slugs of service categories
-  serviceZones       String[]           @map("service_zones")    // zone/neighborhood names
+  id              String   @id @default(uuid())
+  phone           String   @unique
+  name            String?
+  bio             String?
+  yearsExperience Int      @default(0) @map("years_experience")
+  categories      String[] // slugs of service categories
+  serviceZones    String[] @map("service_zones") // zone/neighborhood names
 
   // Identity verification (M3)
   inePhotoFront      String?            @map("ine_photo_front")
@@ -546,17 +546,17 @@ model ProviderApplication {
   rejectionReason    String?            @map("rejection_reason")
   approvedTier       Int?               @map("approved_tier")
 
-  acquisitionSource  String?            @map("acquisition_source")
+  acquisitionSource String? @map("acquisition_source")
 
   // Onboarding step tracking
-  onboardingStep     String             @default("WELCOME") @map("onboarding_step")
+  onboardingStep String @default("WELCOME") @map("onboarding_step")
 
   // Admin review
-  reviewedBy         String?            @map("reviewed_by")
-  reviewedAt         DateTime?          @map("reviewed_at")
+  reviewedBy String?   @map("reviewed_by")
+  reviewedAt DateTime? @map("reviewed_at")
 
-  createdAt          DateTime           @default(now()) @map("created_at")
-  updatedAt          DateTime           @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
   verificationResults VerificationResult[]
@@ -580,7 +580,7 @@ enum VerificationStatus {
 model SavedAddress {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
-  label     String                          // "Mi casa", "Oficina", etc.
+  label     String // "Mi casa", "Oficina", etc.
   address   String
   lat       Float
   lng       Float
@@ -635,13 +635,13 @@ model RefreshToken {
 // Trust Score (dynamic provider reliability score)
 // ──────────────────────────────────────────────
 model TrustScore {
-  id              String   @id @default(uuid())
-  providerId      String   @unique @map("provider_id")
-  score           Float    @default(50)
-  factors         Json     @default("{}")
-  lastCalculated  DateTime @default(now()) @map("last_calculated")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(uuid())
+  providerId     String   @unique @map("provider_id")
+  score          Float    @default(50)
+  factors        Json     @default("{}")
+  lastCalculated DateTime @default(now()) @map("last_calculated")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
 
@@ -653,13 +653,13 @@ model TrustScore {
 // Trust Score History (audit trail)
 // ──────────────────────────────────────────────
 model TrustScoreHistory {
-  id              String   @id @default(uuid())
-  providerId      String   @map("provider_id")
-  previousScore   Float    @map("previous_score")
-  newScore        Float    @map("new_score")
-  reason          String
-  factors         Json     @default("{}")
-  createdAt       DateTime @default(now()) @map("created_at")
+  id            String   @id @default(uuid())
+  providerId    String   @map("provider_id")
+  previousScore Float    @map("previous_score")
+  newScore      Float    @map("new_score")
+  reason        String
+  factors       Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@index([providerId])
   @@index([createdAt])
@@ -670,17 +670,17 @@ model TrustScoreHistory {
 // Verification Results (automated pipeline)
 // ──────────────────────────────────────────────
 model VerificationResult {
-  id              String   @id @default(uuid())
-  applicationId   String   @map("application_id")
-  provider        String   @default("manual")          // "truora", "metamap", "manual"
-  faceMatchScore  Float?   @map("face_match_score")    // 0-100
-  ineValid        Boolean? @map("ine_valid")
-  livenessScore   Float?   @map("liveness_score")      // 0-100
-  decision        String                               // "auto_approved", "manual_review", "auto_rejected"
-  rawResponse     Json?    @map("raw_response")
-  externalId      String?  @map("external_id")         // ID from Truora/MetaMap
-  processedAt     DateTime @default(now()) @map("processed_at")
-  createdAt       DateTime @default(now()) @map("created_at")
+  id             String   @id @default(uuid())
+  applicationId  String   @map("application_id")
+  provider       String   @default("manual") // "truora", "metamap", "manual"
+  faceMatchScore Float?   @map("face_match_score") // 0-100
+  ineValid       Boolean? @map("ine_valid")
+  livenessScore  Float?   @map("liveness_score") // 0-100
+  decision       String // "auto_approved", "manual_review", "auto_rejected"
+  rawResponse    Json?    @map("raw_response")
+  externalId     String?  @map("external_id") // ID from Truora/MetaMap
+  processedAt    DateTime @default(now()) @map("processed_at")
+  createdAt      DateTime @default(now()) @map("created_at")
 
   application ProviderApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
@@ -692,20 +692,20 @@ model VerificationResult {
 // Reports & Disputes
 // ──────────────────────────────────────────────
 model Report {
-  id            String       @id @default(uuid())
-  bookingId     String       @map("booking_id")
-  reporterId    String       @map("reporter_id")
-  reportedId    String       @map("reported_id")
-  category      ReportCategory
-  description   String
-  evidenceUrls  String[]     @map("evidence_urls")
-  status        ReportStatus @default(OPEN)
-  isSafety      Boolean      @default(false) @map("is_safety")
-  resolution    String?
-  resolvedBy    String?      @map("resolved_by")
-  resolvedAt    DateTime?    @map("resolved_at")
-  createdAt     DateTime     @default(now()) @map("created_at")
-  updatedAt     DateTime     @updatedAt @map("updated_at")
+  id           String         @id @default(uuid())
+  bookingId    String         @map("booking_id")
+  reporterId   String         @map("reporter_id")
+  reportedId   String         @map("reported_id")
+  category     ReportCategory
+  description  String
+  evidenceUrls String[]       @map("evidence_urls")
+  status       ReportStatus   @default(OPEN)
+  isSafety     Boolean        @default(false) @map("is_safety")
+  resolution   String?
+  resolvedBy   String?        @map("resolved_by")
+  resolvedAt   DateTime?      @map("resolved_at")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
 
   booking  Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   reporter User    @relation("ReportsGiven", fields: [reporterId], references: [id])
@@ -742,13 +742,13 @@ enum ReportStatus {
 // Service Photos (before/after documentation)
 // ──────────────────────────────────────────────
 model ServicePhoto {
-  id          String   @id @default(uuid())
-  bookingId   String   @map("booking_id")
-  uploaderId  String   @map("uploader_id")
-  type        ServicePhotoType
-  url         String
-  caption     String?
-  createdAt   DateTime @default(now()) @map("created_at")
+  id         String           @id @default(uuid())
+  bookingId  String           @map("booking_id")
+  uploaderId String           @map("uploader_id")
+  type       ServicePhotoType
+  url        String
+  caption    String?
+  createdAt  DateTime         @default(now()) @map("created_at")
 
   booking  Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   uploader User    @relation("ServicePhotos", fields: [uploaderId], references: [id])
@@ -785,13 +785,13 @@ model EmergencyContact {
 // Provider Location (real-time GPS during service)
 // ──────────────────────────────────────────────
 model ProviderLocation {
-  id          String   @id @default(uuid())
-  providerId  String   @map("provider_id")
-  bookingId   String?  @map("booking_id")
-  lat         Float
-  lng         Float
-  accuracy    Float?
-  updatedAt   DateTime @default(now()) @map("updated_at")
+  id         String   @id @default(uuid())
+  providerId String   @map("provider_id")
+  bookingId  String?  @map("booking_id")
+  lat        Float
+  lng        Float
+  accuracy   Float?
+  updatedAt  DateTime @default(now()) @map("updated_at")
 
   provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
 
@@ -809,7 +809,7 @@ model SosAlert {
   triggeredBy String    @map("triggered_by")
   lat         Float?
   lng         Float?
-  status      String    @default("active")    // "active", "resolved", "false_alarm"
+  status      String    @default("active") // "active", "resolved", "false_alarm"
   resolvedAt  DateTime? @map("resolved_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
@@ -828,7 +828,7 @@ model DeviceToken {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
   token     String   @unique
-  platform  String   @default("web")     // "web", "android", "ios"
+  platform  String   @default("web") // "web", "android", "ios"
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -843,16 +843,16 @@ model DeviceToken {
 // Notification Preferences (per-user settings)
 // ──────────────────────────────────────────────
 model NotificationPreference {
-  id                String  @id @default(uuid())
-  userId            String  @unique @map("user_id")
-  bookingUpdates    Boolean @default(true) @map("booking_updates")
-  messages          Boolean @default(true)
-  promotions        Boolean @default(true)
-  weeklyReport      Boolean @default(true) @map("weekly_report")
-  pushEnabled       Boolean @default(true) @map("push_enabled")
-  whatsappEnabled   Boolean @default(true) @map("whatsapp_enabled")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
+  bookingUpdates  Boolean  @default(true) @map("booking_updates")
+  messages        Boolean  @default(true)
+  promotions      Boolean  @default(true)
+  weeklyReport    Boolean  @default(true) @map("weekly_report")
+  pushEnabled     Boolean  @default(true) @map("push_enabled")
+  whatsappEnabled Boolean  @default(true) @map("whatsapp_enabled")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -865,10 +865,10 @@ model NotificationPreference {
 model Notification {
   id        String    @id @default(uuid())
   userId    String    @map("user_id")
-  type      String                          // "booking_update", "message", "rating", "system", "promotion"
+  type      String // "booking_update", "message", "rating", "system", "promotion"
   title     String
   body      String
-  data      Json?                           // Arbitrary metadata (bookingId, etc.)
+  data      Json? // Arbitrary metadata (bookingId, etc.)
   imageUrl  String?   @map("image_url")
   readAt    DateTime? @map("read_at")
   createdAt DateTime  @default(now()) @map("created_at")
