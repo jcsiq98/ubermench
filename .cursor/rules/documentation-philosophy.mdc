@@ -14,5 +14,7 @@ Read the canonical file for full principles. Summary below as fallback.
 1. **Deja rastro.** Every significant decision must be written down, not remembered.
 2. **Depth when it matters.** Routine → commit message. Architecture/pivots → document the why + alternatives. Critical bugs → document root cause.
 3. **Why > What.** Code says what. Docs say why and what was discarded.
-4. **Formats:** `HISTORIA_DECISIONES.md` for strategy, `PIVOT_MILESTONES.md` for roadmap, commit messages with intent, `.sanctuary/*.md` for AI agent context.
-5. **The chain doesn't break.** Ask: "Would someone arriving in 6 months understand why this exists?"
+4. **Explicit epistemic weight.** Tag claims per `.sanctuary/epistemic-status.md`. Untagged strategic narrative defaults to `[andamio]`, not law.
+5. **Formats:** `HISTORIA_DECISIONES.md` for strategy, `PIVOT_MILESTONES.md` for roadmap, commit messages with intent, `.sanctuary/*.md` for AI agent context.
+6. **The chain doesn't break.** Ask: "Would someone arriving in 6 months understand why this exists?"
+7. **Mirrors point, they don't assert.** Cross-tool files (this one included) only summarize and route to canonical. No fast-aging facts (counts, metrics) in mirrors. Editing a `.sanctuary/` file includes reviewing its mirrors.

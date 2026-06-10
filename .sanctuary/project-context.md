@@ -8,6 +8,10 @@
 
 AI Business Assistant for independent trades workers (plomeros, electricistas, albañiles) in Mexico. WhatsApp-based business assistant powered by LLM: income tracking, scheduling, invoicing, CRM.
 
+## Foco actual (actualizar en cada reescritura de roadmap)
+
+> **Junio 10, 2026 — Cap. 57:** dos frentes en paralelo. **A:** primer loop de dinero (lectura del ledger → reactivación → cobranza → pesos atribuibles). **B:** distribución fuera del círculo del founder (diagnóstico del freno → pitch de dinero → 3-5 usuarios externos). Pregunta organizadora: *¿puede Chalán ponerle pesos en la mano a un trabajador que el founder no conoce?* Detalle: `ubermench-docs/proyecto/PIVOT_MILESTONES.md`.
+
 ## Philosophy
 
 This project exists to empower, not to extract. The trades workers we serve — plomeros, electricistas, albañiles — are people who build the world with their hands. They don't need another platform taking a cut. They need tools that make them stronger.

@@ -25,3 +25,8 @@
    - `.sanctuary/*.md` — contexto persistente para agentes AI
 
 6. **La cadena no se rompe.** Cuando hagas un cambio significativo, pregúntate: "¿alguien que llegue en 6 meses entendería por qué esto existe?" Si la respuesta es no, documenta.
+
+7. **Los espejos apuntan, no afirman.** Los archivos cross-tool (`.cursor/rules/*.mdc`, `CLAUDE.md`, `.windsurfrules`, `.github/copilot-instructions.md`) son espejos del canónico en `.sanctuary/`. Reglas:
+   - Un espejo solo *resume y apunta*. Nunca contiene un hecho que no esté en el canónico, y nunca contiene hechos que envejecen rápido (conteos, métricas, números de versión) — esos viven solo en el canónico, con fecha.
+   - Editar un archivo de `.sanctuary/` incluye revisar sus espejos en el mismo movimiento. Si el resumen del espejo ya no refleja el canónico, se corrige ahí mismo.
+   - *Por qué existe esta regla:* el 10 de junio de 2026 se encontraron dos espejos derivados — uno listaba 5 principios cuando el canónico tenía 6, otro decía "26 tools" cuando el código tenía 31. La deriva no es hipotética; es cuestión de tiempo.

@@ -17,7 +17,9 @@ Ubermench: AI Business Assistant for trades workers in Mexico via WhatsApp. Bot 
 
 **3 repos:** `~/ubermench/` (code), `~/ubermench-docs/` (docs), `~/ubermench-strategy/` (strategy).
 
-**Key modules:** `ai/` (OpenAI function calling, 26 tools in `ai.tools.ts`), `workspace/` (provider profile, cache-first), `income/`, `expense/` (puntual + recurring), `appointments/` (CRUD + timezone-aware), `whatsapp/` (webhook, dedup via setNX), `reminders/`, `contacts/` (CRM), `payments/` (Stripe Connect Express).
+**Key modules:** `ai/` (OpenAI function calling, tools in `ai.tools.ts`), `workspace/` (provider profile, cache-first), `income/`, `expense/` (puntual + recurring), `appointments/` (CRUD + timezone-aware), `whatsapp/` (webhook, dedup via setNX), `reminders/`, `contacts/` (CRM), `payments/` (Stripe Connect Express).
+
+**Current focus:** see "Foco actual" in `.sanctuary/project-context.md` (updated on every roadmap rewrite).
 
 **Design decisions:** Intent classification via function calling (not prompt rules). All dates timezone-aware. Sanitize LLM-extracted optional fields server-side. Never push without explicit user approval.
 

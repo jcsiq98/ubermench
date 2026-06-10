@@ -2,7 +2,8 @@
 estatus: corriente
 fecha: 2026-06-09
 con: mythos (Fable 5, Cursor)
-madurez: germen
+madurez: en-desarrollo
+actualizado: 2026-06-10 — el roadmap nuevo (Cap. 57) operacionaliza ambas capas; la hipótesis sigue [corriente] hasta validarse con usuarios
 ---
 
 # El camino al dinero es la cartera existente — pero el limitante real es la distribución
@@ -49,9 +50,9 @@ Estos candidatos no son excluyentes; probablemente es una mezcla. Pero distingui
 
 ## Dónde quedó
 
-Sigue abierto. Dos hilos por madurar:
+**Actualización Junio 10, 2026:** las dos capas se volvieron la columna del roadmap nuevo (Cap. 57, `PIVOT_MILESTONES.md` reescrito):
 
-1. **Hipótesis de producto:** "el camino al dinero es la cartera existente" `[corriente — junio 2026, sin validar con usuarios]`. Se valida construyendo el primer loop (reactivación) y midiendo pesos atribuibles — pero solo tiene sentido cuando haya usuarios que lo usen.
-2. **Pregunta de fondo:** el limitante actual no es producto, es distribución — y dentro de distribución, falta diagnosticar el "x o y". Próximo paso sugerido: una sesión dedicada solo a reconstruir qué intentos de conseguir usuarios se han hecho desde Cap. 51, qué pasó con cada uno, y qué los detuvo. Con eso, el "x o y" deja de ser niebla y se vuelve diagnóstico.
+1. **Hipótesis de producto** → **Frente A** (loop del dinero): tools de lectura sobre el ledger (A0), reactivación (A1), cobranza (A2), métrica de pesos atribuibles (A3). Sigue `[corriente — sin validar con usuarios]`; el roadmap la operacionaliza, no la gradúa. Hallazgo que la reforzó: la revisión de código del Junio 10 mostró que el universo es write-side rico / read-side pobre — el gap arquitectónico y el de valor son el mismo.
+2. **Pregunta de fondo (el "x o y")** → **Frente B0** del roadmap: sesión de diagnóstico dedicada, la entrada más importante del documento. Sigue sin respuesta — esta exploración se actualiza cuando la tenga.
 
-Ninguna de las dos capas se gradúa todavía. Si la hipótesis de la cartera sobrevive al contacto con usuarios reales, se gradúa a `HISTORIA_DECISIONES.md`. Si el diagnóstico de distribución revela que el freno es de otro tipo, esta exploración se actualiza — para eso existe.
+La hipótesis se gradúa (o se descarta) cuando se cumpla el criterio de desmontaje del roadmap: un usuario externo que pueda decir, con datos, que Chalán le generó o recuperó dinero.

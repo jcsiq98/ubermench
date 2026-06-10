@@ -38,6 +38,19 @@ Hoy, cualquier cosa escrita sin fecha y con voz de verdad, un agente la trata co
 
 Una afirmación solo es `roca` si está marcada como tal o si es, evidentemente, una lección que costó dolor. Todo lo demás —especialmente las narrativas estratégicas sin fecha— se sostiene flojo hasta probar lo contrario. Con esa sola inversión se disuelve la mayor parte de la rigidez.
 
+## Fecha los hechos, no solo las hipótesis
+
+Las `[corriente]` llevan fecha por definición. Pero los hechos "duros" envejecen igual y nadie los vigila: "5 usuarios, 578 mensajes" medido en abril sigue apareciendo en documentos de junio con voz de presente, y el agente entrante lo lee como hoy.
+
+> **Todo número o hecho verificable lleva su fecha de medición.**
+
+```markdown
+- 5 usuarios, 578+ mensajes (medido abr 18, 2026)
+- 31 tools en ai.tools.ts (contado jun 10, 2026)
+```
+
+Un hecho fechado que envejeció es honesto — invita a re-medir. Un hecho sin fecha que envejeció es una mentira accidental con voz de verdad. Los hechos que cambian rápido (conteos, métricas) viven solo en su archivo canónico, nunca duplicados en espejos (ver `documentation-philosophy.md`, principio 7).
+
 ## La historia es roca-como-registro, no roca-como-verdad-eterna
 
 `HISTORIA_DECISIONES.md` es inmutable: registra **qué se decidió y cuándo**. Eso es `roca` en el sentido de "esto pasó, no lo reescribas". Pero el *contenido* de una decisión vieja puede ser un andamio que ya no aplica. No falsifiques el registro de que en abril creímos X; sí cuestiona si X sigue de pie hoy.
