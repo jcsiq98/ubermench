@@ -7,7 +7,7 @@
 
 Este archivo define un vocabulario para marcar **cuánta deferencia merece cada cosa escrita** en el santuario. No es burocracia: es la diferencia entre un río con bancos (que fluye) y una zanja llena de planes viejos (que no).
 
-## Las tres etiquetas
+## Las cuatro etiquetas
 
 ### `[roca]` — costó dolor o dinero. Sostenla firme.
 Lecciones pagadas, causas raíz, física del sistema. El costo fue real; la verdad no caduca con el momento.
@@ -23,6 +23,12 @@ Una verdad-como-herramienta, no una verdad-como-hecho. Su trabajo era darte dón
 Una conjetura informada por evidencia reciente, explícitamente provisional. Lleva fecha y, cuando se puede, la evidencia sobre la que descansa.
 - *Instrucción al agente:* **verifica contra el presente antes de usarla.** Si la evidencia se movió, la corriente se mueve.
 - *Ejemplos:* "Los plomeros prefieren X (abril, 5 entrevistas)". "La mayoría del uso real es por texto, no voz (gap conocido a junio)".
+
+### `[cauce]` — la forma tallada del camino. Léelo para entender la trayectoria, no para obedecerla.
+El registro de *cómo se llegó aquí*: los pivots, los giros, las tesis fundacionales y el razonamiento detrás del estado presente. Que pasó es inmutable —no reescribas la historia—, pero **no te ata**. El agua nueva tiende a seguir el cauce existente porque fluye más fácil, no porque esté obligada.
+- *Instrucción al agente:* **esto es combustible de asociación, no restricción.** Mínalo para entender el modelo mental del founder y extrapolar; apúntale agentes de pattern-finding aquí libremente. Nunca lo cites como "la decisión manda que X" — el cauce explica, no ordena. Si tu patrón sugiere tallar lecho nuevo, para eso se lee.
+- *Ejemplos:* el pivot de marketplace a asistente (Cap. 2), el estrechamiento de 5 usuarios a 1 (Cap. 15), Chalán como operador del negocio (Cap. 52).
+- *Cómo se distingue de sus vecinas:* la `corriente` es una hipótesis viva que **verificas**; el cauce es trayectoria cerrada que **asocias**. El `andamio` lo **desmontas**; el cauce no se desmonta, se **relee**.
 
 ## La regla que vale por todas: invierte el default
 
@@ -47,10 +53,11 @@ Pon la etiqueta junto a la afirmación, con contexto cuando sea corriente:
 - Stripe Connect validado en vivo (Cap. 50) [roca — funciona en producción]
 - Distribución a manos fuera del círculo del founder [corriente — abierto a junio 2026]
 - "El siguiente paso es conseguir un plomero externo" [andamio — portería de abril, revisar si sigue siendo el objetivo]
+- Pivot de marketplace a AI assistant (Cap. 2) [cauce — trayectoria, léelo para asociar, no para obedecer]
 ```
 
 Un documento entero puede declararse predominantemente de un tipo en su encabezado (ej. `architecture.md` es casi todo `roca` técnica) y solo marcar las excepciones.
 
 ---
 
-*Este sistema nació de una conversación de junio 2026 sobre por qué el agente defendía narrativas viejas. Ver `HISTORIA_DECISIONES.md` Cap. 55. Si en el futuro este vocabulario estorba más de lo que ayuda, es un andamio — desmóntalo.*
+*Este sistema nació de una conversación de junio 2026 sobre por qué el agente defendía narrativas viejas. Ver `HISTORIA_DECISIONES.md` Cap. 55; la cuarta etiqueta `[cauce]` se agregó en Cap. 56. Si en el futuro este vocabulario estorba más de lo que ayuda, es un andamio — desmóntalo.*

@@ -15,11 +15,13 @@
 
 3. **El porqué > el qué.** El código dice *qué* hace. La documentación debe decir *por qué* se hizo así y *qué se descartó*.
 
-4. **Formatos según contexto:**
+4. **Peso epistémico explícito.** No toda documentación merece la misma deferencia. Marca o sostiene cada afirmación según `.sanctuary/epistemic-status.md`: `[roca]` para lecciones pagadas, `[andamio]` para verdades útiles de arranque, `[corriente]` para hipótesis fechadas. Una narrativa estratégica sin etiqueta se trata como `[andamio]` por default, no como ley.
+
+5. **Formatos según contexto:**
    - `ubermench-docs/proyecto/HISTORIA_DECISIONES.md` — decisiones estratégicas y pivotes
    - `ubermench-docs/proyecto/PIVOT_MILESTONES.md` — hitos del roadmap
    - Commit messages — concisos pero con *intent* (no "fix bug" sino "fix: onboarding crash when Cloudinary is not configured in dev")
    - Code comments — solo para lógica no obvia o trade-offs técnicos
    - `.sanctuary/*.md` — contexto persistente para agentes AI
 
-5. **La cadena no se rompe.** Cuando hagas un cambio significativo, pregúntate: "¿alguien que llegue en 6 meses entendería por qué esto existe?" Si la respuesta es no, documenta.
+6. **La cadena no se rompe.** Cuando hagas un cambio significativo, pregúntate: "¿alguien que llegue en 6 meses entendería por qué esto existe?" Si la respuesta es no, documenta.
