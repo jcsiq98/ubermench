@@ -7,6 +7,8 @@ alwaysApply: true
 
 **Canonical source:** `.sanctuary/project-context.md` + `.sanctuary/architecture.md`
 
+**Landing protocol:** read `.sanctuary/BITACORA.md` (last 3-5 entries) before operating — the project is worked from multiple tools and your snapshot may be stale. Log significant sessions there. For strategic work, re-read "Estado Real" in `ubermench-docs/proyecto/PIVOT_MILESTONES.md` + the latest chapter of `HISTORIA_DECISIONES.md`.
+
 Read the canonical files for full context. Summary below as fallback.
 
 ## Summary

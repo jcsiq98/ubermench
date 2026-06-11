@@ -22,10 +22,12 @@ Three repos:
 
 ## Session Start Protocol
 
-1. Read `.sanctuary/project-context.md` and `.sanctuary/architecture.md`
-2. If user says "modo colaboración" → read `.sanctuary/collaboration-rules.md`
-3. If user says "research mode" → read `.sanctuary/methodologies/research-mode.md`
-4. For all triggers → see `.sanctuary/user-keywords.md`
+1. Read `.sanctuary/BITACORA.md` (last 3-5 entries) — what changed since you last looked. Log your own session there if it changes something significant.
+2. Read `.sanctuary/project-context.md` and `.sanctuary/architecture.md`
+3. For strategic work: re-read "Estado Real" in `~/ubermench-docs/proyecto/PIVOT_MILESTONES.md` + latest chapter of `HISTORIA_DECISIONES.md`. Never assume docs read in a past session are unchanged.
+4. If user says "modo colaboración" → read `.sanctuary/collaboration-rules.md`
+5. If user says "research mode" → read `.sanctuary/methodologies/research-mode.md`
+6. For all triggers → see `.sanctuary/user-keywords.md`
 
 ## Key Paths
 

@@ -66,19 +66,23 @@ See `proyecto/HISTORIA_DECISIONES.md` Chapter 20 for the full rationale.
 - **José Carlos (founder):** +526565884840 — personal number used for testing. User "José Carlos", role PROVIDER, trade "trabajador independiente." Timezone: America/Mexico_City (default).
 - **Oscar Perez (co-founder):** +526563954480 — active user in Miami. User "Oscar Perez", role PROVIDER, trade "electricista." Timezone: America/New_York. First non-CDMX user — triggered timezone implementation (Cap. 37).
 
+**⚠️ Sobre TODOS los usuarios de producción (a junio 2026, Cap. 58):** son T0 (founders) o T1 (familia/amigos invitados). **Los oficios registrados en la DB son ficticios** — pruebas de onboarding, no segmento real. No leer la lista de `/api/internal/users` como composición de mercado. Taxonomía T0-T3 y regla de peso de evidencia: Cap. 58.
+
 ## Internal Observability Endpoints (verify-token protected)
 
 - `GET /api/internal/users` — List all users with message counts
 - `GET /api/internal/users/:phone/conversation?limit=50` — Full conversation, profile, appointments for any phone. Handles all Mexican phone format variants
 - `PATCH /api/internal/users/by-phone/:phone` — Fix user data (name, etc.)
 
-## Legacy Marketplace ("Handy") — retirado del runtime (Cap. 54, Mayo 28, 2026)
+## Legacy Marketplace ("Handy") — retirado (Cap. 54 Etapa A, Cap. 59 Etapa A2)
 
-El código marketplace **ya no vive en este repo**. Fue archivado en `/home/jcsiq98/handy-legacy/` (fuera de git). Chalán ya no importa ni ejecuta bookings/messages/ratings.
+El código marketplace **ya no vive en este repo**. Archivado en `/home/jcsiq98/handy-legacy/` (fuera de git): runtime marketplace (Cap. 54, mayo 28), módulos vestigiales + UI web marketplace (Cap. 59, junio 11). El backend activo tiene 13 módulos; `web/` expone solo landing de Chalán + `/payment/*` + `/privacy`.
 
-**Aún presente pero dormido:**
-- Tablas Prisma (`Booking`, `Message`, `Rating`, etc.) — schema intacto, Etapa B pendiente
-- Módulos marketplace-adjacentes aún registrados: `providers/`, `zones/`, `addresses/`, `provider-dashboard/`, `onboarding/` (web flow), `verification/`, `notifications/`
-- Frontend `web/` con UI marketplace y cookies `handy_*`
+**Aún presente pero dormido (sale con Etapa B, solo vía staging):**
+- Tablas Prisma (`Booking`, `Message`, `Rating`, `Zone`, etc.) — schema intacto
+- Campo `tier` en `ProviderProfile`
+- Fallbacks de secretos dev con nombre `handy-*` y salt PII `handy-pii-salt` (este último NO renombrable sin re-cifrar datos)
+
+**Pendiente con cara al usuario:** `/privacy` aún cita "Handy Technologies, S.A.P.I. de C.V." y `privacidad@handy.mx` — entidad legal y correo los decide el founder.
 
 Do NOT reactivar marketplace sin decisión explícita documentada en `HISTORIA_DECISIONES.md`.

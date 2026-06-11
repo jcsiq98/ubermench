@@ -23,6 +23,10 @@ This sanctuary is, in part, a letter to its next reader. Leave it better: tag wh
 
 ## Knowledge Map
 
+### Read First, Every Session (Landing Protocol)
+- `.sanctuary/BITACORA.md` — Cross-tool session log: what changed since you last looked. **Read the last 3-5 entries before operating; add one line when your session changes something significant.** The project is worked from multiple tools — without this, you operate on a stale snapshot. This protocol exists because on June 11 an agent nearly overwrote a roadmap rewritten the day before in another session.
+- For strategic work, also re-read: "Estado Real" in `ubermench-docs/proyecto/PIVOT_MILESTONES.md` + the latest chapter of `HISTORIA_DECISIONES.md`. Never assume documents you read in a previous session are unchanged.
+
 ### Always Read (Core Context)
 - `.sanctuary/project-context.md` — What the product is, current state, identity, testing accounts, observability
 - `.sanctuary/architecture.md` — Technical architecture, backend modules, design decisions, git protocol

@@ -1,6 +1,7 @@
 # Ubermench — GitHub Copilot Context
 
 Read `.sanctuary/ONBOARDING.md` for full project context.
+Then read `.sanctuary/BITACORA.md` (last 3-5 entries) — what changed since you last looked. Log significant sessions there.
 
 ## Quick Context
 
