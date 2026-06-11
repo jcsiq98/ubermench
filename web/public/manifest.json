@@ -1,16 +1,16 @@
 {
-  "name": "Handy — Servicios a tu alcance",
-  "short_name": "Handy",
-  "description": "Conectamos a jóvenes con los mejores prestadores de servicios del hogar. Plomería, electricidad, limpieza y más.",
+  "name": "Chalán — Tu ayudante de negocio por WhatsApp",
+  "short_name": "Chalán",
+  "description": "Dile a Chalán qué cobraste, qué gastaste o qué cita tienes. Él te lleva las cuentas, los clientes y los pendientes por WhatsApp.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#6366f1",
+  "theme_color": "#16a34a",
   "orientation": "portrait",
   "id": "/",
   "scope": "/",
   "lang": "es-MX",
-  "categories": ["lifestyle", "utilities"],
+  "categories": ["business", "productivity"],
   "prefer_related_applications": false,
   "icons": [
     {
@@ -39,30 +39,5 @@
     }
   ],
   "screenshots": [],
-  "shortcuts": [
-    {
-      "name": "Mis Solicitudes",
-      "short_name": "Solicitudes",
-      "url": "/bookings",
-      "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192" }]
-    },
-    {
-      "name": "Buscar Proveedores",
-      "short_name": "Buscar",
-      "url": "/providers",
-      "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192" }]
-    },
-    {
-      "name": "Panel Proveedor",
-      "short_name": "Proveedor",
-      "url": "/provider",
-      "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192" }]
-    },
-    {
-      "name": "Notificaciones",
-      "short_name": "Notificaciones",
-      "url": "/notifications",
-      "icons": [{ "src": "/icons/icon-192.svg", "sizes": "192x192" }]
-    }
-  ]
+  "shortcuts": []
 }

@@ -10,21 +10,14 @@ import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './config/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
-import { ProvidersModule } from './modules/providers/providers.module';
-import { ZonesModule } from './modules/zones/zones.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { AiModule } from './modules/ai/ai.module';
 import { IncomeModule } from './modules/income/income.module';
 import { ExpenseModule } from './modules/expense/expense.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
-import { OnboardingModule } from './modules/onboarding/onboarding.module';
-import { AddressesModule } from './modules/addresses/addresses.module';
-import { ProviderDashboardModule } from './modules/provider-dashboard/provider-dashboard.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AdminModule } from './modules/admin/admin.module';
-import { VerificationModule } from './modules/verification/verification.module';
-import { NotificationsModule } from './modules/notifications/notifications.module';
 import { QueueModule } from './common/queues/queue.module';
 import { CryptoModule } from './common/crypto/crypto.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
@@ -116,14 +109,7 @@ const isProd = process.env.NODE_ENV === 'production';
 
     // Feature modules
     UsersModule,
-    ProvidersModule,
-    ZonesModule,
-    OnboardingModule,
-    AddressesModule,
-    ProviderDashboardModule,
     AdminModule,
-    VerificationModule,
-    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [

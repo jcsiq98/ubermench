@@ -36,22 +36,6 @@ export class UsersController {
     return this.usersService.updateProfile(req.user.id, body);
   }
 
-  @Get('me/history')
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get booking history for current user' })
-  async getMyHistory(
-    @Req() req: any,
-    @Query('limit') limit?: string,
-    @Query('offset') offset?: string,
-    @Query('status') status?: string,
-  ) {
-    return this.usersService.getBookingHistory(req.user.id, {
-      limit: limit ? parseInt(limit) : undefined,
-      offset: offset ? parseInt(offset) : undefined,
-      status,
-    });
-  }
-
   @Delete('me/account')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete current user account (ARCO compliance)' })

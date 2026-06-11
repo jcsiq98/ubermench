@@ -43,7 +43,7 @@ export class AppController {
 
     return {
       status: allOk ? 'ok' : 'degraded',
-      service: 'handy-api',
+      service: 'ubermench-api',
       timestamp: new Date().toISOString(),
       uptime: Math.round(process.uptime()),
       components: {

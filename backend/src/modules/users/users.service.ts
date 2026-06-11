@@ -39,20 +39,8 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
-        providerProfile: {
-          include: {
-            serviceZones: { include: { zone: true } },
-            trustScore: { select: { score: true } },
-          },
-        },
+        providerProfile: true,
         savedAddresses: { orderBy: { createdAt: 'desc' } },
-        _count: {
-          select: {
-            bookingsAsCustomer: true,
-            ratingsGiven: true,
-            ratingsReceived: true,
-          },
-        },
       },
     });
 
@@ -65,83 +53,10 @@ export class UsersService {
       email: user.email,
       avatarUrl: user.avatarUrl,
       role: user.role,
-      ratingAverage: user.ratingAverage,
-      ratingCount: user.ratingCount,
       isActive: user.isActive,
       createdAt: user.createdAt,
       providerProfile: user.providerProfile,
       savedAddresses: user.savedAddresses,
-      stats: {
-        totalBookings: user._count.bookingsAsCustomer,
-        ratingsGiven: user._count.ratingsGiven,
-        ratingsReceived: user._count.ratingsReceived,
-      },
-    };
-  }
-
-  async getBookingHistory(
-    userId: string,
-    params: { limit?: number; offset?: number; status?: string } = {},
-  ) {
-    const { limit = 20, offset = 0, status } = params;
-
-    const where: any = { customerId: userId };
-    if (status === 'completed') {
-      where.status = { in: ['COMPLETED', 'RATED'] };
-    } else if (status === 'cancelled') {
-      where.status = { in: ['CANCELLED', 'REJECTED'] };
-    } else if (status === 'active') {
-      where.status = {
-        in: ['PENDING', 'ACCEPTED', 'PROVIDER_ARRIVING', 'IN_PROGRESS'],
-      };
-    }
-
-    const [data, total] = await Promise.all([
-      this.prisma.booking.findMany({
-        where,
-        include: {
-          category: { select: { id: true, name: true, slug: true, icon: true } },
-          provider: {
-            include: {
-              user: {
-                select: { id: true, name: true, avatarUrl: true },
-              },
-            },
-          },
-          ratings: {
-            where: { fromUserId: userId },
-            select: { score: true },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-        skip: offset,
-      }),
-      this.prisma.booking.count({ where }),
-    ]);
-
-    return {
-      data: data.map((b) => ({
-        id: b.id,
-        status: b.status,
-        description: b.description,
-        address: b.address,
-        price: b.price,
-        createdAt: b.createdAt,
-        completedAt: b.completedAt,
-        category: b.category,
-        provider: b.provider
-          ? {
-              id: b.provider.id,
-              name: b.provider.user.name,
-              avatarUrl: b.provider.user.avatarUrl,
-            }
-          : null,
-        myRating: b.ratings[0]?.score || null,
-      })),
-      total,
-      limit,
-      offset,
     };
   }
 

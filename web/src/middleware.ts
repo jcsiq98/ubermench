@@ -1,44 +1,8 @@
 import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
 
-// Routes that don't require authentication
-const PUBLIC_PATHS = [
-  '/login',
-  '/login/verify',
-  '/registro-proveedor',
-  '/verify',
-  '/payment', // Stripe onboarding + checkout return pages (no Handy auth)
-];
-
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-
-  // Allow public paths, static files, and API routes
-  if (
-    PUBLIC_PATHS.some((path) => pathname.startsWith(path)) ||
-    pathname.startsWith('/_next') ||
-    pathname.startsWith('/api') ||
-    pathname.includes('.') // static files (favicon, manifest, icons)
-  ) {
-    return NextResponse.next();
-  }
-
-  // Check for auth cookie
-  const authCookie = request.cookies.get('handy_auth');
-
-  if (!authCookie) {
-    // Redirect to login
-    const loginUrl = new URL('/login', request.url);
-    return NextResponse.redirect(loginUrl);
-  }
-
+// All remaining routes are public: landing, /payment (Stripe return pages),
+// /privacy. The marketplace auth flow (handy_auth cookie) was retired with
+// Handy — see HISTORIA_DECISIONES.md Cap. 59.
+export function middleware() {
   return NextResponse.next();
 }
-
-export const config = {
-  matcher: [
-    // Match all paths except _next/static, _next/image, favicon
-    '/((?!_next/static|_next/image|favicon.ico).*)',
-  ],
-};
-
