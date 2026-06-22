@@ -25,6 +25,7 @@ import { ProviderModelModule } from './modules/provider-model/provider-model.mod
 import { RemindersModule } from './modules/reminders/reminders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
+import { ExchangeRateModule } from './modules/exchange-rate/exchange-rate.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -39,7 +40,10 @@ const isProd = process.env.NODE_ENV === 'production';
         level: isProd ? 'info' : 'debug',
         transport: isProd
           ? undefined
-          : { target: 'pino-pretty', options: { colorize: true, singleLine: true } },
+          : {
+              target: 'pino-pretty',
+              options: { colorize: true, singleLine: true },
+            },
         autoLogging: {
           ignore: (req: any) =>
             req.url === '/api/health' || req.url === '/api/health/whatsapp',
@@ -76,6 +80,9 @@ const isProd = process.env.NODE_ENV === 'production';
 
     // AI (global)
     AiModule,
+
+    // Exchange rates (global)
+    ExchangeRateModule,
 
     // Income tracking (global)
     IncomeModule,

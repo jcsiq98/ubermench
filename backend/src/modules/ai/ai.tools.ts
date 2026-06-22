@@ -133,7 +133,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           description: {
             type: 'string',
-            description: 'Descripción del trabajo (ej: "fuga en baño", "instalación eléctrica").',
+            description:
+              'Descripción del trabajo (ej: "fuga en baño", "instalación eléctrica").',
           },
           paymentMethod: {
             type: 'string',
@@ -146,7 +147,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           date: {
             type: 'string',
-            description: 'Fecha del ingreso si es diferente a hoy. Usar palabra relativa ("ayer", "antier", "el lunes") o nombre del día ("martes", "viernes"). Solo usar YYYY-MM-DD si el usuario da fecha numérica exacta. Si no se menciona fecha, NO incluir — se asume hoy.',
+            description:
+              'Fecha del ingreso si es diferente a hoy. Usar palabra relativa ("ayer", "antier", "el lunes") o nombre del día ("martes", "viernes"). Solo usar YYYY-MM-DD si el usuario da fecha numérica exacta. Si no se menciona fecha, NO incluir — se asume hoy.',
           },
         },
         required: ['amount'],
@@ -166,20 +168,47 @@ export const AI_TOOLS: ChatCompletionTool[] = [
         properties: {
           amount: {
             type: 'number',
-            description: 'Monto gastado.',
+            description: 'Monto gastado en la moneda que mencionó el usuario.',
+          },
+          currency: {
+            type: 'string',
+            enum: [
+              'MXN',
+              'USD',
+              'EUR',
+              'CAD',
+              'GBP',
+              'JPY',
+              'BRL',
+              'ARS',
+              'COP',
+              'CLP',
+              'PEN',
+            ],
+            description:
+              'Código ISO 4217 de la moneda del monto. Usar USD para dólares/dlls/dls, MXN para pesos. Si no se menciona moneda, NO incluir — se asume MXN.',
           },
           category: {
             type: 'string',
-            enum: ['material', 'herramienta', 'transporte', 'servicios', 'comida', 'otro'],
+            enum: [
+              'material',
+              'herramienta',
+              'transporte',
+              'servicios',
+              'comida',
+              'otro',
+            ],
             description: 'Categoría del gasto.',
           },
           description: {
             type: 'string',
-            description: 'Descripción breve del gasto (ej: "tubo de cobre", "gasolina").',
+            description:
+              'Descripción breve del gasto (ej: "tubo de cobre", "gasolina").',
           },
           date: {
             type: 'string',
-            description: 'Fecha del gasto si es diferente a hoy. Usar palabra relativa ("ayer", "antier", "el lunes") o nombre del día ("martes", "viernes"). Solo usar YYYY-MM-DD si el usuario da fecha numérica exacta. Si no se menciona fecha, NO incluir — se asume hoy.',
+            description:
+              'Fecha del gasto si es diferente a hoy. Usar palabra relativa ("ayer", "antier", "el lunes") o nombre del día ("martes", "viernes"). Solo usar YYYY-MM-DD si el usuario da fecha numérica exacta. Si no se menciona fecha, NO incluir — se asume hoy.',
           },
         },
         required: ['amount'],
@@ -192,8 +221,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'borrar_ultimo_gasto',
-      description:
-        'Borrar/eliminar/quitar el último gasto registrado.',
+      description: 'Borrar/eliminar/quitar el último gasto registrado.',
       parameters: {
         type: 'object',
         properties: {},
@@ -211,7 +239,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
         properties: {
           description: {
             type: 'string',
-            description: 'Nombre o descripción del gasto a eliminar. Usar la descripción exacta de "Gastos recientes" si está disponible.',
+            description:
+              'Nombre o descripción del gasto a eliminar. Usar la descripción exacta de "Gastos recientes" si está disponible.',
           },
         },
         required: ['description'],
@@ -222,8 +251,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'corregir_ultimo_gasto',
-      description:
-        'Corregir/editar el monto del último gasto registrado.',
+      description: 'Corregir/editar el monto del último gasto registrado.',
       parameters: {
         type: 'object',
         properties: {
@@ -253,11 +281,19 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           description: {
             type: 'string',
-            description: 'Qué se paga (ej: "renta", "luz", "Netflix", "Railway").',
+            description:
+              'Qué se paga (ej: "renta", "luz", "Netflix", "Railway").',
           },
           category: {
             type: 'string',
-            enum: ['material', 'herramienta', 'transporte', 'servicios', 'comida', 'otro'],
+            enum: [
+              'material',
+              'herramienta',
+              'transporte',
+              'servicios',
+              'comida',
+              'otro',
+            ],
             description: 'Categoría del gasto.',
           },
           frequency: {
@@ -285,11 +321,13 @@ export const AI_TOOLS: ChatCompletionTool[] = [
         properties: {
           description: {
             type: 'string',
-            description: 'Nombre del gasto a cancelar. Usar descripción exacta de "Gastos recurrentes activos" si disponible.',
+            description:
+              'Nombre del gasto a cancelar. Usar descripción exacta de "Gastos recurrentes activos" si disponible.',
           },
           dayOfMonth: {
             type: 'number',
-            description: 'Día del mes del gasto a cancelar. IMPORTANTE: incluir si el usuario menciona un día para desambiguar entre gastos con el mismo nombre (ej: "cancela Railway del día 15" → dayOfMonth=15).',
+            description:
+              'Día del mes del gasto a cancelar. IMPORTANTE: incluir si el usuario menciona un día para desambiguar entre gastos con el mismo nombre (ej: "cancela Railway del día 15" → dayOfMonth=15).',
           },
         },
         required: ['description'],
@@ -352,7 +390,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
         properties: {
           period: {
             type: 'string',
-            description: 'Periodo a consultar. "esta semana" (default), "este mes", "hoy", "ayer", "la semana pasada", "el mes pasado", "marzo", "enero 2026", o un rango como "del 1 al 15 de abril". Si no se menciona periodo, NO incluir — se asume esta semana.',
+            description:
+              'Periodo a consultar. "esta semana" (default), "este mes", "hoy", "ayer", "la semana pasada", "el mes pasado", "marzo", "enero 2026", o un rango como "del 1 al 15 de abril". Si no se menciona periodo, NO incluir — se asume esta semana.',
           },
         },
       },
@@ -369,15 +408,18 @@ export const AI_TOOLS: ChatCompletionTool[] = [
         properties: {
           query: {
             type: 'string',
-            description: 'Texto clave a buscar en el historial. Puede ser nombre de cliente, tema, frase o dato recordado.',
+            description:
+              'Texto clave a buscar en el historial. Puede ser nombre de cliente, tema, frase o dato recordado.',
           },
           includeAssistant: {
             type: 'boolean',
-            description: 'Si true, incluye también mensajes previos del asistente. Por default busca solo mensajes del usuario.',
+            description:
+              'Si true, incluye también mensajes previos del asistente. Por default busca solo mensajes del usuario.',
           },
           limit: {
             type: 'number',
-            description: 'Máximo de snippets a devolver. Usa pocos resultados; default 5.',
+            description:
+              'Máximo de snippets a devolver. Usa pocos resultados; default 5.',
           },
         },
         required: ['query'],
@@ -402,7 +444,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           time: {
             type: 'string',
-            description: 'Hora en formato HH:MM (24h). "a las 2" = "14:00", "a las 10" = "10:00".',
+            description:
+              'Hora en formato HH:MM (24h). "a las 2" = "14:00", "a las 10" = "10:00".',
           },
           clientName: {
             type: 'string',
@@ -422,11 +465,13 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           reminderMinutes: {
             type: 'number',
-            description: 'Minutos de anticipación para el recordatorio. "recuérdame 10 min antes" = 10, "avísame 1 hora antes" = 60, "media hora antes" = 30. Solo incluir si el usuario pide recordatorio.',
+            description:
+              'Minutos de anticipación para el recordatorio. "recuérdame 10 min antes" = 10, "avísame 1 hora antes" = 60, "media hora antes" = 30. Solo incluir si el usuario pide recordatorio.',
           },
           estimatedPrice: {
             type: 'number',
-            description: 'Monto estimado que el cliente pagará por este trabajo. "me va a pagar 3000" = 3000, "cobro 1500" = 1500. Solo incluir si el usuario menciona un precio/monto para esta cita.',
+            description:
+              'Monto estimado que el cliente pagará por este trabajo. "me va a pagar 3000" = 3000, "cobro 1500" = 1500. Solo incluir si el usuario menciona un precio/monto para esta cita.',
           },
         },
         required: ['date'],
@@ -444,23 +489,28 @@ export const AI_TOOLS: ChatCompletionTool[] = [
         properties: {
           clientName: {
             type: 'string',
-            description: 'Nombre del cliente de la cita a modificar (para identificar cuál cita).',
+            description:
+              'Nombre del cliente de la cita a modificar (para identificar cuál cita).',
           },
           date: {
             type: 'string',
-            description: 'Fecha original de la cita (para identificar cuál). Usar "hoy", "mañana", día de la semana, o YYYY-MM-DD.',
+            description:
+              'Fecha original de la cita (para identificar cuál). Usar "hoy", "mañana", día de la semana, o YYYY-MM-DD.',
           },
           time: {
             type: 'string',
-            description: 'Hora original de la cita (para identificar cuál). Formato HH:MM (24h).',
+            description:
+              'Hora original de la cita (para identificar cuál). Formato HH:MM (24h).',
           },
           newDate: {
             type: 'string',
-            description: 'Nueva fecha. Usar "hoy", "mañana", día de la semana, o YYYY-MM-DD.',
+            description:
+              'Nueva fecha. Usar "hoy", "mañana", día de la semana, o YYYY-MM-DD.',
           },
           newTime: {
             type: 'string',
-            description: 'Nueva hora en formato HH:MM (24h). "a las 2" = "14:00".',
+            description:
+              'Nueva hora en formato HH:MM (24h). "a las 2" = "14:00".',
           },
           newAddress: {
             type: 'string',
@@ -472,11 +522,13 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           reminderMinutes: {
             type: 'number',
-            description: 'Nuevos minutos de anticipación para recordatorio. "recuérdame 10 min antes" = 10. Solo incluir si el usuario pide cambiar el recordatorio.',
+            description:
+              'Nuevos minutos de anticipación para recordatorio. "recuérdame 10 min antes" = 10. Solo incluir si el usuario pide cambiar el recordatorio.',
           },
           newEstimatedPrice: {
             type: 'number',
-            description: 'Nuevo monto estimado si el usuario quiere corregir el precio. "no, van a ser 2000" = 2000.',
+            description:
+              'Nuevo monto estimado si el usuario quiere corregir el precio. "no, van a ser 2000" = 2000.',
           },
         },
       },
@@ -497,7 +549,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           date: {
             type: 'string',
-            description: 'Fecha de la cita a cancelar. Usar "hoy", "mañana", día de la semana, o YYYY-MM-DD.',
+            description:
+              'Fecha de la cita a cancelar. Usar "hoy", "mañana", día de la semana, o YYYY-MM-DD.',
           },
           time: {
             type: 'string',
@@ -519,7 +572,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           status: {
             type: 'string',
             enum: ['completed', 'no_show', 'cancelled'],
-            description: 'Resultado: completed (sí se hizo), no_show (no llegó/no se presentó), cancelled (se canceló).',
+            description:
+              'Resultado: completed (sí se hizo), no_show (no llegó/no se presentó), cancelled (se canceló).',
           },
           clientName: {
             type: 'string',
@@ -527,20 +581,24 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           date: {
             type: 'string',
-            description: 'Fecha de la cita. Usar "hoy", "mañana", día de la semana, o YYYY-MM-DD.',
+            description:
+              'Fecha de la cita. Usar "hoy", "mañana", día de la semana, o YYYY-MM-DD.',
           },
           time: {
             type: 'string',
-            description: 'Hora de la cita. Formato HH:MM (24h). "la de las 3pm" = "15:00".',
+            description:
+              'Hora de la cita. Formato HH:MM (24h). "la de las 3pm" = "15:00".',
           },
           amount: {
             type: 'number',
-            description: 'Monto cobrado por la cita completada si el usuario lo menciona. "sí, cobré 1500" = 1500.',
+            description:
+              'Monto cobrado por la cita completada si el usuario lo menciona. "sí, cobré 1500" = 1500.',
           },
           paymentMethod: {
             type: 'string',
             enum: ['CASH', 'TRANSFER', 'CARD', 'OTHER'],
-            description: 'Método de pago si lo menciona. efectivo=CASH, transferencia=TRANSFER, tarjeta=CARD.',
+            description:
+              'Método de pago si lo menciona. efectivo=CASH, transferencia=TRANSFER, tarjeta=CARD.',
           },
         },
         required: ['status'],
@@ -551,8 +609,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'ver_agenda',
-      description:
-        'Ver la agenda/citas de hoy y mañana.',
+      description: 'Ver la agenda/citas de hoy y mañana.',
       parameters: {
         type: 'object',
         properties: {},
@@ -577,7 +634,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           serviceName: {
             type: 'string',
-            description: 'Nombre del servicio (ej: "plomería", "electricidad").',
+            description:
+              'Nombre del servicio (ej: "plomería", "electricidad").',
           },
           servicePrice: {
             type: 'number',
@@ -597,15 +655,15 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'configurar_horario',
-      description:
-        'Configurar los días y horario de trabajo del proveedor.',
+      description: 'Configurar los días y horario de trabajo del proveedor.',
       parameters: {
         type: 'object',
         properties: {
           days: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Días de la semana (ej: ["lunes", "martes", "miércoles"]).',
+            description:
+              'Días de la semana (ej: ["lunes", "martes", "miércoles"]).',
           },
           timeStart: {
             type: 'string',
@@ -624,8 +682,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'agregar_nota',
-      description:
-        'Agregar una nota libre al perfil del proveedor.',
+      description: 'Agregar una nota libre al perfil del proveedor.',
       parameters: {
         type: 'object',
         properties: {
@@ -651,11 +708,13 @@ export const AI_TOOLS: ChatCompletionTool[] = [
         properties: {
           description: {
             type: 'string',
-            description: 'Qué recordar (ej: "ir al gym", "comprar material", "llamar al contador").',
+            description:
+              'Qué recordar (ej: "ir al gym", "comprar material", "llamar al contador").',
           },
           date: {
             type: 'string',
-            description: 'Fecha del recordatorio. Usar "hoy", "mañana", nombre del día, o YYYY-MM-DD.',
+            description:
+              'Fecha del recordatorio. Usar "hoy", "mañana", nombre del día, o YYYY-MM-DD.',
           },
           time: {
             type: 'string',
@@ -689,11 +748,13 @@ export const AI_TOOLS: ChatCompletionTool[] = [
         properties: {
           description: {
             type: 'string',
-            description: 'Descripción del recordatorio a modificar (para identificar cuál).',
+            description:
+              'Descripción del recordatorio a modificar (para identificar cuál).',
           },
           newDate: {
             type: 'string',
-            description: 'Nueva fecha. Usar "hoy", "mañana", nombre del día, o YYYY-MM-DD.',
+            description:
+              'Nueva fecha. Usar "hoy", "mañana", nombre del día, o YYYY-MM-DD.',
           },
           newTime: {
             type: 'string',
@@ -719,7 +780,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
         properties: {
           description: {
             type: 'string',
-            description: 'Descripción del recordatorio a cancelar (para identificar cuál).',
+            description:
+              'Descripción del recordatorio a cancelar (para identificar cuál).',
           },
         },
         required: ['description'],
@@ -738,7 +800,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
         properties: {
           description: {
             type: 'string',
-            description: 'Descripción del recordatorio a completar (para identificar cuál).',
+            description:
+              'Descripción del recordatorio a completar (para identificar cuál).',
           },
         },
         required: ['description'],
@@ -762,7 +825,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           description: {
             type: 'string',
-            description: 'Descripción del trabajo (ej: "instalación eléctrica", "reparación de fuga").',
+            description:
+              'Descripción del trabajo (ej: "instalación eléctrica", "reparación de fuga").',
           },
           clientName: {
             type: 'string',
@@ -770,7 +834,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           clientPhone: {
             type: 'string',
-            description: 'Teléfono del cliente. Solo si el usuario lo da explícitamente en este mensaje.',
+            description:
+              'Teléfono del cliente. Solo si el usuario lo da explícitamente en este mensaje.',
           },
           sendToClient: {
             type: 'boolean',
@@ -821,7 +886,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
         properties: {
           query: {
             type: 'string',
-            description: 'Nombre o parte del nombre a buscar. Vacío para listar todos.',
+            description:
+              'Nombre o parte del nombre a buscar. Vacío para listar todos.',
           },
         },
       },
@@ -875,7 +941,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
         properties: {
           period: {
             type: 'string',
-            description: 'Periodo a consultar: "hoy", "mañana", "esta semana", "este mes", o un rango como "lunes a viernes".',
+            description:
+              'Periodo a consultar: "hoy", "mañana", "esta semana", "este mes", o un rango como "lunes a viernes".',
           },
         },
         required: ['period'],

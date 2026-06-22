@@ -63,7 +63,8 @@ describe('ExpenseService.formatExpenseSummaryMessage — empty / single-category
       ],
     };
     const msg = service.formatExpenseSummaryMessage(summary, tz);
-    const emojiMatches = msg.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) || [];
+    const emojiMatches =
+      msg.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) || [];
     expect(emojiMatches.length).toBe(1);
     expect(msg).toContain('📊');
   });
@@ -141,7 +142,9 @@ describe('ExpenseService.formatExpenseSummaryMessage — grouped block (count > 
         amount: 100 * (i + 1),
         category: 'material',
         description: `compra ${i + 1}`,
-        date: d(`2026-0${i < 5 ? 4 : 5}-${String((i % 9) + 1).padStart(2, '0')}T18:00:00Z`),
+        date: d(
+          `2026-0${i < 5 ? 4 : 5}-${String((i % 9) + 1).padStart(2, '0')}T18:00:00Z`,
+        ),
       });
     }
     return items;
@@ -162,5 +165,55 @@ describe('ExpenseService.formatExpenseSummaryMessage — grouped block (count > 
     expect(msg).toContain('Más recientes:');
     const recentSection = msg.split('Más recientes:')[1];
     expect(recentSection.match(/^• /gm)?.length).toBe(5);
+  });
+});
+
+describe('ExpenseService — currency metadata', () => {
+  it('persists converted amount and FX metadata', async () => {
+    const prisma = {
+      expense: {
+        create: jest.fn().mockResolvedValue({ id: 'expense-1' }),
+      },
+    };
+    const service = new ExpenseService(prisma as any);
+    const exchangeRateDate = d('2026-06-21T00:00:00.000Z');
+
+    await service.create({
+      providerId: 'provider-1',
+      amount: 647.5,
+      currency: 'MXN',
+      originalAmount: 35,
+      originalCurrency: 'USD',
+      exchangeRate: 18.5,
+      exchangeRateProvider: 'frankfurter',
+      exchangeRateDate,
+      description: 'material',
+    });
+
+    expect(prisma.expense.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        providerId: 'provider-1',
+        currency: 'MXN',
+        originalCurrency: 'USD',
+        exchangeRateProvider: 'frankfurter',
+        exchangeRateDate,
+        description: 'material',
+      }),
+    });
+  });
+
+  it('formats a foreign-currency confirmation with MXN and original amount', () => {
+    const service = makeService();
+
+    const msg = service.formatExpenseConfirmation(647.5, 'material', 'tubo', {
+      originalAmount: 35,
+      originalCurrency: 'USD',
+      exchangeRate: 18.5,
+      exchangeRateDate: d('2026-06-21T00:00:00.000Z'),
+    });
+
+    expect(msg).toContain('$647.5 MXN');
+    expect(msg).toContain('Original: 35 USD');
+    expect(msg).toContain('Tipo de cambio: 18.5 (2026-06-21)');
   });
 });

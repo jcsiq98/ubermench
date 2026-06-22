@@ -15,6 +15,12 @@ import {
 export interface CreateExpenseDto {
   providerId: string;
   amount: number;
+  currency?: string;
+  originalAmount?: number;
+  originalCurrency?: string;
+  exchangeRate?: number;
+  exchangeRateProvider?: string;
+  exchangeRateDate?: Date;
   category?: string;
   description?: string;
   date?: Date;
@@ -28,6 +34,9 @@ export interface CreateExpenseDto {
 
 export interface ExpenseSummaryItem {
   amount: number;
+  currency?: string;
+  originalAmount?: number | null;
+  originalCurrency?: string | null;
   category: string | null;
   description: string | null;
   date: Date;
@@ -61,6 +70,16 @@ export class ExpenseService {
         data: {
           providerId: dto.providerId,
           amount: new Prisma.Decimal(dto.amount),
+          currency: dto.currency || 'MXN',
+          originalAmount: dto.originalAmount
+            ? new Prisma.Decimal(dto.originalAmount)
+            : undefined,
+          originalCurrency: dto.originalCurrency,
+          exchangeRate: dto.exchangeRate
+            ? new Prisma.Decimal(dto.exchangeRate)
+            : undefined,
+          exchangeRateProvider: dto.exchangeRateProvider,
+          exchangeRateDate: dto.exchangeRateDate,
           category: dto.category,
           description: dto.description,
           date: dto.date || new Date(),
@@ -94,12 +113,18 @@ export class ExpenseService {
     }
   }
 
-  async getWeekSummary(providerId: string, tz: string = DEFAULT_TIMEZONE): Promise<ExpenseSummary> {
+  async getWeekSummary(
+    providerId: string,
+    tz: string = DEFAULT_TIMEZONE,
+  ): Promise<ExpenseSummary> {
     const startOfWeek = getWeekStartUtc(tz);
     return this.getSummary(providerId, startOfWeek, new Date(), 'esta semana');
   }
 
-  async getMonthSummary(providerId: string, tz: string = DEFAULT_TIMEZONE): Promise<ExpenseSummary> {
+  async getMonthSummary(
+    providerId: string,
+    tz: string = DEFAULT_TIMEZONE,
+  ): Promise<ExpenseSummary> {
     const startOfMonth = getMonthStartUtc(tz);
     return this.getSummary(providerId, startOfMonth, new Date(), 'este mes');
   }
@@ -127,10 +152,7 @@ export class ExpenseService {
       orderBy: { date: 'asc' },
     });
 
-    const total = expenses.reduce(
-      (sum, e) => sum + Number(e.amount),
-      0,
-    );
+    const total = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
 
     const categoryMap = new Map<string, { total: number; count: number }>();
     for (const expense of expenses) {
@@ -147,6 +169,9 @@ export class ExpenseService {
 
     const items: ExpenseSummaryItem[] = expenses.map((e) => ({
       amount: Number(e.amount),
+      currency: e.currency,
+      originalAmount: e.originalAmount ? Number(e.originalAmount) : null,
+      originalCurrency: e.originalCurrency,
       category: e.category,
       description: e.description,
       date: e.date,
@@ -164,7 +189,9 @@ export class ExpenseService {
     if (!last) return null;
 
     await this.prisma.expense.delete({ where: { id: last.id } });
-    this.logger.log(`Deleted last expense (${last.id}) for provider ${providerId}`);
+    this.logger.log(
+      `Deleted last expense (${last.id}) for provider ${providerId}`,
+    );
     return last;
   }
 
@@ -179,14 +206,20 @@ export class ExpenseService {
     const match = expenses.find((e) => {
       const desc = (e.description || '').toLowerCase();
       const cat = (e.category || '').toLowerCase();
-      return desc.includes(needle) || needle.includes(desc) ||
-             cat.includes(needle) || needle.includes(cat);
+      return (
+        desc.includes(needle) ||
+        needle.includes(desc) ||
+        cat.includes(needle) ||
+        needle.includes(cat)
+      );
     });
 
     if (!match) return null;
 
     await this.prisma.expense.delete({ where: { id: match.id } });
-    this.logger.log(`Deleted expense by description "${description}" (${match.id}) for provider ${providerId}`);
+    this.logger.log(
+      `Deleted expense by description "${description}" (${match.id}) for provider ${providerId}`,
+    );
     return match;
   }
 
@@ -210,7 +243,9 @@ export class ExpenseService {
       data,
     });
 
-    this.logger.log(`Edited last expense (${last.id}): amount → ${updates.amount} for provider ${providerId}`);
+    this.logger.log(
+      `Edited last expense (${last.id}): amount → ${updates.amount} for provider ${providerId}`,
+    );
     return { previous: last, updated };
   }
 
@@ -221,6 +256,9 @@ export class ExpenseService {
       take: limit,
       select: {
         amount: true,
+        currency: true,
+        originalAmount: true,
+        originalCurrency: true,
         category: true,
         description: true,
         date: true,
@@ -232,8 +270,22 @@ export class ExpenseService {
     amount: number,
     category?: string,
     description?: string,
+    fx?: {
+      originalAmount: number;
+      originalCurrency: string;
+      exchangeRate: number;
+      exchangeRateDate: Date;
+    },
   ): string {
-    let msg = `✅ *¡Gasto registrado!*\n\n💸 *$${amount.toLocaleString('es-MX')}*`;
+    let msg = `✅ *¡Gasto registrado!*\n\n💸 *$${amount.toLocaleString('es-MX')} MXN*`;
+
+    if (fx) {
+      msg +=
+        `\nOriginal: ${fx.originalAmount.toLocaleString('es-MX')} ${fx.originalCurrency}` +
+        `\nTipo de cambio: ${fx.exchangeRate.toLocaleString('es-MX', {
+          maximumFractionDigits: 4,
+        })} (${fx.exchangeRateDate.toISOString().slice(0, 10)})`;
+    }
 
     if (category) msg += `\n🏷️ ${category}`;
     if (description) msg += `\n📝 ${description}`;
@@ -300,11 +352,7 @@ function formatShortDate(date: Date, tz: string): string {
     day: '2-digit',
     month: 'short',
   });
-  return raw
-    .replace(/\./g, '')
-    .replace(/-/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return raw.replace(/\./g, '').replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function formatExpenseLine(item: ExpenseSummaryItem, tz: string): string {
@@ -325,7 +373,10 @@ function groupExpenseItemsByMonth(
   items: ExpenseSummaryItem[],
   tz: string,
 ): { label: string; total: number; count: number }[] {
-  const groups = new Map<string, { label: string; total: number; count: number }>();
+  const groups = new Map<
+    string,
+    { label: string; total: number; count: number }
+  >();
   for (const item of items) {
     const label = formatDate(item.date, tz, {
       weekday: undefined,

@@ -23,6 +23,10 @@ import { PersonalReminderJobData } from '../../common/queues/processors/personal
 import { RemindersService } from '../reminders/reminders.service';
 import { PaymentsService } from '../payments/payments.service';
 import { ContactsService } from '../contacts/contacts.service';
+import {
+  ExchangeRateService,
+  ExchangeRateUnavailableError,
+} from '../exchange-rate/exchange-rate.service';
 import { AttributionQueue } from './attribution-queue';
 import {
   formatTime,
@@ -79,8 +83,15 @@ import {
 } from './trade-examples';
 
 const JUNK_CLIENT_NAMES = new Set([
-  'ninguno', 'ninguna', 'no', 'n/a', 'na', 'nada',
-  'sin nombre', 'desconocido', 'nadie',
+  'ninguno',
+  'ninguna',
+  'no',
+  'n/a',
+  'na',
+  'nada',
+  'sin nombre',
+  'desconocido',
+  'nadie',
 ]);
 
 // ─── Provider session states ────────────────────────────────
@@ -124,7 +135,8 @@ interface PendingAppointmentCloseoutState {
   scheduledAt: string;
 }
 
-const PENDING_APPOINTMENT_FOLLOWUPS_PREFIX = 'wa_pending_appointment_followups:';
+const PENDING_APPOINTMENT_FOLLOWUPS_PREFIX =
+  'wa_pending_appointment_followups:';
 const PENDING_APPOINTMENT_FOLLOWUPS_TTL = 12 * 60 * 60; // 12 hours
 
 interface PendingAppointmentFollowupState {
@@ -166,6 +178,7 @@ export class WhatsAppProviderHandler {
     private paymentsService: PaymentsService,
     private contactsService: ContactsService,
     private attributionQueue: AttributionQueue,
+    private exchangeRateService: ExchangeRateService,
   ) {}
 
   // ─── Session management ──────────────────────────────────
@@ -265,7 +278,9 @@ export class WhatsAppProviderHandler {
     phone: string,
   ): Promise<PendingAppointmentCloseoutState | null> {
     const normalizedPhone = canonicalizePhoneE164(phone);
-    const raw = await this.redis.get(`${PENDING_APPOINTMENT_CLOSEOUT_PREFIX}${normalizedPhone}`);
+    const raw = await this.redis.get(
+      `${PENDING_APPOINTMENT_CLOSEOUT_PREFIX}${normalizedPhone}`,
+    );
     if (!raw) return null;
     try {
       return JSON.parse(raw) as PendingAppointmentCloseoutState;
@@ -288,19 +303,25 @@ export class WhatsAppProviderHandler {
 
   private async clearPendingAppointmentCloseout(phone: string): Promise<void> {
     const normalizedPhone = canonicalizePhoneE164(phone);
-    await this.redis.del(`${PENDING_APPOINTMENT_CLOSEOUT_PREFIX}${normalizedPhone}`);
+    await this.redis.del(
+      `${PENDING_APPOINTMENT_CLOSEOUT_PREFIX}${normalizedPhone}`,
+    );
   }
 
   private async getPendingAppointmentFollowups(
     phone: string,
   ): Promise<PendingAppointmentFollowupState[]> {
     const normalizedPhone = canonicalizePhoneE164(phone);
-    const raw = await this.redis.get(`${PENDING_APPOINTMENT_FOLLOWUPS_PREFIX}${normalizedPhone}`);
+    const raw = await this.redis.get(
+      `${PENDING_APPOINTMENT_FOLLOWUPS_PREFIX}${normalizedPhone}`,
+    );
     if (!raw) return [];
     try {
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed)
-        ? parsed.sort((a, b) => String(a.askedAt).localeCompare(String(b.askedAt)))
+        ? parsed.sort((a, b) =>
+            String(a.askedAt).localeCompare(String(b.askedAt)),
+          )
         : [];
     } catch {
       return [];
@@ -313,7 +334,9 @@ export class WhatsAppProviderHandler {
   ): Promise<void> {
     const normalizedPhone = canonicalizePhoneE164(phone);
     if (items.length === 0) {
-      await this.redis.del(`${PENDING_APPOINTMENT_FOLLOWUPS_PREFIX}${normalizedPhone}`);
+      await this.redis.del(
+        `${PENDING_APPOINTMENT_FOLLOWUPS_PREFIX}${normalizedPhone}`,
+      );
       return;
     }
 
@@ -328,7 +351,9 @@ export class WhatsAppProviderHandler {
     phone: string,
   ): Promise<PendingDelegatedSendState | null> {
     const normalizedPhone = canonicalizePhoneE164(phone);
-    const raw = await this.redis.get(`${PENDING_DELEGATED_SEND_PREFIX}${normalizedPhone}`);
+    const raw = await this.redis.get(
+      `${PENDING_DELEGATED_SEND_PREFIX}${normalizedPhone}`,
+    );
     if (!raw) return null;
     try {
       return JSON.parse(raw) as PendingDelegatedSendState;
@@ -358,7 +383,9 @@ export class WhatsAppProviderHandler {
     phone: string,
   ): Promise<PendingContactPhoneState | null> {
     const normalizedPhone = canonicalizePhoneE164(phone);
-    const raw = await this.redis.get(`${PENDING_CONTACT_PHONE_PREFIX}${normalizedPhone}`);
+    const raw = await this.redis.get(
+      `${PENDING_CONTACT_PHONE_PREFIX}${normalizedPhone}`,
+    );
     if (!raw) return null;
     try {
       return JSON.parse(raw) as PendingContactPhoneState;
@@ -411,9 +438,13 @@ export class WhatsAppProviderHandler {
     );
   }
 
-  private async clearPendingContactDisambiguation(phone: string): Promise<void> {
+  private async clearPendingContactDisambiguation(
+    phone: string,
+  ): Promise<void> {
     const normalizedPhone = canonicalizePhoneE164(phone);
-    await this.redis.del(`${PENDING_CONTACT_DISAMBIGUATION_PREFIX}${normalizedPhone}`);
+    await this.redis.del(
+      `${PENDING_CONTACT_DISAMBIGUATION_PREFIX}${normalizedPhone}`,
+    );
   }
 
   private async clearAllContactPendingFlows(phone: string): Promise<void> {
@@ -475,7 +506,9 @@ export class WhatsAppProviderHandler {
   ): Promise<void> {
     const provider = await this.findProviderByPhone(senderPhone);
     if (!provider) {
-      this.logger.log(`Message from non-provider ${senderPhone}, routing to onboarding`);
+      this.logger.log(
+        `Message from non-provider ${senderPhone}, routing to onboarding`,
+      );
       const text = await this.extractContent(message, senderPhone);
       await this.onboardingHandler.handleMessage(senderPhone, senderName, text);
       return;
@@ -484,7 +517,13 @@ export class WhatsAppProviderHandler {
     const text = await this.extractContent(message, senderPhone);
     const buttonReply = this.extractButtonReply(message);
 
-    await this.processProviderMessage(senderPhone, senderName, text, buttonReply, provider);
+    await this.processProviderMessage(
+      senderPhone,
+      senderName,
+      text,
+      buttonReply,
+      provider,
+    );
   }
 
   /**
@@ -498,12 +537,20 @@ export class WhatsAppProviderHandler {
   ): Promise<void> {
     const provider = await this.findProviderByPhone(senderPhone);
     if (!provider) {
-      this.logger.log(`Buffered message from non-provider ${senderPhone}, routing to onboarding`);
+      this.logger.log(
+        `Buffered message from non-provider ${senderPhone}, routing to onboarding`,
+      );
       await this.onboardingHandler.handleMessage(senderPhone, senderName, text);
       return;
     }
 
-    await this.processProviderMessage(senderPhone, senderName, text, null, provider);
+    await this.processProviderMessage(
+      senderPhone,
+      senderName,
+      text,
+      null,
+      provider,
+    );
   }
 
   // ─── Core message processing (shared by direct + buffered paths) ──
@@ -513,7 +560,9 @@ export class WhatsAppProviderHandler {
     senderName: string,
     text: string,
     buttonReply: { id: string; title: string } | null,
-    provider: NonNullable<Awaited<ReturnType<WhatsAppProviderHandler['findProviderByPhone']>>>,
+    provider: NonNullable<
+      Awaited<ReturnType<WhatsAppProviderHandler['findProviderByPhone']>>
+    >,
   ): Promise<void> {
     // Track activity and engagement for unit economics
     const updatePromises: Promise<any>[] = [
@@ -591,7 +640,11 @@ export class WhatsAppProviderHandler {
 
     if (this.isSummaryQuery(normalized)) {
       if (provider.providerProfile) {
-        return this.handleVerResumen(senderPhone, {}, provider.providerProfile.id);
+        return this.handleVerResumen(
+          senderPhone,
+          {},
+          provider.providerProfile.id,
+        );
       }
     }
 
@@ -606,9 +659,16 @@ export class WhatsAppProviderHandler {
       return this.sendHelpMenu(senderPhone);
     }
     if (normalized === 'menu' || normalized === 'inicio') {
-      return this.sendProviderDashboard(senderPhone, provider.name || senderName);
+      return this.sendProviderDashboard(
+        senderPhone,
+        provider.name || senderName,
+      );
     }
-    if (normalized === 'reset' || normalized === 'limpiar historial' || normalized === 'limpiar') {
+    if (
+      normalized === 'reset' ||
+      normalized === 'limpiar historial' ||
+      normalized === 'limpiar'
+    ) {
       await this.aiContextService.clearHistory(senderPhone);
       await this.whatsapp.sendTextMessage(
         senderPhone,
@@ -719,7 +779,8 @@ export class WhatsAppProviderHandler {
     let tz = DEFAULT_TIMEZONE;
     if (providerProfileId) {
       try {
-        const wsCtx = await this.workspaceService.getWorkspaceContext(providerProfileId);
+        const wsCtx =
+          await this.workspaceService.getWorkspaceContext(providerProfileId);
         tz = wsCtx.timezone || DEFAULT_TIMEZONE;
         const [recentExpenses, activeRecurring, providerModel, todayAppts] =
           await Promise.all([
@@ -815,50 +876,91 @@ export class WhatsAppProviderHandler {
       // data in the user message. The pre-AI hook in the next turn
       // (commit 3) reads pending and bypasses the LLM on a direct answer.
       if (providerProfileId) {
-        await this.tryPlantPendingFinancial(
-          phone,
-          text,
-          firewalled,
-          srcHash,
-        );
+        await this.tryPlantPendingFinancial(phone, text, firewalled, srcHash);
       }
 
       for (const aiResponse of firewalled) {
         switch (aiResponse.intent) {
           case AiIntent.REGISTRAR_INGRESO:
-            await this.handleRegistrarIngreso(phone, aiResponse.data, providerProfileId, tz, srcHash);
+            await this.handleRegistrarIngreso(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+              srcHash,
+            );
             break;
 
           case AiIntent.REGISTRAR_GASTO:
-            await this.handleRegistrarGasto(phone, aiResponse.data, providerProfileId, tz, srcHash);
+            await this.handleRegistrarGasto(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+              srcHash,
+            );
             break;
 
           case AiIntent.GESTIONAR_GASTO:
-            await this.handleGestionarGasto(phone, aiResponse.data, providerProfileId);
+            await this.handleGestionarGasto(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+            );
             break;
 
           case AiIntent.GESTIONAR_GASTO_RECURRENTE:
-            await this.handleGastoRecurrente(phone, aiResponse.data, providerProfileId);
+            await this.handleGastoRecurrente(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+            );
             break;
 
           case AiIntent.VER_RESUMEN:
-            await this.handleVerResumen(phone, aiResponse.data, providerProfileId, tz);
+            await this.handleVerResumen(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+            );
             break;
 
           case AiIntent.AGENDAR_CITA:
-            await this.handleAgendarCita(phone, aiResponse.data, providerProfileId, tz);
+            await this.handleAgendarCita(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+            );
             break;
 
           case AiIntent.MODIFICAR_CITA:
-            await this.handleModificarCita(phone, aiResponse.data, providerProfileId, tz);
+            await this.handleModificarCita(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+            );
             break;
 
           case AiIntent.CANCELAR_CITA:
-            await this.handleCancelarCita(phone, aiResponse.data, providerProfileId, tz);
+            await this.handleCancelarCita(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+            );
             break;
 
           case AiIntent.CONFIRMAR_RESULTADO_CITA:
-            await this.handleConfirmarResultadoCita(phone, aiResponse.data, providerProfileId, tz, srcHash);
+            await this.handleConfirmarResultadoCita(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+              srcHash,
+            );
             break;
 
           case AiIntent.VER_AGENDA:
@@ -866,16 +968,30 @@ export class WhatsAppProviderHandler {
             break;
 
           case AiIntent.VER_INGRESOS_PROYECTADOS:
-            await this.handleVerIngresosProyectados(phone, aiResponse.data, providerProfileId, tz);
+            await this.handleVerIngresosProyectados(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+            );
             break;
 
           case AiIntent.CONFIRMAR_CLIENTE:
             this.logger.log('Intent: confirmar_cliente');
-            await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
+            await this.sendAndRecord(
+              phone,
+              aiResponse.message,
+              aiResponse.intent,
+            );
             break;
 
           case AiIntent.CREAR_RECORDATORIO:
-            await this.handleCrearRecordatorio(phone, aiResponse.data, providerProfileId, tz);
+            await this.handleCrearRecordatorio(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+            );
             break;
 
           case AiIntent.VER_RECORDATORIOS:
@@ -883,19 +999,37 @@ export class WhatsAppProviderHandler {
             break;
 
           case AiIntent.MODIFICAR_RECORDATORIO:
-            await this.handleModificarRecordatorio(phone, aiResponse.data, providerProfileId, tz);
+            await this.handleModificarRecordatorio(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+            );
             break;
 
           case AiIntent.CANCELAR_RECORDATORIO:
-            await this.handleCancelarRecordatorio(phone, aiResponse.data, providerProfileId, tz);
+            await this.handleCancelarRecordatorio(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+            );
             break;
 
           case AiIntent.COMPLETAR_RECORDATORIO:
-            await this.handleCompletarRecordatorio(phone, aiResponse.data, providerProfileId);
+            await this.handleCompletarRecordatorio(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+            );
             break;
 
           case AiIntent.CONFIGURAR_PERFIL:
-            await this.handleConfigurarPerfil(phone, aiResponse, providerProfileId);
+            await this.handleConfigurarPerfil(
+              phone,
+              aiResponse,
+              providerProfileId,
+            );
             break;
 
           case AiIntent.CREAR_LINK_COBRO:
@@ -909,11 +1043,20 @@ export class WhatsAppProviderHandler {
             break;
 
           case AiIntent.GUARDAR_CONTACTO:
-            await this.handleGuardarContacto(phone, aiResponse.data, providerProfileId, tz);
+            await this.handleGuardarContacto(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+            );
             break;
 
           case AiIntent.BUSCAR_CONTACTOS:
-            await this.handleBuscarContactos(phone, aiResponse.data, providerProfileId);
+            await this.handleBuscarContactos(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+            );
             break;
 
           case AiIntent.ACTIVAR_COBROS:
@@ -931,7 +1074,11 @@ export class WhatsAppProviderHandler {
             break;
 
           default:
-            await this.sendAndRecord(phone, aiResponse.message, aiResponse.intent);
+            await this.sendAndRecord(
+              phone,
+              aiResponse.message,
+              aiResponse.intent,
+            );
             break;
         }
       }
@@ -958,13 +1105,18 @@ export class WhatsAppProviderHandler {
           dataMutatingIntents.includes(r.intent),
         );
         if (hasMutation) {
-          this.providerModelService.invalidate(providerProfileId).catch(() => {});
+          this.providerModelService
+            .invalidate(providerProfileId)
+            .catch(() => {});
         }
 
-        this.maybeExtractLearnedFacts(phone, providerProfileId, workspaceContext)
-          .catch((err) =>
-            this.logger.warn(`Learned facts extraction failed: ${err.message}`),
-          );
+        this.maybeExtractLearnedFacts(
+          phone,
+          providerProfileId,
+          workspaceContext,
+        ).catch((err) =>
+          this.logger.warn(`Learned facts extraction failed: ${err.message}`),
+        );
       }
     } catch (error: any) {
       this.logger.error(`AI conversation error: ${error.message}`);
@@ -1151,9 +1303,16 @@ export class WhatsAppProviderHandler {
     }
 
     try {
-      let status = await this.paymentsService.getProviderStripeStatus(providerProfileId);
-      if (status?.stripeAccountId && status.stripeOnboardingStatus !== 'ACTIVE') {
-        status = await this.paymentsService.refreshProviderStripeStatus(providerProfileId);
+      let status =
+        await this.paymentsService.getProviderStripeStatus(providerProfileId);
+      if (
+        status?.stripeAccountId &&
+        status.stripeOnboardingStatus !== 'ACTIVE'
+      ) {
+        status =
+          await this.paymentsService.refreshProviderStripeStatus(
+            providerProfileId,
+          );
       }
 
       if (status?.stripeOnboardingStatus === 'ACTIVE') {
@@ -1165,7 +1324,8 @@ export class WhatsAppProviderHandler {
         return;
       }
 
-      const result = await this.paymentsService.createConnectedAccount(providerProfileId);
+      const result =
+        await this.paymentsService.createConnectedAccount(providerProfileId);
 
       await this.sendAndRecord(
         phone,
@@ -1180,7 +1340,9 @@ export class WhatsAppProviderHandler {
           phone,
           '⚠️ Los cobros con link aún no están habilitados. Estamos configurando el sistema.',
         );
-      } else if (error.message === 'Provider already has an active Stripe account') {
+      } else if (
+        error.message === 'Provider already has an active Stripe account'
+      ) {
         await this.sendAndRecord(
           phone,
           '✅ Tu cuenta de cobros ya está activa. Puedes generar links diciendo por ejemplo: *"Cóbrale 1,200 al señor Ramírez"*',
@@ -1205,7 +1367,10 @@ export class WhatsAppProviderHandler {
     oldConfirmed: boolean = false,
   ): Promise<string> {
     if (!providerProfileId) {
-      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
       return DEFAULT_TIMEZONE;
     }
 
@@ -1260,7 +1425,10 @@ export class WhatsAppProviderHandler {
       return resolved;
     } catch (error: any) {
       this.logger.error(`Error setting timezone: ${error.message}`);
-      await this.sendAndRecord(phone, '❌ No se pudo configurar la zona horaria. Intenta de nuevo.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se pudo configurar la zona horaria. Intenta de nuevo.',
+      );
       return oldTz;
     }
   }
@@ -1282,14 +1450,20 @@ export class WhatsAppProviderHandler {
   ): boolean {
     if (!workspaceContext) return false;
     if (isMexicanPhone(phone)) return false;
-    if (workspaceContext.timezone && workspaceContext.timezone !== DEFAULT_TIMEZONE) {
+    if (
+      workspaceContext.timezone &&
+      workspaceContext.timezone !== DEFAULT_TIMEZONE
+    ) {
       return false;
     }
     if (workspaceContext.timezoneConfirmed) return false;
     return responses.some((r) => TIMEZONE_GATE_INTENTS.has(r.intent));
   }
 
-  private async openTimezoneGate(phone: string, rawText: string): Promise<void> {
+  private async openTimezoneGate(
+    phone: string,
+    rawText: string,
+  ): Promise<void> {
     await this.setPendingTimezone(phone, {
       rawText,
       attempts: 0,
@@ -1320,7 +1494,10 @@ export class WhatsAppProviderHandler {
 
     const trimmed = text.trim();
 
-    if (isTimezoneSkipPhrase(trimmed) || pending.attempts >= MAX_PENDING_TZ_ATTEMPTS) {
+    if (
+      isTimezoneSkipPhrase(trimmed) ||
+      pending.attempts >= MAX_PENDING_TZ_ATTEMPTS
+    ) {
       await this.workspaceService.markTimezonePromptSkipped(providerProfileId);
       await this.clearPendingTimezone(phone);
       await this.sendAndRecord(
@@ -1358,7 +1535,10 @@ export class WhatsAppProviderHandler {
     if (!result.success) {
       pending.attempts += 1;
       await this.setPendingTimezone(phone, pending);
-      await this.sendAndRecord(phone, `${result.message}\n\nIntenta con otra ciudad.`);
+      await this.sendAndRecord(
+        phone,
+        `${result.message}\n\nIntenta con otra ciudad.`,
+      );
       return true;
     }
 
@@ -1411,7 +1591,8 @@ export class WhatsAppProviderHandler {
         providerPhone,
       );
 
-      const successCount = result.appointmentsMigrated + result.remindersMigrated;
+      const successCount =
+        result.appointmentsMigrated + result.remindersMigrated;
       const failureCount =
         result.failedAppointments.length + result.failedReminders.length;
 
@@ -1430,7 +1611,9 @@ export class WhatsAppProviderHandler {
             `${result.remindersMigrated} recordatorio${result.remindersMigrated === 1 ? '' : 's'}`,
           );
         }
-        lines.push(`Reajusté ${parts.join(' y ')} para que mantengan la hora local.`);
+        lines.push(
+          `Reajusté ${parts.join(' y ')} para que mantengan la hora local.`,
+        );
       }
       if (failureCount > 0) {
         const parts: string[] = [];
@@ -1463,9 +1646,16 @@ export class WhatsAppProviderHandler {
     phone: string,
     providerProfileId: string,
   ): Promise<boolean> {
-    let stripeStatus = await this.paymentsService.getProviderStripeStatus(providerProfileId);
-    if (stripeStatus?.stripeAccountId && stripeStatus.stripeOnboardingStatus !== 'ACTIVE') {
-      stripeStatus = await this.paymentsService.refreshProviderStripeStatus(providerProfileId);
+    let stripeStatus =
+      await this.paymentsService.getProviderStripeStatus(providerProfileId);
+    if (
+      stripeStatus?.stripeAccountId &&
+      stripeStatus.stripeOnboardingStatus !== 'ACTIVE'
+    ) {
+      stripeStatus =
+        await this.paymentsService.refreshProviderStripeStatus(
+          providerProfileId,
+        );
     }
     if (stripeStatus?.stripeOnboardingStatus !== 'ACTIVE') {
       await this.sendAndRecord(
@@ -1478,7 +1668,10 @@ export class WhatsAppProviderHandler {
     return true;
   }
 
-  private async handlePaymentLinkError(phone: string, error: any): Promise<void> {
+  private async handlePaymentLinkError(
+    phone: string,
+    error: any,
+  ): Promise<void> {
     this.logger.error(`Error creating payment link: ${error.message}`);
 
     if (error.message === 'Stripe is not configured') {
@@ -1516,7 +1709,10 @@ export class WhatsAppProviderHandler {
     tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
       return;
     }
 
@@ -1572,7 +1768,10 @@ export class WhatsAppProviderHandler {
     providerProfileId?: string,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
       return;
     }
 
@@ -1612,7 +1811,10 @@ export class WhatsAppProviderHandler {
       if (isAffirmativeReply(text)) {
         await this.clearPendingDelegatedSend(phone);
         try {
-          await this.whatsapp.sendTextMessage(delegated.clientPhone, delegated.message);
+          await this.whatsapp.sendTextMessage(
+            delegated.clientPhone,
+            delegated.message,
+          );
           await this.contactsService.touchContact(delegated.contactId);
           await this.sendAndRecord(
             phone,
@@ -1638,11 +1840,17 @@ export class WhatsAppProviderHandler {
     }
 
     const pendingPhone = await this.getPendingContactPhone(phone);
-    if (pendingPhone && pendingPhone.payload.providerProfileId === providerProfileId) {
+    if (
+      pendingPhone &&
+      pendingPhone.payload.providerProfileId === providerProfileId
+    ) {
       const rawPhone = extractPhoneFromText(text) || text.trim();
       const tz =
-        (await this.workspaceService.getWorkspaceContext(providerProfileId).catch(() => null))
-          ?.timezone ?? DEFAULT_TIMEZONE;
+        (
+          await this.workspaceService
+            .getWorkspaceContext(providerProfileId)
+            .catch(() => null)
+        )?.timezone ?? DEFAULT_TIMEZONE;
 
       try {
         let contactId = pendingPhone.contactId;
@@ -1690,11 +1898,18 @@ export class WhatsAppProviderHandler {
     ) {
       if (isNegativeReply(text)) {
         await this.clearPendingContactDisambiguation(phone);
-        await this.sendAndRecord(phone, 'Va, cancelado.', AiIntent.CREAR_LINK_COBRO);
+        await this.sendAndRecord(
+          phone,
+          'Va, cancelado.',
+          AiIntent.CREAR_LINK_COBRO,
+        );
         return true;
       }
 
-      const choice = parseDisambiguationChoice(text, pendingDisambig.candidateIds.length);
+      const choice = parseDisambiguationChoice(
+        text,
+        pendingDisambig.candidateIds.length,
+      );
       if (choice === null) {
         await this.sendAndRecord(
           phone,
@@ -1707,8 +1922,11 @@ export class WhatsAppProviderHandler {
       const contactId = pendingDisambig.candidateIds[choice];
       await this.clearPendingContactDisambiguation(phone);
       const tz =
-        (await this.workspaceService.getWorkspaceContext(providerProfileId).catch(() => null))
-          ?.timezone ?? DEFAULT_TIMEZONE;
+        (
+          await this.workspaceService
+            .getWorkspaceContext(providerProfileId)
+            .catch(() => null)
+        )?.timezone ?? DEFAULT_TIMEZONE;
 
       await this.continuePaymentLinkAfterContactResolved(
         phone,
@@ -1735,7 +1953,11 @@ export class WhatsAppProviderHandler {
       contactId,
     );
     if (!contact) {
-      await this.sendAndRecord(phone, '❌ No encontré ese contacto.', AiIntent.CREAR_LINK_COBRO);
+      await this.sendAndRecord(
+        phone,
+        '❌ No encontré ese contacto.',
+        AiIntent.CREAR_LINK_COBRO,
+      );
       return;
     }
 
@@ -1754,7 +1976,9 @@ export class WhatsAppProviderHandler {
       return;
     }
 
-    if (!(await this.ensureStripeActiveForLinks(phone, payload.providerProfileId))) {
+    if (
+      !(await this.ensureStripeActiveForLinks(phone, payload.providerProfileId))
+    ) {
       return;
     }
 
@@ -1807,7 +2031,11 @@ export class WhatsAppProviderHandler {
   ): Promise<void> {
     const url = paymentLink.stripePaymentUrl;
     if (!url) {
-      await this.sendAndRecord(phone, '❌ No se pudo generar el link.', AiIntent.CREAR_LINK_COBRO);
+      await this.sendAndRecord(
+        phone,
+        '❌ No se pudo generar el link.',
+        AiIntent.CREAR_LINK_COBRO,
+      );
       return;
     }
 
@@ -1871,7 +2099,10 @@ export class WhatsAppProviderHandler {
     providerName = 'tu maestro',
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
       return;
     }
 
@@ -2061,21 +2292,44 @@ export class WhatsAppProviderHandler {
     const parsedDate = data?.date
       ? this.appointmentsService.parseScheduledDate(data.date, undefined, tz)
       : null;
+    const transactionDate = parsedDate ?? new Date();
 
     try {
+      const fx = await this.exchangeRateService.convertToMxn({
+        amount,
+        currency: data?.currency,
+        date: transactionDate,
+        timezone: tz,
+      });
+      const ledgerAmount = fx?.convertedAmount ?? amount;
+
       const created = await this.expenseService.create({
         providerId: providerProfileId,
-        amount,
+        amount: ledgerAmount,
+        currency: fx?.convertedCurrency ?? 'MXN',
+        originalAmount: fx?.originalAmount,
+        originalCurrency: fx?.originalCurrency,
+        exchangeRate: fx?.exchangeRate,
+        exchangeRateProvider: fx?.exchangeRateProvider,
+        exchangeRateDate: fx?.exchangeRateDate,
         category: data?.category,
         description: data?.description,
-        date: parsedDate ?? undefined,
+        date: transactionDate,
         sourceTextHash: srcHash,
       });
 
       const confirmation = this.expenseService.formatExpenseConfirmation(
-        amount,
+        ledgerAmount,
         data?.category,
         data?.description,
+        fx
+          ? {
+              originalAmount: fx.originalAmount,
+              originalCurrency: fx.originalCurrency,
+              exchangeRate: fx.exchangeRate,
+              exchangeRateDate: fx.exchangeRateDate,
+            }
+          : undefined,
       );
 
       await this.sendFinancialConfirmation(
@@ -2087,12 +2341,20 @@ export class WhatsAppProviderHandler {
           kind: 'expense',
           providerId: providerProfileId,
           providerPhone: phone,
-          amount,
+          amount: ledgerAmount,
           recordId: created.id,
           sourceTextHash: srcHash,
         },
       );
     } catch (error: any) {
+      if (error instanceof ExchangeRateUnavailableError) {
+        await this.sendAndRecord(
+          phone,
+          'No pude consultar el tipo de cambio ahorita, así que no registré el gasto para no inventar el monto en pesos. Intenta de nuevo en unos minutos o dime el equivalente en MXN.',
+        );
+        return;
+      }
+
       this.logger.error(`Error creating expense: ${error.message}`);
       await this.sendAndRecord(
         phone,
@@ -2122,7 +2384,8 @@ export class WhatsAppProviderHandler {
       try {
         const deleted = await this.expenseService.deleteLast(providerProfileId);
         if (deleted) {
-          const desc = deleted.description || deleted.category || 'Sin descripción';
+          const desc =
+            deleted.description || deleted.category || 'Sin descripción';
           await this.sendAndRecord(
             phone,
             `🗑️ *Gasto eliminado:*\n\n💸 $${Number(deleted.amount).toLocaleString('es-MX')} — ${desc}`,
@@ -2135,7 +2398,10 @@ export class WhatsAppProviderHandler {
         }
       } catch (error: any) {
         this.logger.error(`Error deleting last expense: ${error.message}`);
-        await this.sendAndRecord(phone, '❌ No se pudo borrar el gasto. Intenta de nuevo.');
+        await this.sendAndRecord(
+          phone,
+          '❌ No se pudo borrar el gasto. Intenta de nuevo.',
+        );
       }
       return;
     }
@@ -2151,24 +2417,37 @@ export class WhatsAppProviderHandler {
       }
 
       try {
-        let deleted = await this.expenseService.deleteByDescription(providerProfileId, description);
+        let deleted = await this.expenseService.deleteByDescription(
+          providerProfileId,
+          description,
+        );
 
         if (!deleted) {
-          const recent = await this.expenseService.getRecent(providerProfileId, 10);
+          const recent = await this.expenseService.getRecent(
+            providerProfileId,
+            10,
+          );
           const options = recent
             .map((e) => e.description || e.category)
             .filter((d): d is string => !!d);
 
           if (options.length > 0) {
-            const matched = await this.aiService.matchToList(description, options);
+            const matched = await this.aiService.matchToList(
+              description,
+              options,
+            );
             if (matched) {
-              deleted = await this.expenseService.deleteByDescription(providerProfileId, matched);
+              deleted = await this.expenseService.deleteByDescription(
+                providerProfileId,
+                matched,
+              );
             }
           }
         }
 
         if (deleted) {
-          const desc = deleted.description || deleted.category || 'Sin descripción';
+          const desc =
+            deleted.description || deleted.category || 'Sin descripción';
           await this.sendAndRecord(
             phone,
             `🗑️ *Gasto eliminado:*\n\n💸 $${Number(deleted.amount).toLocaleString('es-MX')} — ${desc}`,
@@ -2180,8 +2459,13 @@ export class WhatsAppProviderHandler {
           );
         }
       } catch (error: any) {
-        this.logger.error(`Error deleting expense by description: ${error.message}`);
-        await this.sendAndRecord(phone, '❌ No se pudo borrar el gasto. Intenta de nuevo.');
+        this.logger.error(
+          `Error deleting expense by description: ${error.message}`,
+        );
+        await this.sendAndRecord(
+          phone,
+          '❌ No se pudo borrar el gasto. Intenta de nuevo.',
+        );
       }
       return;
     }
@@ -2197,14 +2481,19 @@ export class WhatsAppProviderHandler {
       }
 
       try {
-        const result = await this.expenseService.editLast(providerProfileId, { amount });
+        const result = await this.expenseService.editLast(providerProfileId, {
+          amount,
+        });
         if (result) {
-          const desc = result.previous.description || result.previous.category || 'Sin descripción';
+          const desc =
+            result.previous.description ||
+            result.previous.category ||
+            'Sin descripción';
           await this.sendAndRecord(
             phone,
             `✏️ *Gasto corregido:*\n\n` +
-            `💸 $${Number(result.previous.amount).toLocaleString('es-MX')} → *$${amount.toLocaleString('es-MX')}*\n` +
-            `📝 ${desc}`,
+              `💸 $${Number(result.previous.amount).toLocaleString('es-MX')} → *$${amount.toLocaleString('es-MX')}*\n` +
+              `📝 ${desc}`,
           );
         } else {
           await this.sendAndRecord(
@@ -2214,7 +2503,10 @@ export class WhatsAppProviderHandler {
         }
       } catch (error: any) {
         this.logger.error(`Error editing last expense: ${error.message}`);
-        await this.sendAndRecord(phone, '❌ No se pudo editar el gasto. Intenta de nuevo.');
+        await this.sendAndRecord(
+          phone,
+          '❌ No se pudo editar el gasto. Intenta de nuevo.',
+        );
       }
       return;
     }
@@ -2222,9 +2514,9 @@ export class WhatsAppProviderHandler {
     await this.sendAndRecord(
       phone,
       '🤔 No entendí qué quieres hacer con el gasto. Puedes:\n\n' +
-      '• *"Borra el último gasto"*\n' +
-      '• *"Borra el gasto de material"*\n' +
-      '• *"El último gasto era 300, no 200"*',
+        '• *"Borra el último gasto"*\n' +
+        '• *"Borra el gasto de material"*\n' +
+        '• *"El último gasto era 300, no 200"*',
     );
   }
 
@@ -2246,7 +2538,8 @@ export class WhatsAppProviderHandler {
     const action = data?.action;
 
     if (action === 'list') {
-      const expenses = await this.recurringExpenseService.listActive(providerProfileId);
+      const expenses =
+        await this.recurringExpenseService.listActive(providerProfileId);
       const msg = this.recurringExpenseService.formatRecurringList(expenses);
       await this.sendAndRecord(phone, msg);
       return;
@@ -2272,10 +2565,11 @@ export class WhatsAppProviderHandler {
 
       if (!cancelled) {
         // Check if failure is due to ambiguity (multiple expenses with same name)
-        const ambiguousMatches = await this.recurringExpenseService.findMatchesByDescription(
-          providerProfileId,
-          description,
-        );
+        const ambiguousMatches =
+          await this.recurringExpenseService.findMatchesByDescription(
+            providerProfileId,
+            description,
+          );
 
         if (ambiguousMatches.length > 1) {
           const lines = ambiguousMatches.map((e) => {
@@ -2291,18 +2585,28 @@ export class WhatsAppProviderHandler {
         }
 
         // Not ambiguous — try LLM fuzzy match against all active expenses
-        const active = await this.recurringExpenseService.listActive(providerProfileId);
+        const active =
+          await this.recurringExpenseService.listActive(providerProfileId);
         const options = active.map((e) => e.description);
         if (options.length > 0) {
-          const matched = await this.aiService.matchToList(description, options);
+          const matched = await this.aiService.matchToList(
+            description,
+            options,
+          );
           if (matched) {
-            cancelled = await this.recurringExpenseService.cancel(providerProfileId, matched, cancelDay);
+            cancelled = await this.recurringExpenseService.cancel(
+              providerProfileId,
+              matched,
+              cancelDay,
+            );
           }
         }
       }
 
       if (cancelled) {
-        const dayInfo = cancelled.dayOfMonth ? ` (día ${cancelled.dayOfMonth})` : '';
+        const dayInfo = cancelled.dayOfMonth
+          ? ` (día ${cancelled.dayOfMonth})`
+          : '';
         await this.sendAndRecord(
           phone,
           `✅ Cancelé el gasto recurrente de *${cancelled.description}*${dayInfo}.`,
@@ -2316,7 +2620,12 @@ export class WhatsAppProviderHandler {
       return;
     }
 
-    if (action === 'update' || action === 'modify' || action === 'change' || action === 'edit') {
+    if (
+      action === 'update' ||
+      action === 'modify' ||
+      action === 'change' ||
+      action === 'edit'
+    ) {
       const description = data?.description;
       if (!description) {
         await this.sendAndRecord(
@@ -2326,10 +2635,16 @@ export class WhatsAppProviderHandler {
         return;
       }
 
-      const updates: { amount?: number; frequency?: string; dayOfMonth?: number } = {};
-      if (data?.amount && typeof data.amount === 'number' && data.amount > 0) updates.amount = data.amount;
+      const updates: {
+        amount?: number;
+        frequency?: string;
+        dayOfMonth?: number;
+      } = {};
+      if (data?.amount && typeof data.amount === 'number' && data.amount > 0)
+        updates.amount = data.amount;
       if (data?.frequency) updates.frequency = data.frequency;
-      if (data?.dayOfMonth && typeof data.dayOfMonth === 'number') updates.dayOfMonth = data.dayOfMonth;
+      if (data?.dayOfMonth && typeof data.dayOfMonth === 'number')
+        updates.dayOfMonth = data.dayOfMonth;
 
       if (Object.keys(updates).length === 0) {
         await this.sendAndRecord(
@@ -2347,10 +2662,11 @@ export class WhatsAppProviderHandler {
 
       if (!updated) {
         // Check if failure is due to ambiguity (multiple expenses with same name)
-        const ambiguousMatches = await this.recurringExpenseService.findMatchesByDescription(
-          providerProfileId,
-          description,
-        );
+        const ambiguousMatches =
+          await this.recurringExpenseService.findMatchesByDescription(
+            providerProfileId,
+            description,
+          );
 
         if (ambiguousMatches.length > 1) {
           const lines = ambiguousMatches.map((e) => {
@@ -2366,20 +2682,32 @@ export class WhatsAppProviderHandler {
         }
 
         // Not ambiguous — try LLM fuzzy match against all active expenses
-        const active = await this.recurringExpenseService.listActive(providerProfileId);
+        const active =
+          await this.recurringExpenseService.listActive(providerProfileId);
         const options = active.map((e) => e.description);
         if (options.length > 0) {
-          const matched = await this.aiService.matchToList(description, options);
+          const matched = await this.aiService.matchToList(
+            description,
+            options,
+          );
           if (matched) {
-            updated = await this.recurringExpenseService.update(providerProfileId, matched, updates);
+            updated = await this.recurringExpenseService.update(
+              providerProfileId,
+              matched,
+              updates,
+            );
           }
         }
       }
 
       if (updated) {
         const changes: string[] = [];
-        if (updates.amount) changes.push(`monto: *$${updates.amount.toLocaleString('es-MX')}*`);
-        if (updates.frequency) changes.push(`frecuencia: *${updates.frequency === 'monthly' ? 'mensual' : 'semanal'}*`);
+        if (updates.amount)
+          changes.push(`monto: *$${updates.amount.toLocaleString('es-MX')}*`);
+        if (updates.frequency)
+          changes.push(
+            `frecuencia: *${updates.frequency === 'monthly' ? 'mensual' : 'semanal'}*`,
+          );
         if (updates.dayOfMonth) changes.push(`día: *${updates.dayOfMonth}*`);
 
         await this.sendAndRecord(
@@ -2418,9 +2746,10 @@ export class WhatsAppProviderHandler {
         });
 
         const freq = recurring.frequency === 'monthly' ? 'mensual' : 'semanal';
-        const day = recurring.frequency === 'monthly' && recurring.dayOfMonth
-          ? ` (día ${recurring.dayOfMonth})`
-          : '';
+        const day =
+          recurring.frequency === 'monthly' && recurring.dayOfMonth
+            ? ` (día ${recurring.dayOfMonth})`
+            : '';
 
         await this.sendAndRecord(
           phone,
@@ -2464,13 +2793,28 @@ export class WhatsAppProviderHandler {
     if (dateRange) {
       // Custom period: single query for the specified range
       const [incomeR, expenseR] = await Promise.allSettled([
-        this.incomeService.getCustomSummary(providerProfileId, dateRange.from, dateRange.to, dateRange.label),
-        this.expenseService.getCustomSummary(providerProfileId, dateRange.from, dateRange.to, dateRange.label),
+        this.incomeService.getCustomSummary(
+          providerProfileId,
+          dateRange.from,
+          dateRange.to,
+          dateRange.label,
+        ),
+        this.expenseService.getCustomSummary(
+          providerProfileId,
+          dateRange.from,
+          dateRange.to,
+          dateRange.label,
+        ),
       ]);
 
       if (incomeR.status === 'rejected' && expenseR.status === 'rejected') {
-        this.logger.error(`Custom summary failed for ${providerProfileId}: ${(incomeR as PromiseRejectedResult).reason?.message}`);
-        await this.sendAndRecord(phone, 'No pude leer tus números en este momento. Intenta en un minuto.');
+        this.logger.error(
+          `Custom summary failed for ${providerProfileId}: ${(incomeR as PromiseRejectedResult).reason?.message}`,
+        );
+        await this.sendAndRecord(
+          phone,
+          'No pude leer tus números en este momento. Intenta en un minuto.',
+        );
         return;
       }
 
@@ -2486,17 +2830,21 @@ export class WhatsAppProviderHandler {
         }
       }
 
-      await this.sendAndRecord(phone, msg || `No hay datos ${dateRange.label}.`);
+      await this.sendAndRecord(
+        phone,
+        msg || `No hay datos ${dateRange.label}.`,
+      );
       return;
     }
 
     // Default: week + month (original behavior)
-    const [weekIncomeR, monthIncomeR, weekExpenseR, monthExpenseR] = await Promise.allSettled([
-      this.incomeService.getWeekSummary(providerProfileId, tz),
-      this.incomeService.getMonthSummary(providerProfileId, tz),
-      this.expenseService.getWeekSummary(providerProfileId, tz),
-      this.expenseService.getMonthSummary(providerProfileId, tz),
-    ]);
+    const [weekIncomeR, monthIncomeR, weekExpenseR, monthExpenseR] =
+      await Promise.allSettled([
+        this.incomeService.getWeekSummary(providerProfileId, tz),
+        this.incomeService.getMonthSummary(providerProfileId, tz),
+        this.expenseService.getWeekSummary(providerProfileId, tz),
+        this.expenseService.getMonthSummary(providerProfileId, tz),
+      ]);
 
     const logIfRejected = (label: string, r: PromiseSettledResult<any>) => {
       if (r.status === 'rejected') {
@@ -2527,7 +2875,10 @@ export class WhatsAppProviderHandler {
     const parts: string[] = [];
 
     if (weekIncomeR.status === 'fulfilled') {
-      let weekBlock = this.incomeService.formatSummaryMessage(weekIncomeR.value, tz);
+      let weekBlock = this.incomeService.formatSummaryMessage(
+        weekIncomeR.value,
+        tz,
+      );
       if (weekExpenseR.status === 'fulfilled' && weekExpenseR.value.count > 0) {
         weekBlock += `\n\n${this.expenseService.formatExpenseSummaryMessage(weekExpenseR.value, tz)}`;
         const weekNet = weekIncomeR.value.total - weekExpenseR.value.total;
@@ -2537,8 +2888,14 @@ export class WhatsAppProviderHandler {
     }
 
     if (monthIncomeR.status === 'fulfilled') {
-      let monthBlock = this.incomeService.formatSummaryMessage(monthIncomeR.value, tz);
-      if (monthExpenseR.status === 'fulfilled' && monthExpenseR.value.count > 0) {
+      let monthBlock = this.incomeService.formatSummaryMessage(
+        monthIncomeR.value,
+        tz,
+      );
+      if (
+        monthExpenseR.status === 'fulfilled' &&
+        monthExpenseR.value.count > 0
+      ) {
         monthBlock += `\n\n${this.expenseService.formatExpenseSummaryMessage(monthExpenseR.value, tz)}`;
         const monthNet = monthIncomeR.value.total - monthExpenseR.value.total;
         monthBlock += `\n\n*Balance mes: $${monthNet.toLocaleString('es-MX')}*`;
@@ -2582,7 +2939,10 @@ export class WhatsAppProviderHandler {
       return { from: range.start, to: range.end, label: 'antier' };
     }
 
-    if (period.includes('semana pasada') || period.includes('semana anterior')) {
+    if (
+      period.includes('semana pasada') ||
+      period.includes('semana anterior')
+    ) {
       const dayOfWeek = now.getDay();
       const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
       const thisMonday = new Date(now);
@@ -2598,22 +2958,46 @@ export class WhatsAppProviderHandler {
 
     if (period.includes('mes pasado') || period.includes('mes anterior')) {
       const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const to = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      const to = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        0,
+        23,
+        59,
+        59,
+        999,
+      );
       return { from, to, label: 'el mes pasado' };
     }
 
     // Named months: "marzo", "enero 2026"
     const monthNames: Record<string, number> = {
-      enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5,
-      julio: 6, agosto: 7, septiembre: 8, octubre: 9, noviembre: 10, diciembre: 11,
+      enero: 0,
+      febrero: 1,
+      marzo: 2,
+      abril: 3,
+      mayo: 4,
+      junio: 5,
+      julio: 6,
+      agosto: 7,
+      septiembre: 8,
+      octubre: 9,
+      noviembre: 10,
+      diciembre: 11,
     };
-    const monthMatch = period.match(/^(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)(?:\s+(\d{4}))?$/);
+    const monthMatch = period.match(
+      /^(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)(?:\s+(\d{4}))?$/,
+    );
     if (monthMatch) {
       const month = monthNames[monthMatch[1]];
       const year = monthMatch[2] ? parseInt(monthMatch[2]) : now.getFullYear();
       const from = new Date(year, month, 1);
       const to = new Date(year, month + 1, 0, 23, 59, 59, 999);
-      return { from, to, label: `${monthMatch[1]}${monthMatch[2] ? ' ' + monthMatch[2] : ''}` };
+      return {
+        from,
+        to,
+        label: `${monthMatch[1]}${monthMatch[2] ? ' ' + monthMatch[2] : ''}`,
+      };
     }
 
     return null;
@@ -2649,7 +3033,9 @@ export class WhatsAppProviderHandler {
       return;
     }
 
-    const reminderMinutes = data?.reminderMinutes ? Number(data.reminderMinutes) : undefined;
+    const reminderMinutes = data?.reminderMinutes
+      ? Number(data.reminderMinutes)
+      : undefined;
 
     const clientName = this.sanitizeClientField(data?.clientName);
     const clientPhone = this.sanitizeClientField(data?.clientPhone);
@@ -2671,7 +3057,9 @@ export class WhatsAppProviderHandler {
         address: data?.address,
         scheduledAt,
         reminderMinutes,
-        estimatedPrice: data?.estimatedPrice ? Number(data.estimatedPrice) : undefined,
+        estimatedPrice: data?.estimatedPrice
+          ? Number(data.estimatedPrice)
+          : undefined,
       });
 
       let confirmation = this.appointmentsService.formatAppointmentConfirmation(
@@ -2688,7 +3076,10 @@ export class WhatsAppProviderHandler {
           const pastVisits = await this.prisma.appointment.count({
             where: {
               providerId: providerProfileId,
-              clientName: { contains: linked.clientName.trim(), mode: 'insensitive' },
+              clientName: {
+                contains: linked.clientName.trim(),
+                mode: 'insensitive',
+              },
               id: { not: appointment.id },
               status: { in: ['CONFIRMED', 'COMPLETED'] },
             },
@@ -2704,7 +3095,12 @@ export class WhatsAppProviderHandler {
 
       if (reminderMinutes) {
         const scheduled = await this.scheduleAppointmentReminder(
-          appointment.id, phone, scheduledAt, reminderMinutes, linked.clientName, tz,
+          appointment.id,
+          phone,
+          scheduledAt,
+          reminderMinutes,
+          linked.clientName,
+          tz,
         );
         if (scheduled) {
           confirmation += `\n\n🔔 Te recordaré *${reminderMinutes} minutos* antes.`;
@@ -2716,7 +3112,11 @@ export class WhatsAppProviderHandler {
       await this.sendAndRecord(phone, confirmation);
 
       this.scheduleAppointmentFollowup(
-        appointment.id, phone, scheduledAt, linked.clientName, tz,
+        appointment.id,
+        phone,
+        scheduledAt,
+        linked.clientName,
+        tz,
       );
     } catch (error: any) {
       this.logger.error(`Error creating appointment: ${error.message}`);
@@ -2775,12 +3175,20 @@ export class WhatsAppProviderHandler {
 
     const parts: string[] = [];
     if (today.ok) {
-      parts.push(this.appointmentsService.formatAgendaMessage(today.appts, 'de hoy', tz));
+      parts.push(
+        this.appointmentsService.formatAgendaMessage(today.appts, 'de hoy', tz),
+      );
     } else {
       parts.push('No pude leer la agenda de hoy.');
     }
     if (tomorrow.ok) {
-      parts.push(this.appointmentsService.formatAgendaMessage(tomorrow.appts, 'de mañana', tz));
+      parts.push(
+        this.appointmentsService.formatAgendaMessage(
+          tomorrow.appts,
+          'de mañana',
+          tz,
+        ),
+      );
     } else {
       parts.push('No pude leer la agenda de mañana.');
     }
@@ -2803,7 +3211,10 @@ export class WhatsAppProviderHandler {
     tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
       return;
     }
 
@@ -2827,7 +3238,9 @@ export class WhatsAppProviderHandler {
       label = 'de mañana';
     } else if (period.includes('mes')) {
       from = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
-      to = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59));
+      to = new Date(
+        Date.UTC(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59),
+      );
       label = 'del mes';
     } else {
       // Default: this week (Monday to Sunday)
@@ -2845,7 +3258,11 @@ export class WhatsAppProviderHandler {
     }
 
     try {
-      const result = await this.appointmentsService.getProjectedIncome(providerProfileId, from, to);
+      const result = await this.appointmentsService.getProjectedIncome(
+        providerProfileId,
+        from,
+        to,
+      );
 
       if (result.count === 0) {
         await this.sendAndRecord(
@@ -2880,7 +3297,10 @@ export class WhatsAppProviderHandler {
       await this.sendAndRecord(phone, msg);
     } catch (error: any) {
       this.logger.error(`Failed to get projected income: ${error.message}`);
-      await this.sendAndRecord(phone, 'No pude consultar los ingresos proyectados. Intenta de nuevo.');
+      await this.sendAndRecord(
+        phone,
+        'No pude consultar los ingresos proyectados. Intenta de nuevo.',
+      );
     }
   }
 
@@ -2893,11 +3313,18 @@ export class WhatsAppProviderHandler {
     tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
       return;
     }
 
-    const dateHint = this.appointmentsService.parseScheduledDate(data?.date, data?.time, tz);
+    const dateHint = this.appointmentsService.parseScheduledDate(
+      data?.date,
+      data?.time,
+      tz,
+    );
     const matches = await this.appointmentsService.findByContext(
       providerProfileId,
       data?.clientName,
@@ -2925,9 +3352,14 @@ export class WhatsAppProviderHandler {
     }
 
     const target = matches[0];
-    const updates: import('../appointments/appointments.service').UpdateAppointmentDto = {};
+    const updates: import('../appointments/appointments.service').UpdateAppointmentDto =
+      {};
 
-    const newScheduledAt = this.appointmentsService.parseScheduledDate(data?.newDate, data?.newTime, tz);
+    const newScheduledAt = this.appointmentsService.parseScheduledDate(
+      data?.newDate,
+      data?.newTime,
+      tz,
+    );
     if (newScheduledAt) {
       updates.scheduledAt = newScheduledAt;
     } else if (data?.newTime) {
@@ -2935,8 +3367,12 @@ export class WhatsAppProviderHandler {
       if (!isNaN(h)) {
         const local = toLocalTime(target.scheduledAt, tz);
         updates.scheduledAt = wallClockToUtc(
-          local.getFullYear(), local.getMonth(), local.getDate(),
-          h, m || 0, tz,
+          local.getFullYear(),
+          local.getMonth(),
+          local.getDate(),
+          h,
+          m || 0,
+          tz,
         );
       }
     }
@@ -2944,10 +3380,14 @@ export class WhatsAppProviderHandler {
     if (data?.newAddress) updates.address = data.newAddress;
     if (data?.newDescription) updates.description = data.newDescription;
     if (data?.reminderMinutes !== undefined) {
-      updates.reminderMinutes = data.reminderMinutes ? Number(data.reminderMinutes) : null;
+      updates.reminderMinutes = data.reminderMinutes
+        ? Number(data.reminderMinutes)
+        : null;
     }
     if (data?.newEstimatedPrice !== undefined) {
-      updates.estimatedPrice = data.newEstimatedPrice ? Number(data.newEstimatedPrice) : null;
+      updates.estimatedPrice = data.newEstimatedPrice
+        ? Number(data.newEstimatedPrice)
+        : null;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -2971,15 +3411,28 @@ export class WhatsAppProviderHandler {
       if (updates.scheduledAt) {
         await this.cancelAppointmentFollowup(updated.id);
         this.scheduleAppointmentFollowup(
-          updated.id, phone, updated.scheduledAt, updated.clientName ?? undefined, tz,
+          updated.id,
+          phone,
+          updated.scheduledAt,
+          updated.clientName ?? undefined,
+          tz,
         );
       }
 
-      const activeReminder = updated.reminderMinutes ?? (target as any).reminderMinutes;
-      if (activeReminder && (updates.scheduledAt || updates.reminderMinutes !== undefined)) {
+      const activeReminder =
+        updated.reminderMinutes ?? (target as any).reminderMinutes;
+      if (
+        activeReminder &&
+        (updates.scheduledAt || updates.reminderMinutes !== undefined)
+      ) {
         await this.cancelAppointmentReminder(updated.id);
         const scheduled = await this.scheduleAppointmentReminder(
-          updated.id, phone, updated.scheduledAt, activeReminder, updated.clientName ?? undefined, tz,
+          updated.id,
+          phone,
+          updated.scheduledAt,
+          activeReminder,
+          updated.clientName ?? undefined,
+          tz,
         );
         if (scheduled) {
           confirmation += `\n\n🔔 Recordatorio reprogramado: *${activeReminder} minutos* antes.`;
@@ -2989,7 +3442,10 @@ export class WhatsAppProviderHandler {
       await this.sendAndRecord(phone, confirmation);
     } catch (error: any) {
       this.logger.error(`Error modifying appointment: ${error.message}`);
-      await this.sendAndRecord(phone, '❌ No se pudo modificar la cita. Intenta de nuevo.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se pudo modificar la cita. Intenta de nuevo.',
+      );
     }
   }
 
@@ -3002,11 +3458,18 @@ export class WhatsAppProviderHandler {
     tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
       return;
     }
 
-    const dateHint = this.appointmentsService.parseScheduledDate(data?.date, data?.time, tz);
+    const dateHint = this.appointmentsService.parseScheduledDate(
+      data?.date,
+      data?.time,
+      tz,
+    );
     const matches = await this.appointmentsService.findByContext(
       providerProfileId,
       data?.clientName,
@@ -3047,7 +3510,10 @@ export class WhatsAppProviderHandler {
       await this.sendAndRecord(phone, confirmation);
     } catch (error: any) {
       this.logger.error(`Error cancelling appointment: ${error.message}`);
-      await this.sendAndRecord(phone, '❌ No se pudo cancelar la cita. Intenta de nuevo.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se pudo cancelar la cita. Intenta de nuevo.',
+      );
     }
   }
 
@@ -3083,11 +3549,18 @@ export class WhatsAppProviderHandler {
     srcHash?: string,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
       return;
     }
 
-    const status = data?.status as 'completed' | 'no_show' | 'cancelled' | undefined;
+    const status = data?.status as
+      | 'completed'
+      | 'no_show'
+      | 'cancelled'
+      | undefined;
     if (!status) {
       await this.sendAndRecord(
         phone,
@@ -3096,15 +3569,19 @@ export class WhatsAppProviderHandler {
       return;
     }
 
-    let appointment: Awaited<ReturnType<typeof this.appointmentsService.findByContext>>[number] | null = null;
+    let appointment:
+      | Awaited<
+          ReturnType<typeof this.appointmentsService.findByContext>
+        >[number]
+      | null = null;
 
     if (data?.appointmentId) {
-      appointment = await this.prisma.appointment.findFirst({
+      appointment = (await this.prisma.appointment.findFirst({
         where: {
           id: data.appointmentId,
           providerId: providerProfileId,
         },
-      }) as any;
+      })) as any;
     }
 
     const dateHint = appointment
@@ -3198,8 +3675,13 @@ export class WhatsAppProviderHandler {
         );
       }
     } catch (error: any) {
-      this.logger.error(`Error confirming appointment result: ${error.message}`);
-      await this.sendAndRecord(phone, '❌ No se pudo registrar el resultado. Intenta de nuevo.');
+      this.logger.error(
+        `Error confirming appointment result: ${error.message}`,
+      );
+      await this.sendAndRecord(
+        phone,
+        '❌ No se pudo registrar el resultado. Intenta de nuevo.',
+      );
     }
   }
 
@@ -3212,11 +3694,18 @@ export class WhatsAppProviderHandler {
     tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
       return;
     }
 
-    const remindAt = this.remindersService.parseScheduledDate(data?.date, data?.time, tz);
+    const remindAt = this.remindersService.parseScheduledDate(
+      data?.date,
+      data?.time,
+      tz,
+    );
 
     if (!remindAt) {
       await this.sendAndRecord(
@@ -3235,13 +3724,24 @@ export class WhatsAppProviderHandler {
         remindAt,
       });
 
-      const confirmation = this.remindersService.formatReminderConfirmation(description, remindAt, tz);
-      await this.sendAndRecord(phone, confirmation, AiIntent.CREAR_RECORDATORIO);
+      const confirmation = this.remindersService.formatReminderConfirmation(
+        description,
+        remindAt,
+        tz,
+      );
+      await this.sendAndRecord(
+        phone,
+        confirmation,
+        AiIntent.CREAR_RECORDATORIO,
+      );
 
       this.schedulePersonalReminder(reminder.id, phone, description, remindAt);
     } catch (error: any) {
       this.logger.error(`Error creating reminder: ${error.message}`);
-      await this.sendAndRecord(phone, '❌ No se pudo crear el recordatorio. Intenta de nuevo.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se pudo crear el recordatorio. Intenta de nuevo.',
+      );
     }
   }
 
@@ -3251,17 +3751,24 @@ export class WhatsAppProviderHandler {
     tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
       return;
     }
 
     try {
-      const reminders = await this.remindersService.findActive(providerProfileId);
+      const reminders =
+        await this.remindersService.findActive(providerProfileId);
       const msg = this.remindersService.formatRemindersList(reminders, tz);
       await this.sendAndRecord(phone, msg, AiIntent.VER_RECORDATORIOS);
     } catch (error: any) {
       this.logger.error(`Error listing reminders: ${error.message}`);
-      await this.sendAndRecord(phone, '❌ No se pudieron cargar los recordatorios. Intenta de nuevo.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se pudieron cargar los recordatorios. Intenta de nuevo.',
+      );
     }
   }
 
@@ -3272,18 +3779,27 @@ export class WhatsAppProviderHandler {
     tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
       return;
     }
 
     const description = data?.description;
     if (!description) {
-      await this.sendAndRecord(phone, '🤔 ¿Cuál recordatorio quieres modificar?');
+      await this.sendAndRecord(
+        phone,
+        '🤔 ¿Cuál recordatorio quieres modificar?',
+      );
       return;
     }
 
     try {
-      const matches = await this.remindersService.findByDescription(providerProfileId, description);
+      const matches = await this.remindersService.findByDescription(
+        providerProfileId,
+        description,
+      );
 
       if (matches.length === 0) {
         await this.sendAndRecord(
@@ -3300,17 +3816,27 @@ export class WhatsAppProviderHandler {
         updateData.description = data.newDescription;
       }
 
-      const newRemindAt = this.remindersService.parseScheduledDate(data?.newDate, data?.newTime, tz);
+      const newRemindAt = this.remindersService.parseScheduledDate(
+        data?.newDate,
+        data?.newTime,
+        tz,
+      );
       if (newRemindAt) {
         updateData.remindAt = newRemindAt;
       }
 
       if (Object.keys(updateData).length === 0) {
-        await this.sendAndRecord(phone, '🤔 ¿Qué quieres cambiar del recordatorio? (hora, fecha, descripción)');
+        await this.sendAndRecord(
+          phone,
+          '🤔 ¿Qué quieres cambiar del recordatorio? (hora, fecha, descripción)',
+        );
         return;
       }
 
-      const updated = await this.remindersService.update(reminder.id, updateData);
+      const updated = await this.remindersService.update(
+        reminder.id,
+        updateData,
+      );
 
       await this.cancelPersonalReminder(reminder.id);
       this.schedulePersonalReminder(
@@ -3320,11 +3846,18 @@ export class WhatsAppProviderHandler {
         updated.remindAt,
       );
 
-      const msg = this.remindersService.formatReminderModified(updated.description, updated.remindAt, tz);
+      const msg = this.remindersService.formatReminderModified(
+        updated.description,
+        updated.remindAt,
+        tz,
+      );
       await this.sendAndRecord(phone, msg, AiIntent.MODIFICAR_RECORDATORIO);
     } catch (error: any) {
       this.logger.error(`Error modifying reminder: ${error.message}`);
-      await this.sendAndRecord(phone, '❌ No se pudo modificar el recordatorio. Intenta de nuevo.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se pudo modificar el recordatorio. Intenta de nuevo.',
+      );
     }
   }
 
@@ -3335,18 +3868,27 @@ export class WhatsAppProviderHandler {
     _tz: string = DEFAULT_TIMEZONE,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
       return;
     }
 
     const description = data?.description;
     if (!description) {
-      await this.sendAndRecord(phone, '🤔 ¿Cuál recordatorio quieres cancelar?');
+      await this.sendAndRecord(
+        phone,
+        '🤔 ¿Cuál recordatorio quieres cancelar?',
+      );
       return;
     }
 
     try {
-      const matches = await this.remindersService.findByDescription(providerProfileId, description);
+      const matches = await this.remindersService.findByDescription(
+        providerProfileId,
+        description,
+      );
 
       if (matches.length === 0) {
         await this.sendAndRecord(
@@ -3360,11 +3902,16 @@ export class WhatsAppProviderHandler {
       await this.remindersService.cancel(reminder.id);
       await this.cancelPersonalReminder(reminder.id);
 
-      const msg = this.remindersService.formatReminderCancelled(reminder.description);
+      const msg = this.remindersService.formatReminderCancelled(
+        reminder.description,
+      );
       await this.sendAndRecord(phone, msg, AiIntent.CANCELAR_RECORDATORIO);
     } catch (error: any) {
       this.logger.error(`Error cancelling reminder: ${error.message}`);
-      await this.sendAndRecord(phone, '❌ No se pudo cancelar el recordatorio. Intenta de nuevo.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se pudo cancelar el recordatorio. Intenta de nuevo.',
+      );
     }
   }
 
@@ -3374,7 +3921,10 @@ export class WhatsAppProviderHandler {
     providerProfileId?: string,
   ): Promise<void> {
     if (!providerProfileId) {
-      await this.sendAndRecord(phone, '❌ No se encontró tu perfil de proveedor.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
       return;
     }
 
@@ -3385,7 +3935,10 @@ export class WhatsAppProviderHandler {
     }
 
     try {
-      const matches = await this.remindersService.findCompletableByDescription(providerProfileId, description);
+      const matches = await this.remindersService.findCompletableByDescription(
+        providerProfileId,
+        description,
+      );
 
       if (matches.length === 0) {
         await this.sendAndRecord(
@@ -3399,11 +3952,16 @@ export class WhatsAppProviderHandler {
       await this.remindersService.markCompleted(reminder.id);
       await this.cancelPersonalReminder(reminder.id);
 
-      const msg = this.remindersService.formatReminderCompleted(reminder.description);
+      const msg = this.remindersService.formatReminderCompleted(
+        reminder.description,
+      );
       await this.sendAndRecord(phone, msg, AiIntent.COMPLETAR_RECORDATORIO);
     } catch (error: any) {
       this.logger.error(`Error completing reminder: ${error.message}`);
-      await this.sendAndRecord(phone, '❌ No se pudo completar el recordatorio. Intenta de nuevo.');
+      await this.sendAndRecord(
+        phone,
+        '❌ No se pudo completar el recordatorio. Intenta de nuevo.',
+      );
     }
   }
 
@@ -3427,14 +3985,14 @@ export class WhatsAppProviderHandler {
     };
 
     this.queueService
-      .addJob(
-        QUEUE_NAMES.PERSONAL_REMINDER,
-        'personal-reminder',
-        jobData,
-        { delay, jobId: `personal-reminder-${reminderId}` },
-      )
+      .addJob(QUEUE_NAMES.PERSONAL_REMINDER, 'personal-reminder', jobData, {
+        delay,
+        jobId: `personal-reminder-${reminderId}`,
+      })
       .catch((err) =>
-        this.logger.warn(`Failed to schedule personal reminder: ${err.message}`),
+        this.logger.warn(
+          `Failed to schedule personal reminder: ${err.message}`,
+        ),
       );
 
     return true;
@@ -3470,14 +4028,14 @@ export class WhatsAppProviderHandler {
     };
 
     this.queueService
-      .addJob(
-        QUEUE_NAMES.APPOINTMENT_FOLLOWUP,
-        'followup',
-        jobData,
-        { delay, jobId: `followup-${appointmentId}` },
-      )
+      .addJob(QUEUE_NAMES.APPOINTMENT_FOLLOWUP, 'followup', jobData, {
+        delay,
+        jobId: `followup-${appointmentId}`,
+      })
       .catch((err) =>
-        this.logger.warn(`Failed to schedule appointment followup: ${err.message}`),
+        this.logger.warn(
+          `Failed to schedule appointment followup: ${err.message}`,
+        ),
       );
   }
 
@@ -3489,7 +4047,8 @@ export class WhatsAppProviderHandler {
     clientName?: string,
     timezone?: string,
   ): Promise<boolean> {
-    const delay = scheduledAt.getTime() - Date.now() - reminderMinutes * 60 * 1000;
+    const delay =
+      scheduledAt.getTime() - Date.now() - reminderMinutes * 60 * 1000;
 
     if (delay <= 0) return false;
 
@@ -3503,21 +4062,23 @@ export class WhatsAppProviderHandler {
     };
 
     const jobId = await this.queueService
-      .addJob(
-        QUEUE_NAMES.APPOINTMENT_REMINDER,
-        'reminder',
-        jobData,
-        { delay, jobId: `reminder-${appointmentId}` },
-      )
+      .addJob(QUEUE_NAMES.APPOINTMENT_REMINDER, 'reminder', jobData, {
+        delay,
+        jobId: `reminder-${appointmentId}`,
+      })
       .catch((err) => {
-        this.logger.warn(`Failed to schedule appointment reminder: ${err.message}`);
+        this.logger.warn(
+          `Failed to schedule appointment reminder: ${err.message}`,
+        );
         return null;
       });
 
     return jobId !== null;
   }
 
-  private async cancelAppointmentReminder(appointmentId: string): Promise<void> {
+  private async cancelAppointmentReminder(
+    appointmentId: string,
+  ): Promise<void> {
     await this.queueService.removeJob(
       QUEUE_NAMES.APPOINTMENT_REMINDER,
       `reminder-${appointmentId}`,
@@ -3530,7 +4091,9 @@ export class WhatsAppProviderHandler {
    * marked completed/no-show — otherwise the old followup fires with stale
    * data and confuses the user (Cap. 38, bug Oscar 16-abr).
    */
-  private async cancelAppointmentFollowup(appointmentId: string): Promise<void> {
+  private async cancelAppointmentFollowup(
+    appointmentId: string,
+  ): Promise<void> {
     await this.queueService.removeJob(
       QUEUE_NAMES.APPOINTMENT_FOLLOWUP,
       `followup-${appointmentId}`,
@@ -3556,10 +4119,7 @@ export class WhatsAppProviderHandler {
   }
 
   private async sendHelpMenu(phone: string) {
-    await this.whatsapp.sendTextMessage(
-      phone,
-      buildActivationHelpMessage(),
-    );
+    await this.whatsapp.sendTextMessage(phone, buildActivationHelpMessage());
   }
 
   // ─── Learned Memory extraction ─────────────────────────
@@ -3625,10 +4185,21 @@ export class WhatsAppProviderHandler {
   // False positives are harmless — they just route to the LLM instead of
   // the keyword bypass, which is always correct.
   private static readonly ACTION_STEMS = [
-    'cancel', 'elimin', 'borr', 'quit',
-    'crea', 'crear', 'agreg', 'registr',
-    'nuev', 'cambi', 'modific', 'actualiz',
-    'agend', 'program', 'configur',
+    'cancel',
+    'elimin',
+    'borr',
+    'quit',
+    'crea',
+    'crear',
+    'agreg',
+    'registr',
+    'nuev',
+    'cambi',
+    'modific',
+    'actualiz',
+    'agend',
+    'program',
+    'configur',
   ];
 
   private hasActionWord(words: string[]): boolean {
@@ -3645,9 +4216,16 @@ export class WhatsAppProviderHandler {
     const words = normalizedText.split(/\s+/);
 
     const RECURRING_SIGNALS = [
-      'fijo', 'fijos', 'fija', 'fijas',
-      'recurrente', 'recurrentes',
-      'periodico', 'periodicos', 'periodica', 'periodicas',
+      'fijo',
+      'fijos',
+      'fija',
+      'fijas',
+      'recurrente',
+      'recurrentes',
+      'periodico',
+      'periodicos',
+      'periodica',
+      'periodicas',
     ];
 
     if (!words.some((w) => RECURRING_SIGNALS.includes(w))) return false;
@@ -3665,21 +4243,30 @@ export class WhatsAppProviderHandler {
   private isSummaryQuery(normalizedText: string): boolean {
     const words = normalizedText.split(/\s+/);
 
-    const SUMMARY_SIGNALS = [
-      'resumen', 'balance', 'estado',
-    ];
+    const SUMMARY_SIGNALS = ['resumen', 'balance', 'estado'];
     const SUMMARY_PHRASES = [
-      'como voy', 'cuanto llevo', 'cuanto he ganado', 'cuanto he gastado',
-      'cuanto gane', 'cuanto gaste',
+      'como voy',
+      'cuanto llevo',
+      'cuanto he ganado',
+      'cuanto he gastado',
+      'cuanto gane',
+      'cuanto gaste',
     ];
     const RECURRING_SIGNALS = [
-      'fijo', 'fijos', 'fija', 'fijas',
-      'recurrente', 'recurrentes',
-      'periodico', 'periodicos',
+      'fijo',
+      'fijos',
+      'fija',
+      'fijas',
+      'recurrente',
+      'recurrentes',
+      'periodico',
+      'periodicos',
     ];
 
     const hasSummaryWord = words.some((w) => SUMMARY_SIGNALS.includes(w));
-    const hasSummaryPhrase = SUMMARY_PHRASES.some((p) => normalizedText.includes(p));
+    const hasSummaryPhrase = SUMMARY_PHRASES.some((p) =>
+      normalizedText.includes(p),
+    );
     if (!hasSummaryWord && !hasSummaryPhrase) return false;
 
     // "resumen de gastos fijos" → should go to recurring list, not summary
@@ -3698,13 +4285,18 @@ export class WhatsAppProviderHandler {
 
     const AGENDA_SIGNALS = ['agenda', 'citas'];
     const AGENDA_PHRASES = [
-      'que tengo hoy', 'que tengo manana',
-      'tengo citas', 'tengo algo',
-      'mi agenda', 'mis citas',
+      'que tengo hoy',
+      'que tengo manana',
+      'tengo citas',
+      'tengo algo',
+      'mi agenda',
+      'mis citas',
     ];
 
     const hasAgendaWord = words.some((w) => AGENDA_SIGNALS.includes(w));
-    const hasAgendaPhrase = AGENDA_PHRASES.some((p) => normalizedText.includes(p));
+    const hasAgendaPhrase = AGENDA_PHRASES.some((p) =>
+      normalizedText.includes(p),
+    );
     if (!hasAgendaWord && !hasAgendaPhrase) return false;
 
     // "agenda una cita" or "agendar para mañana" → action, not query
@@ -3740,7 +4332,9 @@ export class WhatsAppProviderHandler {
 
       const mediaUrl = await this.whatsapp.getMediaUrl(message.audio.id);
       if (!mediaUrl) {
-        this.logger.warn(`Could not resolve media URL for audio ${message.audio.id}`);
+        this.logger.warn(
+          `Could not resolve media URL for audio ${message.audio.id}`,
+        );
         await this.logAudioEvent(senderPhone, {
           event: 'audio_media_url_failed_direct_handler',
           mediaId: message.audio.id,
@@ -3771,7 +4365,10 @@ export class WhatsAppProviderHandler {
       }
 
       const mimeType = message.audio.mime_type || 'audio/ogg';
-      const transcript = await this.aiService.transcribeAudio(audioBuffer, mimeType);
+      const transcript = await this.aiService.transcribeAudio(
+        audioBuffer,
+        mimeType,
+      );
 
       if (!transcript) {
         await this.logAudioEvent(senderPhone, {
@@ -3811,7 +4408,9 @@ export class WhatsAppProviderHandler {
         },
       })
       .catch((err) => {
-        this.logger.warn(`Failed to log audio event for ${phone}: ${err.message}`);
+        this.logger.warn(
+          `Failed to log audio event for ${phone}: ${err.message}`,
+        );
       });
   }
 
@@ -4298,7 +4897,9 @@ export class WhatsAppProviderHandler {
     if (responses.length !== 1) return;
     const sole = responses[0];
     if (sole.intent !== AiIntent.CONVERSACION_GENERAL) return;
-    const detected = looksLikeFinancialClarificationQuestion(sole.message || '');
+    const detected = looksLikeFinancialClarificationQuestion(
+      sole.message || '',
+    );
     if (!detected) return;
     await this.plantPendingFinancialDirect(
       phone,
@@ -4347,8 +4948,9 @@ export class WhatsAppProviderHandler {
     tz: string,
     srcHash: string,
   ): Promise<boolean> {
-    const pending = (await this.getPendingAppointmentFollowups(phone))
-      .filter((item) => item.providerProfileId === providerProfileId);
+    const pending = (await this.getPendingAppointmentFollowups(phone)).filter(
+      (item) => item.providerProfileId === providerProfileId,
+    );
     if (pending.length === 0) return false;
 
     const replies = this.parseAppointmentFollowupReplies(text);
@@ -4364,7 +4966,14 @@ export class WhatsAppProviderHandler {
         );
         return true;
       }
-      await this.applyAppointmentFollowupReply(phone, byName, replies[0], providerProfileId, tz, srcHash);
+      await this.applyAppointmentFollowupReply(
+        phone,
+        byName,
+        replies[0],
+        providerProfileId,
+        tz,
+        srcHash,
+      );
       return true;
     }
 
@@ -4406,7 +5015,8 @@ export class WhatsAppProviderHandler {
   private parseAppointmentFollowupReplies(
     text: string,
   ): Array<{ status: 'completed' | 'no_show'; amount?: number }> {
-    const replies: Array<{ status: 'completed' | 'no_show'; amount?: number }> = [];
+    const replies: Array<{ status: 'completed' | 'no_show'; amount?: number }> =
+      [];
 
     text
       .split(/\n+/)
@@ -4415,11 +5025,20 @@ export class WhatsAppProviderHandler {
       .forEach((line) => {
         const normalized = this.normalizeForKeywords(line);
         const amount = this.extractMoneyAmount(line) ?? undefined;
-        if (/\b(no se hizo|no fui|no llego|no llego|no vino|no)\b/.test(normalized)) {
+        if (
+          /\b(no se hizo|no fui|no llego|no llego|no vino|no)\b/.test(
+            normalized,
+          )
+        ) {
           replies.push({ status: 'no_show', amount });
           return;
         }
-        if (/\b(si|sí|se hizo|hecho|cobre|cobré|cobro|pago|pagó)\b/.test(line.toLowerCase()) || amount) {
+        if (
+          /\b(si|sí|se hizo|hecho|cobre|cobré|cobro|pago|pagó)\b/.test(
+            line.toLowerCase(),
+          ) ||
+          amount
+        ) {
           replies.push({ status: 'completed', amount });
         }
       });
@@ -4432,13 +5051,18 @@ export class WhatsAppProviderHandler {
     pending: PendingAppointmentFollowupState[],
   ): PendingAppointmentFollowupState | null {
     const normalized = this.normalizeForKeywords(text);
-    return pending.find((item) => {
-      if (!item.clientName) return false;
-      const words = this.normalizeForKeywords(item.clientName)
-        .split(/\s+/)
-        .filter((w) => w.length > 2 && !['senor', 'sra', 'sr', 'lic', 'dr'].includes(w));
-      return words.some((word) => normalized.includes(word));
-    }) || null;
+    return (
+      pending.find((item) => {
+        if (!item.clientName) return false;
+        const words = this.normalizeForKeywords(item.clientName)
+          .split(/\s+/)
+          .filter(
+            (w) =>
+              w.length > 2 && !['senor', 'sra', 'sr', 'lic', 'dr'].includes(w),
+          );
+        return words.some((word) => normalized.includes(word));
+      }) || null
+    );
   }
 
   private normalizePositiveAmount(value: unknown): number | null {
@@ -4452,13 +5076,16 @@ export class WhatsAppProviderHandler {
   }
 
   private extractMoneyAmount(text: string): number | null {
-    const match = text.match(/\$?\s*(\d{1,3}(?:[,\s]\d{3})+|\d+(?:[.,]\d{1,2})?)/);
+    const match = text.match(
+      /\$?\s*(\d{1,3}(?:[,\s]\d{3})+|\d+(?:[.,]\d{1,2})?)/,
+    );
     if (!match) return null;
 
     const raw = match[1].replace(/\s/g, '');
-    const normalized = raw.includes(',') && !raw.includes('.')
-      ? raw.replace(/,/g, '')
-      : raw.replace(/,/g, '');
+    const normalized =
+      raw.includes(',') && !raw.includes('.')
+        ? raw.replace(/,/g, '')
+        : raw.replace(/,/g, '');
     const amount = Number(normalized);
 
     return Number.isFinite(amount) && amount > 0 ? amount : null;

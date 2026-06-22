@@ -89,7 +89,9 @@ describe('TOOL_TO_INTENT — expense management decomposition', () => {
 
 describe('TOOL_TO_INTENT — workspace config decomposition', () => {
   it('configurar_servicio maps to CONFIGURAR_PERFIL', () => {
-    expect(TOOL_TO_INTENT['configurar_servicio'].intent).toBe(AiIntent.CONFIGURAR_PERFIL);
+    expect(TOOL_TO_INTENT['configurar_servicio'].intent).toBe(
+      AiIntent.CONFIGURAR_PERFIL,
+    );
   });
 
   it('configurar_horario maps to CONFIGURAR_PERFIL with action=set_schedule', () => {
@@ -106,7 +108,8 @@ describe('TOOL_TO_INTENT — workspace config decomposition', () => {
 });
 
 describe('Tool parameter schemas', () => {
-  const findTool = (name: string) => functionTools.find((t) => t.function.name === name)!;
+  const findTool = (name: string) =>
+    functionTools.find((t) => t.function.name === name)!;
 
   it('crear_gasto_recurrente requires amount and description', () => {
     const tool = findTool('crear_gasto_recurrente');
@@ -119,6 +122,16 @@ describe('Tool parameter schemas', () => {
     const tool = findTool('registrar_ingreso');
     const params = tool.function.parameters as any;
     expect(params.required).toEqual(['amount']);
+  });
+
+  it('registrar_gasto can carry the original currency', () => {
+    const tool = findTool('registrar_gasto');
+    const params = tool.function.parameters as any;
+    expect(params.required).toEqual(['amount']);
+    expect(params.properties.currency.enum).toEqual(
+      expect.arrayContaining(['MXN', 'USD', 'EUR', 'CAD']),
+    );
+    expect(params.properties.currency.description).toContain('USD');
   });
 
   it('agendar_cita requires date', () => {

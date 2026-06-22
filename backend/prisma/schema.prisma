@@ -223,13 +223,19 @@ enum PaymentLinkStatus {
 // Expenses (provider spending tracking)
 // ──────────────────────────────────────────────
 model Expense {
-  id          String   @id @default(uuid())
-  providerId  String   @map("provider_id")
-  amount      Decimal  @db.Decimal(12, 2)
-  category    String?
-  description String?
-  date        DateTime @default(now())
-  createdAt   DateTime @default(now()) @map("created_at")
+  id                   String    @id @default(uuid())
+  providerId           String    @map("provider_id")
+  amount               Decimal   @db.Decimal(12, 2)
+  currency             String    @default("MXN")
+  originalAmount       Decimal?  @map("original_amount") @db.Decimal(12, 2)
+  originalCurrency     String?   @map("original_currency")
+  exchangeRate         Decimal?  @map("exchange_rate") @db.Decimal(18, 8)
+  exchangeRateProvider String?   @map("exchange_rate_provider")
+  exchangeRateDate     DateTime? @map("exchange_rate_date")
+  category             String?
+  description          String?
+  date                 DateTime  @default(now())
+  createdAt            DateTime  @default(now()) @map("created_at")
 
   provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
 
