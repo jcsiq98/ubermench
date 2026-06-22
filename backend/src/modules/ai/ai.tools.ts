@@ -50,6 +50,15 @@ export const TOOL_TO_INTENT: Record<
   ver_resumen: {
     intent: AiIntent.VER_RESUMEN,
   },
+  consultar_cliente: {
+    intent: AiIntent.CONSULTAR_CLIENTE,
+  },
+  clientes_inactivos: {
+    intent: AiIntent.CLIENTES_INACTIVOS,
+  },
+  cobros_pendientes: {
+    intent: AiIntent.COBROS_PENDIENTES,
+  },
   agendar_cita: {
     intent: AiIntent.AGENDAR_CITA,
   },
@@ -392,6 +401,70 @@ export const AI_TOOLS: ChatCompletionTool[] = [
             type: 'string',
             description:
               'Periodo a consultar. "esta semana" (default), "este mes", "hoy", "ayer", "la semana pasada", "el mes pasado", "marzo", "enero 2026", o un rango como "del 1 al 15 de abril". Si no se menciona periodo, NO incluir — se asume esta semana.',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'consultar_cliente',
+      description:
+        'Consultar historial real de un cliente desde el ledger/Postgres: ingresos, citas y links de pago. Usar para preguntas como "cuándo vino Pedro", "cuánto me ha pagado Mariana", "qué tengo registrado de la Sra. García". NO inventar si no hay datos.',
+      parameters: {
+        type: 'object',
+        properties: {
+          clientName: {
+            type: 'string',
+            description:
+              'Nombre del cliente a consultar, tal como lo dijo el usuario.',
+          },
+          limit: {
+            type: 'number',
+            description:
+              'Máximo de movimientos recientes a mostrar. Default 5, máximo 10.',
+          },
+        },
+        required: ['clientName'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'clientes_inactivos',
+      description:
+        'Listar clientes con actividad previa pero sin ingresos/citas/links recientes en N días. Usar para "clientes inactivos", "a quién no le he trabajado", "quién tiene rato que no viene".',
+      parameters: {
+        type: 'object',
+        properties: {
+          days: {
+            type: 'number',
+            description:
+              'Días mínimos de inactividad. Default 90. "hace 2 meses" ≈ 60.',
+          },
+          limit: {
+            type: 'number',
+            description: 'Máximo de clientes a mostrar. Default 5, máximo 10.',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cobros_pendientes',
+      description:
+        'Listar cobros pendientes desde el ledger: links de pago pendientes sin ingreso registrado. Usar para "quién me debe", "qué cobros tengo pendientes", "a quién tengo que cobrar". Si no existe link pendiente, no inventar deuda.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: {
+            type: 'number',
+            description:
+              'Máximo de cobros pendientes a mostrar. Default 5, máximo 10.',
           },
         },
       },

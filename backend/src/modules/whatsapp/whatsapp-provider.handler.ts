@@ -27,6 +27,11 @@ import {
   ExchangeRateService,
   ExchangeRateUnavailableError,
 } from '../exchange-rate/exchange-rate.service';
+import {
+  LedgerClientActivity,
+  LedgerQueryService,
+  PendingChargeItem,
+} from '../ledger/ledger-query.service';
 import { AttributionQueue } from './attribution-queue';
 import {
   formatTime,
@@ -179,6 +184,7 @@ export class WhatsAppProviderHandler {
     private contactsService: ContactsService,
     private attributionQueue: AttributionQueue,
     private exchangeRateService: ExchangeRateService,
+    private ledgerQueryService: LedgerQueryService,
   ) {}
 
   // ─── Session management ──────────────────────────────────
@@ -919,6 +925,33 @@ export class WhatsAppProviderHandler {
 
           case AiIntent.VER_RESUMEN:
             await this.handleVerResumen(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+            );
+            break;
+
+          case AiIntent.CONSULTAR_CLIENTE:
+            await this.handleConsultarCliente(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+            );
+            break;
+
+          case AiIntent.CLIENTES_INACTIVOS:
+            await this.handleClientesInactivos(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+            );
+            break;
+
+          case AiIntent.COBROS_PENDIENTES:
+            await this.handleCobrosPendientes(
               phone,
               aiResponse.data,
               providerProfileId,
@@ -3001,6 +3034,205 @@ export class WhatsAppProviderHandler {
     }
 
     return null;
+  }
+
+  // ─── Ledger A0: read-side tools ──────────────────────────
+
+  private async handleConsultarCliente(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, 'No encontré tu perfil.');
+      return;
+    }
+
+    const clientName = this.sanitizeClientField(data?.clientName);
+    if (!clientName) {
+      await this.sendAndRecord(phone, '¿Qué cliente quieres que revise?');
+      return;
+    }
+
+    const history = await this.ledgerQueryService.getClientHistory({
+      providerId: providerProfileId,
+      clientName,
+      limit: this.normalizeToolLimit(data?.limit),
+    });
+
+    if (!history) {
+      await this.sendAndRecord(
+        phone,
+        `No tengo registro de ${clientName} en tus ingresos, citas ni links.`,
+        AiIntent.CONSULTAR_CLIENTE,
+      );
+      return;
+    }
+
+    const lines = [
+      `De ${history.clientLabel}:`,
+      `Ingresos: ${history.incomeCount} por *${this.formatMoney(history.totalIncome)}*`,
+      `Citas: ${history.appointmentCount}`,
+      `Links pendientes: ${history.pendingPaymentLinkCount}`,
+    ];
+
+    if (history.lastActivityAt) {
+      lines.push(
+        `Último movimiento: ${formatDate(history.lastActivityAt, tz)}`,
+      );
+    }
+
+    if (history.recentActivity.length > 0) {
+      lines.push('', 'Más reciente:');
+      for (const item of history.recentActivity.slice(0, 5)) {
+        lines.push(this.formatLedgerActivityLine(item, tz));
+      }
+    }
+
+    await this.sendAndRecord(
+      phone,
+      lines.join('\n'),
+      AiIntent.CONSULTAR_CLIENTE,
+    );
+  }
+
+  private async handleClientesInactivos(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, 'No encontré tu perfil.');
+      return;
+    }
+
+    const days = this.normalizePositiveToolInt(data?.days);
+    const clients = await this.ledgerQueryService.listInactiveClients({
+      providerId: providerProfileId,
+      days,
+      limit: this.normalizeToolLimit(data?.limit),
+    });
+
+    const threshold = days ?? 90;
+    if (clients.length === 0) {
+      await this.sendAndRecord(
+        phone,
+        `No encontré clientes con más de ${threshold} días sin actividad registrada.`,
+        AiIntent.CLIENTES_INACTIVOS,
+      );
+      return;
+    }
+
+    const lines = [`Clientes con más de ${threshold} días sin actividad:`];
+    for (const client of clients) {
+      const bits = [
+        `${client.clientLabel}: ${client.daysInactive} días`,
+        `último ${formatDate(client.lastActivityAt, tz)}`,
+      ];
+      if (client.totalIncome > 0) {
+        bits.push(this.formatMoney(client.totalIncome));
+      }
+      lines.push(`• ${bits.join(' — ')}`);
+    }
+
+    await this.sendAndRecord(
+      phone,
+      lines.join('\n'),
+      AiIntent.CLIENTES_INACTIVOS,
+    );
+  }
+
+  private async handleCobrosPendientes(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, 'No encontré tu perfil.');
+      return;
+    }
+
+    const pending = await this.ledgerQueryService.listPendingCharges({
+      providerId: providerProfileId,
+      limit: this.normalizeToolLimit(data?.limit),
+    });
+
+    if (pending.items.length === 0) {
+      await this.sendAndRecord(
+        phone,
+        'No tengo cobros pendientes registrados.',
+        AiIntent.COBROS_PENDIENTES,
+      );
+      return;
+    }
+
+    const lines = [
+      `Cobros pendientes: *${this.formatMoney(pending.totalAmount)}*`,
+    ];
+    for (const item of pending.items.slice(0, 5)) {
+      lines.push(this.formatPendingChargeLine(item, tz));
+    }
+
+    await this.sendAndRecord(
+      phone,
+      lines.join('\n'),
+      AiIntent.COBROS_PENDIENTES,
+    );
+  }
+
+  private formatLedgerActivityLine(
+    item: LedgerClientActivity,
+    tz: string,
+  ): string {
+    const date = formatDate(item.date, tz, {
+      weekday: undefined,
+      day: '2-digit',
+      month: 'short',
+    })
+      .replace(/\./g, '')
+      .replace(/-/g, ' ');
+    const amount = item.amount ? ` — ${this.formatMoney(item.amount)}` : '';
+    const detail = item.description ? ` — ${item.description}` : '';
+    const label =
+      item.type === 'income'
+        ? 'ingreso'
+        : item.type === 'appointment'
+          ? 'cita'
+          : 'link';
+    return `• ${date}: ${label}${amount}${detail}`;
+  }
+
+  private formatPendingChargeLine(item: PendingChargeItem, tz: string): string {
+    const date = formatDate(item.date, tz, {
+      weekday: undefined,
+      day: '2-digit',
+      month: 'short',
+    })
+      .replace(/\./g, '')
+      .replace(/-/g, ' ');
+    const amount = item.amount
+      ? this.formatMoney(item.amount)
+      : 'monto sin registrar';
+    const description = item.description ? ` — ${item.description}` : '';
+    return `• ${item.clientLabel}: ${amount} — link ${date}${description}`;
+  }
+
+  private formatMoney(amount: number): string {
+    return `$${amount.toLocaleString('es-MX')}`;
+  }
+
+  private normalizeToolLimit(value: unknown): number | undefined {
+    return this.normalizePositiveToolInt(value);
+  }
+
+  private normalizePositiveToolInt(value: unknown): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      return undefined;
+    }
+    return Math.floor(value);
   }
 
   // ─── Appointments: agendar cita ─────────────────────────

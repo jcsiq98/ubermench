@@ -18,6 +18,7 @@
 
 | Fecha | Herramienta | Qué cambió | Refs |
 |---|---|---|---|
+| 2026-06-22 | Cursor (GPT-5.5) | Frente A0 implementado: tools de lectura ledger para clientes, inactivos y cobros pendientes. | `backend/src/modules/ledger/`, `backend/src/modules/ai/ai.tools.ts` |
 | 2026-06-22 | Cursor (GPT-5.5) | Gastos en divisa extranjera: FX histórico server-side, metadata auditable. | `backend/src/modules/exchange-rate/`, `backend/prisma/schema.prisma` |
 | 2026-06-16 | Claude Code (Opus 4.6) | Epistemic Auditor: protocolo de subagente para Claude Code. Gate en CLAUDE.md: solo [roca] bloquea al founder. Memoria sembrada con preguntas abiertas. | `.sanctuary/methodologies/epistemic-auditor.md`, `CLAUDE.md` §Epistemic Hierarchy, `ONBOARDING.md` |
 | 2026-06-15 | Claude Code (Opus 4.8) | Lote Juárez (6 entrevistas) analizado: 1er dolor admin target confirmado (Contratista_1) pero perdido sin contacto. Confirmado: Chalán en 0 usuarios activos (churn total de Vero). Tesis: B precede a A. | `research/ENTREVISTAS_INDEX.md`, `exploraciones/2026-06-15-distribucion-antes-que-loops.md` |

@@ -12,8 +12,8 @@ const functionTools = AI_TOOLS.filter((t) => t.type === 'function') as Array<
 >;
 
 describe('AI Tools — Function Calling definitions', () => {
-  it('should define 30 tools', () => {
-    expect(AI_TOOLS).toHaveLength(30);
+  it('should define 33 tools', () => {
+    expect(AI_TOOLS).toHaveLength(33);
   });
 
   it('every tool should have a valid name and description', () => {
@@ -132,6 +132,20 @@ describe('Tool parameter schemas', () => {
       expect.arrayContaining(['MXN', 'USD', 'EUR', 'CAD']),
     );
     expect(params.properties.currency.description).toContain('USD');
+  });
+
+  it('A0 ledger tools read clients and pending charges from structured data', () => {
+    const consultarCliente = findTool('consultar_cliente');
+    const consultarParams = consultarCliente.function.parameters as any;
+    expect(consultarParams.required).toEqual(['clientName']);
+    expect(consultarCliente.function.description).toContain('ledger/Postgres');
+
+    const clientesInactivos = findTool('clientes_inactivos');
+    const inactivosParams = clientesInactivos.function.parameters as any;
+    expect(inactivosParams.properties.days.type).toBe('number');
+
+    const cobrosPendientes = findTool('cobros_pendientes');
+    expect(cobrosPendientes.function.description).toContain('links de pago');
   });
 
   it('agendar_cita requires date', () => {

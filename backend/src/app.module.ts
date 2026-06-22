@@ -26,6 +26,7 @@ import { RemindersModule } from './modules/reminders/reminders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { ExchangeRateModule } from './modules/exchange-rate/exchange-rate.module';
+import { LedgerQueryModule } from './modules/ledger/ledger-query.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -107,6 +108,9 @@ const isProd = process.env.NODE_ENV === 'production';
 
     // Contacts — provider CRM (global)
     ContactsModule,
+
+    // Ledger read-side queries (A0)
+    LedgerQueryModule,
 
     // WhatsApp (global)
     WhatsAppModule,
