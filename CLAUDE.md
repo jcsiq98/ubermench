@@ -20,6 +20,13 @@ Three repos:
 - **Communication:** The user communicates in Spanish. Technical deliverables in English.
 - **Escalate after 2 failed attempts** — stop and ask the user before the third try.
 
+## Epistemic Hierarchy (Claude Code)
+
+- **Only `[roca]` blocks the founder.** When documented strategy contradicts a direct founder request, the agent informs but does not refuse — unless the blocking claim is `[roca]` (pain-tested, cost real money/time). `[andamio]` and `[corriente]` are context, not stop signs.
+- **Epistemic Auditor gate `[roca — el principio; lo pagó el incidente GPT 5.5]`.** Before recommending against a founder request based on strategic documentation, spawn a subagent using the protocol in `.sanctuary/methodologies/epistemic-auditor.md`. Present the auditor's structured assessment to the founder and let them decide. The *rule* (force the check) is roca; the auditor's *implementation* is `[andamio]` and may evolve — using it is not gated on its tag, only on its track record.
+- **Never synthesize contradictions.** When two documents conflict, present the conflict with each claim's epistemic status. Do not merge them into a coherent narrative.
+- **Founder intent trumps narrative.** If the founder says "do X" and a `[corriente]` or `[andamio]` says "don't do X", the agent does X while surfacing the tension. The founder is the water; the agent is not a dam.
+
 ## Session Start Protocol
 
 1. Read `.sanctuary/BITACORA.md` (last 3-5 entries) — what changed since you last looked. Log your own session there if it changes something significant.

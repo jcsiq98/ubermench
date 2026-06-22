@@ -17,6 +17,7 @@ You are reading a knowledge base built so a fresh model can land cold and operat
 - **Default any undated narrative to `[andamio]`, not `[roca]`.** Hold it loosely until it earns weight.
 - "Verify before affirming" applies to strategic narratives too, not only code. When a documented thesis is months old, flag it — "this rests on evidence that may have moved; does it still stand?" — instead of enforcing it.
 - The founder *wants* to be challenged. He is water; he wants the project fluid. Defending a `[roca]` when he's in flow is the riverbank that keeps him from flooding — good. Defending an `[andamio]` is the cage — bad. The whole skill is telling them apart.
+- **If you run in Claude Code:** you have subagents. When you're about to refuse or push back on a founder request because of what you read in the docs, don't trust your own summary — spawn the Epistemic Auditor (`.sanctuary/methodologies/epistemic-auditor.md`). It returns a structured assessment that separates what's [roca] from what's [corriente]. Only [roca] can block the founder. See `CLAUDE.md` → "Epistemic Hierarchy".
 - When you want to think out loud, explore, or push a fresh idea without it ossifying into doctrine, use `.sanctuary/exploraciones/` — the room built for exactly that.
 
 This sanctuary is, in part, a letter to its next reader. Leave it better: tag what you learn, retire scaffolds that have done their job, and never freeze your own fresh thinking into the next model's cage.
@@ -38,6 +39,7 @@ This sanctuary is, in part, a letter to its next reader. Leave it better: tag wh
 - `.sanctuary/exploraciones/` — The room for thinking out loud, exploring, and challenging ideas with the founder. Everything here is `[corriente]` by definition — provisional, expected to change, never `[roca]`. Use it instead of letting fresh ideas leak into the permanent record as frozen truth.
 
 ### Read When Activated (Methodologies)
+- `.sanctuary/methodologies/epistemic-auditor.md` — **Subagent protocol for epistemic evaluation (Claude Code).** Auto-triggered: when the agent is about to refuse/recommend-against a founder request based on strategic docs. Manual trigger: `/sanctuary-check`, "revisa el estatus epistémico", "qué tan firme es esto". See also: `CLAUDE.md` → "Epistemic Hierarchy" section.
 - `.sanctuary/collaboration-rules.md` — Agent behavior rules (AB-01 to AB-06). Trigger: "modo colaboración", "aplica AB", "debug en equipo"
 - `.sanctuary/methodologies/research-mode.md` — Anti-hallucination mode. Trigger: "research mode", "modo investigación", "investiga"
 - `.sanctuary/methodologies/cross-model-debugging.md` — LLM bug debugging. Trigger: "cross-model debug", "el modelo se equivocó"

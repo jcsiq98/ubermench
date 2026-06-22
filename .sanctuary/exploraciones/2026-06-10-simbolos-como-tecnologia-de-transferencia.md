@@ -55,7 +55,7 @@ funcionales exactas pero pierden la metáfora — `[roca]` → `[tipo-1: no reli
 río. Si la condición metafórica produce mejor separación (BRH−SND) que la seca, el símbolo
 trabaja más que su definición — el postulado, medido. Si no hay diferencia, lo que importa
 es la instrucción funcional y la metáfora es interfaz para humanos. **Ambos resultados son
-publicables.** Registrada en `ubermench-research/DESIGN.md` como ablation de v2.
+publicables.** Registrada en `~/Documents/paper_epistemic/DESIGN.md` como ablation de v2 (antes en `ubermench-research`, movido el 2026-06-13).
 
 ### Relación con el paper (decidido en este diálogo)
 
