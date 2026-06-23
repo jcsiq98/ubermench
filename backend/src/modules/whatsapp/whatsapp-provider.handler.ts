@@ -73,6 +73,7 @@ import {
   sourceTextHash,
   type FinancialAuditPayload,
 } from '../../common/utils/financial-audit';
+import { FinancialRateLimitError } from '../../common/financial-rate-limit.service';
 import {
   PENDING_FIN_PREFIX,
   PENDING_FIN_TTL,
@@ -1313,6 +1314,17 @@ export class WhatsAppProviderHandler {
         },
       );
     } catch (error: any) {
+      if (error instanceof FinancialRateLimitError) {
+        this.logger.warn(
+          `Income write blocked (${error.reason}) for ${providerProfileId}`,
+        );
+        await this.sendAndRecord(
+          phone,
+          error.userMessage,
+          AiIntent.REGISTRAR_INGRESO,
+        );
+        return;
+      }
       this.logger.error(`Error creating income: ${error.message}`);
       await this.sendAndRecord(
         phone,
@@ -1705,6 +1717,16 @@ export class WhatsAppProviderHandler {
     phone: string,
     error: any,
   ): Promise<void> {
+    if (error instanceof FinancialRateLimitError) {
+      this.logger.warn(`Payment link blocked (${error.reason})`);
+      await this.sendAndRecord(
+        phone,
+        error.userMessage,
+        AiIntent.CREAR_LINK_COBRO,
+      );
+      return;
+    }
+
     this.logger.error(`Error creating payment link: ${error.message}`);
 
     if (error.message === 'Stripe is not configured') {
@@ -2384,6 +2406,18 @@ export class WhatsAppProviderHandler {
         await this.sendAndRecord(
           phone,
           'No pude consultar el tipo de cambio ahorita, así que no registré el gasto para no inventar el monto en pesos. Intenta de nuevo en unos minutos o dime el equivalente en MXN.',
+        );
+        return;
+      }
+
+      if (error instanceof FinancialRateLimitError) {
+        this.logger.warn(
+          `Expense write blocked (${error.reason}) for ${providerProfileId}`,
+        );
+        await this.sendAndRecord(
+          phone,
+          error.userMessage,
+          AiIntent.REGISTRAR_GASTO,
         );
         return;
       }

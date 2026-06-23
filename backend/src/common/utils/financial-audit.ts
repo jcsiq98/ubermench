@@ -27,6 +27,12 @@ export const FINANCIAL_EVENT = {
   WRITE_ATTEMPTED: 'financial_write_attempted',
   WRITE_COMMITTED: 'financial_write_committed',
   WRITE_FAILED: 'financial_write_failed',
+  // Agent-security audit (Gap 1, jun 2026): the rate-limit guard refused a
+  // write before it reached the DB — either an absurd single amount or a
+  // per-provider burst that looks automated rather than human. Logger-only,
+  // like the pending events; the integrity endpoint only needs the commit
+  // chain, but WRITE_BLOCKED is grep-able in Railway to spot abuse / loops.
+  WRITE_BLOCKED: 'financial_write_blocked',
   CONFIRMATION_SENT: 'financial_confirmation_sent',
   // ── Cap. 47 / M1 — pending clarification lifecycle events ──
   // Logger-only by design. Not persisted in ConversationLog.metadata

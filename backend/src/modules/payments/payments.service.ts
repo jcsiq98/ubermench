@@ -4,6 +4,7 @@ import Stripe from 'stripe';
 import { PrismaService } from '../../prisma/prisma.service';
 import { IncomeService } from '../income/income.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { FinancialRateLimitService } from '../../common/financial-rate-limit.service';
 import {
   PaymentMethod,
   PaymentLinkStatus,
@@ -50,6 +51,7 @@ export class PaymentsService {
     private prisma: PrismaService,
     private incomeService: IncomeService,
     private whatsappService: WhatsAppService,
+    private rateLimit: FinancialRateLimitService,
   ) {
     const secretKey = this.config.get<string>('STRIPE_SECRET_KEY');
     if (secretKey && !secretKey.includes('REPLACE_ME')) {
@@ -193,6 +195,14 @@ export class PaymentsService {
     if (!this.stripe) {
       throw new Error('Stripe is not configured');
     }
+
+    // Share the provider's money-mutation budget (Gap 1): an absurd amount
+    // or a burst of cobro links trips the same breaker as ledger writes.
+    await this.rateLimit.assertWithinLimits({
+      providerId: dto.providerId,
+      kind: 'payment_link',
+      amount: dto.amount,
+    });
 
     const provider = await this.prisma.providerProfile.findUnique({
       where: { id: dto.providerId },

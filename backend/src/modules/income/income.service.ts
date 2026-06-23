@@ -12,6 +12,7 @@ import {
   FINANCIAL_EVENT,
   emitFinancialEvent,
 } from '../../common/utils/financial-audit';
+import { FinancialRateLimitService } from '../../common/financial-rate-limit.service';
 
 export interface CreateIncomeDto {
   providerId: string;
@@ -49,9 +50,20 @@ export interface IncomeSummary {
 export class IncomeService {
   private readonly logger = new Logger(IncomeService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private rateLimit: FinancialRateLimitService,
+  ) {}
 
   async create(dto: CreateIncomeDto) {
+    // Rate-limit guard runs before WRITE_ATTEMPTED so a blocked write never
+    // reaches the integrity chain. Throws FinancialRateLimitError on breach.
+    await this.rateLimit.assertWithinLimits({
+      providerId: dto.providerId,
+      kind: 'income',
+      amount: dto.amount,
+    });
+
     emitFinancialEvent(this.logger, {
       event: FINANCIAL_EVENT.WRITE_ATTEMPTED,
       kind: 'income',

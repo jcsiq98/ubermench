@@ -5,7 +5,11 @@ import { IncomeService, IncomeSummary } from './income.service';
 // PrismaService since formatSummaryMessage is pure.
 
 function makeService(): IncomeService {
-  return new IncomeService(null as any);
+  // Pure-formatting tests never call create(), so the rate-limit guard is
+  // a no-op stub here.
+  return new IncomeService(null as any, {
+    assertWithinLimits: jest.fn().mockResolvedValue(undefined),
+  } as any);
 }
 
 const tz = 'America/Mexico_City';

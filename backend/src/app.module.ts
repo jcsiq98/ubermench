@@ -20,6 +20,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { AdminModule } from './modules/admin/admin.module';
 import { QueueModule } from './common/queues/queue.module';
 import { CryptoModule } from './common/crypto/crypto.module';
+import { FinancialRateLimitModule } from './common/financial-rate-limit.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { ProviderModelModule } from './modules/provider-model/provider-model.module';
 import { RemindersModule } from './modules/reminders/reminders.module';
@@ -78,6 +79,10 @@ const isProd = process.env.NODE_ENV === 'production';
     RedisModule,
     QueueModule.register(),
     CryptoModule,
+
+    // Financial write rate-limit guard (global) — caps per-tx amount and
+    // per-provider write rate ahead of Income/Expense create().
+    FinancialRateLimitModule,
 
     // AI (global)
     AiModule,

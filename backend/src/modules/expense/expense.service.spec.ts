@@ -1,7 +1,11 @@
 import { ExpenseService, ExpenseSummary } from './expense.service';
 
 function makeService(): ExpenseService {
-  return new ExpenseService(null as any);
+  // Pure-formatting tests never call create(), so the rate-limit guard is
+  // a no-op stub here.
+  return new ExpenseService(null as any, {
+    assertWithinLimits: jest.fn().mockResolvedValue(undefined),
+  } as any);
 }
 
 const tz = 'America/Mexico_City';
@@ -175,7 +179,10 @@ describe('ExpenseService — currency metadata', () => {
         create: jest.fn().mockResolvedValue({ id: 'expense-1' }),
       },
     };
-    const service = new ExpenseService(prisma as any);
+    const rateLimit = {
+      assertWithinLimits: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new ExpenseService(prisma as any, rateLimit as any);
     const exchangeRateDate = d('2026-06-21T00:00:00.000Z');
 
     await service.create({
