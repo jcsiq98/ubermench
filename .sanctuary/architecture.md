@@ -29,6 +29,7 @@
 - **Intent classification uses OpenAI function calling (tools), not prompt-based rules.** Each action is a typed tool definition in `ai.tools.ts`. The system prompt contains only personality and workspace context — no classification rules. Adding a new action = adding a tool, not editing the prompt. See `proyecto/HISTORIA_DECISIONES.md` Chapter 16 for the full rationale.
 - **Always sanitize LLM-extracted optional fields server-side** before using them in DB queries. The LLM will fill optional fields with nonsense from colloquial speech (e.g. `clientName: "ninguna"` from "No, ninguna"). See Cap. 30.
 - **All date/time logic uses the provider's timezone**, stored in `WorkspaceProfile.timezone` (IANA string, default `America/Mexico_City`). Shared utility: `backend/src/common/utils/timezone.utils.ts`. Never hardcode `America/Mexico_City` or UTC offsets — always use the utility functions. Cron jobs run hourly and filter by provider's local hour. See Cap. 37.
+- **Memory is context, the ledger is truth.** Truth hierarchy: ledger (Postgres) > learned memory > conversation history. Operational claims (money, agenda, client state) must resolve via a tool that reads the ledger; memory never holds amounts/dates/balances as authority. Full rule (4 reglas + where each lives in code): `.sanctuary/memory-policy.md` `[roca]`.
 
 ## Git Protocol
 

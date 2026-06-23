@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PaymentLinkStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -6,7 +6,21 @@ const DEFAULT_CLIENT_HISTORY_LIMIT = 5;
 const DEFAULT_INACTIVE_DAYS = 90;
 const DEFAULT_LIST_LIMIT = 5;
 
+/**
+ * Provenance for a ledger read: the row ids that back the answer.
+ * Memory policy rule 4 (`.sanctuary/memory-policy.md` [roca]): every
+ * financial/operational answer must be traceable to a ledger row id.
+ * Emitted to logs even when not shown to the user.
+ */
+export interface LedgerProvenance {
+  incomeIds: string[];
+  appointmentIds: string[];
+  paymentLinkIds: string[];
+  contactIds: string[];
+}
+
 export interface LedgerClientActivity {
+  id: string;
   type: 'income' | 'appointment' | 'payment_link';
   date: Date;
   amount?: number | null;
@@ -23,10 +37,12 @@ export interface LedgerClientHistory {
   pendingPaymentLinkCount: number;
   lastActivityAt: Date | null;
   recentActivity: LedgerClientActivity[];
+  provenance: LedgerProvenance;
 }
 
 export interface InactiveClientItem {
   clientLabel: string;
+  contactId: string | null;
   lastActivityAt: Date;
   daysInactive: number;
   totalIncome: number;
@@ -35,6 +51,7 @@ export interface InactiveClientItem {
 }
 
 export interface PendingChargeItem {
+  id: string;
   type: 'payment_link';
   clientLabel: string;
   amount?: number | null;
@@ -46,10 +63,12 @@ export interface PendingChargeItem {
 export interface PendingChargesResult {
   items: PendingChargeItem[];
   totalAmount: number;
+  provenance: LedgerProvenance;
 }
 
 type ClientRecordBucket = {
   clientLabel: string;
+  contactId: string | null;
   lastActivityAt: Date | null;
   totalIncome: number;
   incomeCount: number;
@@ -58,7 +77,36 @@ type ClientRecordBucket = {
 
 @Injectable()
 export class LedgerQueryService {
+  private readonly logger = new Logger(LedgerQueryService.name);
+
   constructor(private readonly prisma: PrismaService) {}
+
+  private emptyProvenance(): LedgerProvenance {
+    return {
+      incomeIds: [],
+      appointmentIds: [],
+      paymentLinkIds: [],
+      contactIds: [],
+    };
+  }
+
+  private logProvenance(
+    query: string,
+    providerId: string,
+    provenance: LedgerProvenance,
+  ): void {
+    this.logger.log(
+      JSON.stringify({
+        event: 'ledger_query',
+        query,
+        providerId,
+        incomeIds: provenance.incomeIds,
+        appointmentIds: provenance.appointmentIds,
+        paymentLinkIds: provenance.paymentLinkIds,
+        contactIds: provenance.contactIds,
+      }),
+    );
+  }
 
   async getClientHistory(input: {
     providerId: string;
@@ -122,6 +170,7 @@ export class LedgerQueryService {
     const recentActivity = [
       ...incomes.map(
         (income): LedgerClientActivity => ({
+          id: income.id,
           type: 'income',
           date: income.date,
           amount: Number(income.amount),
@@ -131,6 +180,7 @@ export class LedgerQueryService {
       ),
       ...appointments.map(
         (appointment): LedgerClientActivity => ({
+          id: appointment.id,
           type: 'appointment',
           date: appointment.scheduledAt,
           amount: appointment.estimatedPrice,
@@ -140,6 +190,7 @@ export class LedgerQueryService {
       ),
       ...paymentLinks.map(
         (link): LedgerClientActivity => ({
+          id: link.id,
           type: 'payment_link',
           date: link.createdAt,
           amount: Number(link.amount),
@@ -150,6 +201,14 @@ export class LedgerQueryService {
     ]
       .sort((a, b) => b.date.getTime() - a.date.getTime())
       .slice(0, limit);
+
+    const provenance: LedgerProvenance = {
+      incomeIds: incomes.map((i) => i.id),
+      appointmentIds: appointments.map((a) => a.id),
+      paymentLinkIds: paymentLinks.map((p) => p.id),
+      contactIds,
+    };
+    this.logProvenance('consultar_cliente', input.providerId, provenance);
 
     return {
       query,
@@ -172,6 +231,7 @@ export class LedgerQueryService {
       lastActivityAt:
         recentActivity[0]?.date ?? contacts[0]?.lastUsedAt ?? null,
       recentActivity,
+      provenance,
     };
   }
 
@@ -217,6 +277,7 @@ export class LedgerQueryService {
           `contact:${contact.id}`,
           contact.name,
           contact.lastUsedAt,
+          contact.id,
         );
       }
     }
@@ -229,7 +290,13 @@ export class LedgerQueryService {
         income.clientName,
         contactNameById,
       );
-      const bucket = this.touchBucket(buckets, key, label, income.date);
+      const bucket = this.touchBucket(
+        buckets,
+        key,
+        label,
+        income.date,
+        income.contactId,
+      );
       bucket.totalIncome += Number(income.amount);
       bucket.incomeCount += 1;
     }
@@ -247,6 +314,7 @@ export class LedgerQueryService {
         key,
         label,
         appointment.scheduledAt,
+        appointment.contactId,
       );
       bucket.appointmentCount += 1;
     }
@@ -259,10 +327,10 @@ export class LedgerQueryService {
         link.clientName,
         contactNameById,
       );
-      this.touchBucket(buckets, key, label, link.createdAt);
+      this.touchBucket(buckets, key, label, link.createdAt, link.contactId);
     }
 
-    return Array.from(buckets.values())
+    const items = Array.from(buckets.values())
       .filter(
         (bucket) => bucket.lastActivityAt && bucket.lastActivityAt <= cutoff,
       )
@@ -270,6 +338,7 @@ export class LedgerQueryService {
       .slice(0, limit)
       .map((bucket) => ({
         clientLabel: bucket.clientLabel,
+        contactId: bucket.contactId,
         lastActivityAt: bucket.lastActivityAt!,
         daysInactive: Math.floor(
           (now.getTime() - bucket.lastActivityAt!.getTime()) /
@@ -279,6 +348,14 @@ export class LedgerQueryService {
         incomeCount: bucket.incomeCount,
         appointmentCount: bucket.appointmentCount,
       }));
+
+    const provenance = this.emptyProvenance();
+    provenance.contactIds = items
+      .map((item) => item.contactId)
+      .filter((id): id is string => Boolean(id));
+    this.logProvenance('clientes_inactivos', input.providerId, provenance);
+
+    return items;
   }
 
   async listPendingCharges(input: {
@@ -302,6 +379,7 @@ export class LedgerQueryService {
     const items = [
       ...links.map(
         (link): PendingChargeItem => ({
+          id: link.id,
           type: 'payment_link',
           clientLabel: link.clientName || 'Cliente sin nombre',
           amount: Number(link.amount),
@@ -314,9 +392,14 @@ export class LedgerQueryService {
       .sort((a, b) => a.date.getTime() - b.date.getTime())
       .slice(0, limit);
 
+    const provenance = this.emptyProvenance();
+    provenance.paymentLinkIds = items.map((item) => item.id);
+    this.logProvenance('cobros_pendientes', input.providerId, provenance);
+
     return {
       items,
       totalAmount: items.reduce((sum, item) => sum + (item.amount ?? 0), 0),
+      provenance,
     };
   }
 
@@ -376,9 +459,11 @@ export class LedgerQueryService {
     key: string,
     clientLabel: string,
     date: Date,
+    contactId?: string | null,
   ): ClientRecordBucket {
     const existing = buckets.get(key) ?? {
       clientLabel,
+      contactId: null,
       lastActivityAt: null,
       totalIncome: 0,
       incomeCount: 0,
@@ -386,6 +471,9 @@ export class LedgerQueryService {
     };
     if (!existing.lastActivityAt || date > existing.lastActivityAt) {
       existing.lastActivityAt = date;
+    }
+    if (!existing.contactId && contactId) {
+      existing.contactId = contactId;
     }
     buckets.set(key, existing);
     return existing;

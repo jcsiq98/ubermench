@@ -18,6 +18,7 @@
 
 | Fecha | Herramienta | Qué cambió | Refs |
 |---|---|---|---|
+| 2026-06-22 | Cursor (Opus 4.8) | Memory policy `[roca]` (ledger > memoria > historial; claims operativos vía tool; provenance a id de fila) tras estudiar arquitectura OpenClaw. Provenance implementada en A0: `LedgerProvenance` + log `ledger_query`. | `.sanctuary/memory-policy.md`, `architecture.md`, `backend/src/modules/ledger/` |
 | 2026-06-22 | Claude Code (Opus 4.8) | Audit de seguridad de agente (threat-model trading-LLM): rate-limit guard sobre mutaciones financieras (tope tx/hora/día + circuit breaker). Defensas previas (tenant scoping, firewall Cap. 44/45/47) confirmadas sólidas. 452 tests OK, sin deploy. | Cap. 60, `backend/src/common/financial-rate-limit.service.ts`, `Income`/`Expense`/`Payments` create* |
 | 2026-06-22 | Cursor (GPT-5.5) | Frente A0 implementado: tools de lectura ledger para clientes, inactivos y cobros pendientes. | `backend/src/modules/ledger/`, `backend/src/modules/ai/ai.tools.ts` |
 | 2026-06-22 | Cursor (GPT-5.5) | Gastos en divisa extranjera: FX histórico server-side, metadata auditable. | `backend/src/modules/exchange-rate/`, `backend/prisma/schema.prisma` |

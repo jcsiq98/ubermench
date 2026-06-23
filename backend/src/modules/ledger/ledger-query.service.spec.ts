@@ -43,6 +43,7 @@ describe('LedgerQueryService', () => {
     ]);
     prisma.income.findMany.mockResolvedValueOnce([
       {
+        id: 'income-1',
         amount: 1200,
         description: 'mantenimiento',
         paymentMethod: PaymentMethod.CASH,
@@ -52,6 +53,7 @@ describe('LedgerQueryService', () => {
     ]);
     prisma.appointment.findMany.mockResolvedValueOnce([
       {
+        id: 'appt-1',
         description: 'boiler',
         estimatedPrice: 900,
         clientName: 'Sra. García',
@@ -61,6 +63,7 @@ describe('LedgerQueryService', () => {
     ]);
     prisma.paymentLink.findMany.mockResolvedValueOnce([
       {
+        id: 'link-1',
         amount: 500,
         description: 'anticipo',
         clientName: 'Sra. García',
@@ -83,8 +86,15 @@ describe('LedgerQueryService', () => {
       pendingPaymentLinkCount: 1,
     });
     expect(result?.recentActivity[0]).toMatchObject({
+      id: 'link-1',
       type: 'payment_link',
       amount: 500,
+    });
+    expect(result?.provenance).toEqual({
+      incomeIds: ['income-1'],
+      appointmentIds: ['appt-1'],
+      paymentLinkIds: ['link-1'],
+      contactIds: ['contact-1'],
     });
     expect(prisma.income.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -118,12 +128,14 @@ describe('LedgerQueryService', () => {
     prisma.contact.findMany.mockResolvedValueOnce([]);
     prisma.income.findMany.mockResolvedValueOnce([
       {
-        contactId: null,
+        id: 'income-mariana',
+        contactId: 'contact-mariana',
         clientName: 'Mariana',
         amount: 800,
         date: d('2026-02-01T12:00:00Z'),
       },
       {
+        id: 'income-luis',
         contactId: null,
         clientName: 'Luis',
         amount: 500,
@@ -142,6 +154,7 @@ describe('LedgerQueryService', () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       clientLabel: 'Mariana',
+      contactId: 'contact-mariana',
       totalIncome: 800,
       incomeCount: 1,
     });
@@ -152,6 +165,7 @@ describe('LedgerQueryService', () => {
     const prisma = makePrisma();
     prisma.paymentLink.findMany.mockResolvedValueOnce([
       {
+        id: 'link-pedro',
         amount: 1500,
         description: 'reparación',
         clientName: 'Pedro',
@@ -166,6 +180,7 @@ describe('LedgerQueryService', () => {
 
     expect(result.totalAmount).toBe(1500);
     expect(result.items.map((item) => item.clientLabel)).toEqual(['Pedro']);
+    expect(result.provenance.paymentLinkIds).toEqual(['link-pedro']);
     expect(prisma.paymentLink.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
