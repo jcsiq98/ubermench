@@ -30,6 +30,7 @@
 - **Always sanitize LLM-extracted optional fields server-side** before using them in DB queries. The LLM will fill optional fields with nonsense from colloquial speech (e.g. `clientName: "ninguna"` from "No, ninguna"). See Cap. 30.
 - **All date/time logic uses the provider's timezone**, stored in `WorkspaceProfile.timezone` (IANA string, default `America/Mexico_City`). Shared utility: `backend/src/common/utils/timezone.utils.ts`. Never hardcode `America/Mexico_City` or UTC offsets — always use the utility functions. Cron jobs run hourly and filter by provider's local hour. See Cap. 37.
 - **Memory is context, the ledger is truth.** Truth hierarchy: ledger (Postgres) > learned memory > conversation history. Operational claims (money, agenda, client state) must resolve via a tool that reads the ledger; memory never holds amounts/dates/balances as authority. Full rule (4 reglas + where each lives in code): `.sanctuary/memory-policy.md` `[roca]`.
+- **A versioned pre-commit secret guard blocks live keys and sensitive files.** `scripts/hooks/pre-commit`, wired via `core.hooksPath` (run `git config core.hooksPath scripts/hooks` once per clone). Blocks sensitive filenames (`.env*`, `*.pem/.key/.p12`, `id_rsa`) and high-signal key patterns in added lines. Escapes: per-line `secret-guard:allow` marker, or `git commit --no-verify`. A money agent's repo must never leak a key — the one mechanism we borrowed from ECC's harness (the sanctuary already wins on epistemics, so its memory/skills layer was not adopted).
 
 ## Git Protocol
 

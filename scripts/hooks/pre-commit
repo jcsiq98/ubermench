@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+#
+# Secret / sensitive-file guard (sanctuary robustness, jun 2026)
+# ─────────────────────────────────────────────────────────────
+# Inspired by ECC's pre-commit secret blocking. The sanctuary wins on
+# epistemics; this is the one mechanical control we borrowed: a money
+# agent's repo must never leak a live key or a PII-bearing file.
+#
+# Blocks a commit when staged changes contain:
+#   1. Sensitive files (.env, *.pem, *.key, *.p12, id_rsa, ...)
+#   2. High-signal live-secret patterns in added lines
+#
+# Escape hatches:
+#   - One-off bypass:        git commit --no-verify
+#   - Per-line allowlist:     append  secret-guard:allow  to the line
+#
+# This hook is versioned (scripts/hooks/) and wired via core.hooksPath,
+# so it survives clones and is visible to every agent reading the repo.
+
+set -euo pipefail
+
+red()  { printf '\033[31m%s\033[0m\n' "$1"; }
+ylw()  { printf '\033[33m%s\033[0m\n' "$1"; }
+
+fail=0
+
+# ── 1. Sensitive filenames among staged (added/modified) files ──────────
+sensitive_files=$(git diff --cached --name-only --diff-filter=ACM \
+  | grep -E '(^|/)(\.env(\..+)?|.*\.(pem|key|p12|pfx)|id_rsa|.*\.keystore)$' \
+  | grep -vE '\.env\.example$' || true)
+
+if [ -n "$sensitive_files" ]; then
+  red "✖ Pre-commit blocked: sensitive file(s) staged"
+  echo "$sensitive_files" | sed 's/^/    /'
+  ylw "  These should never be committed. Unstage with: git restore --staged <file>"
+  fail=1
+fi
+
+# ── 2. Live-secret patterns in added lines only ─────────────────────────
+# Match only additions (lines starting with '+'), skip the diff header.
+added=$(git diff --cached -U0 --diff-filter=ACM \
+  | grep -E '^\+' | grep -vE '^\+\+\+ ' || true)
+
+# Drop lines the author explicitly allowlisted.
+added=$(printf '%s\n' "$added" | grep -v 'secret-guard:allow' || true)
+
+# High-signal patterns: real provider key prefixes + private-key blocks.
+patterns='sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|xox[baprs]-[0-9A-Za-z-]{10,}|sk_live_[0-9A-Za-z]{24,}|rk_live_[0-9A-Za-z]{24,}|SK[0-9a-f]{32}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+
+hits=$(printf '%s\n' "$added" | grep -nE "$patterns" || true)
+
+if [ -n "$hits" ]; then
+  red "✖ Pre-commit blocked: possible live secret in staged changes"
+  printf '%s\n' "$hits" | sed 's/^/    /'
+  ylw "  If this is a false positive, append  secret-guard:allow  to the line,"
+  ylw "  or bypass once with: git commit --no-verify"
+  fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  exit 1
+fi
+
+exit 0
