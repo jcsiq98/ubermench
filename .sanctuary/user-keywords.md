@@ -20,6 +20,7 @@ Registro vivo de triggers y comandos personalizados. Cuando el usuario dice una 
 | "modo colaboración", "aplica AB", "debug en equipo" | Leer y activar `.sanctuary/collaboration-rules.md`: verificar antes de afirmar, lentitud deliberada en cambios sensibles, escalar tras dos intentos fallidos. Confirmar al usuario que las reglas AB están activas. |
 | "nuevo SOTA", "validar SOTA", "branch por modelo", "metodología SOTA", "¿esto va a main directo?" | Consultar `.sanctuary/methodologies/sota-validation.md` para decidir flujo según magnitud del cambio (fix quirúrgico → main directo; cambio de prompt → branch staging; cambio estructural → servicio paralelo) |
 | "transcribe [archivo]", "analiza la entrevista [nombre]", "nueva entrevista" | Transcribir audio → analizar con contexto del proyecto → guardar análisis → actualizar índice. Ver `.sanctuary/methodologies/interview-system.md` |
+| "santa loop", "/santa-loop", "pasa el gate", "doble review", "¿esto pasa el gate?" | Gate de doble revisión independiente (dos modelos, sin contexto compartido) antes de pushear código del money-path o flujos de usuario. Ambos reviewers deben dar NICE; máx 3 rondas; NICE no pushea solo. Ver `.sanctuary/methodologies/dual-review-gate.md` |
 
 ## Cómo agregar nuevas palabras clave
 
@@ -32,4 +33,4 @@ Este archivo es viable con hasta ~30 comandos (~150 líneas). Más allá de eso,
 - `user-keywords-actions.md` — triggers que disparan acciones concretas
 - `user-keywords-workflow.md` — triggers de flujos (checks, deploys, etc.)
 
-Estado actual: 8 comandos. No dividir todavía.
+Estado actual: 9 comandos. No dividir todavía.

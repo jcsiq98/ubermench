@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# Money-path dual-review push gate (sanctuary, jun 2026)
+# ─────────────────────────────────────────────────────────────
+# Gives teeth to .sanctuary/methodologies/dual-review-gate.md. The gate
+# methodology is prose — an agent can skip it. This hook is the forcing
+# function: it BLOCKS a push that changes the money path unless a passed
+# dual-review is recorded in a pushed commit message.
+#
+# A change is "money path" if it touches:
+#   - backend/src/modules/{payments,income,expense,ledger,business-loop}/
+#   - backend/src/common/financial-rate-limit*
+#   - backend/prisma/schema.prisma (defines every financial table)
+#   - backend/prisma/migrations/* whose name names a financial table
+#
+# To clear the gate, run it (say "santa loop") and, on NICE, stamp the tip
+# commit with a trailer line:
+#       Dual-Review: PASS
+#
+# Escape hatches (consistent with the secret-guard pre-commit):
+#   - Emergency bypass, leaves a trace:  DUAL_REVIEW_OVERRIDE="reason" git push
+#   - Native one-off bypass:             git push --no-verify
+#
+# Versioned (scripts/hooks/) and wired via core.hooksPath, so it survives
+# clones and is visible to every agent reading the repo.
+
+set -euo pipefail
+
+red()  { printf '\033[31m%s\033[0m\n' "$1"; }
+ylw()  { printf '\033[33m%s\033[0m\n' "$1"; }
+
+remote_name="${1:-origin}"
+
+MONEY_PATHS='^backend/src/modules/(payments|income|expense|ledger|business-loop)/|^backend/src/common/financial-rate-limit|^backend/prisma/schema\.prisma$|^backend/prisma/migrations/[^/]*(income|expense|payment|ledger|business_loop|financial)'
+GATE_MARKER='Dual-Review:[[:space:]]*(PASS|NICE)'
+zero='^0+$'
+
+fail=0
+
+# git feeds: <local ref> <local sha> <remote ref> <remote sha>
+# shellcheck disable=SC2034  # local_ref/remote_ref document git's stdin format
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Skip branch deletions (nothing is being pushed).
+  [[ "$local_sha" =~ $zero ]] && continue
+
+  # Commits about to be pushed on this ref.
+  if [[ "$remote_sha" =~ $zero ]]; then
+    # New branch on the remote: everything not already on that remote.
+    mapfile -t commits < <(git rev-list "$local_sha" --not --remotes="$remote_name" 2>/dev/null \
+      || git rev-list "$local_sha" 2>/dev/null)
+  else
+    mapfile -t commits < <(git rev-list "${remote_sha}..${local_sha}" 2>/dev/null)
+  fi
+  [ "${#commits[@]}" -eq 0 ] && continue
+
+  # Collect money-path files touched by any pushed commit.
+  money_files=""
+  for c in "${commits[@]}"; do
+    f=$(git diff-tree --no-commit-id --name-only -r "$c" | grep -E "$MONEY_PATHS" || true)
+    [ -n "$f" ] && money_files+="$f"$'\n'
+  done
+  [ -z "$money_files" ] && continue   # no money path on this ref → no gate required
+
+  # Money path touched → require the gate marker in some pushed commit message.
+  if git show -s --format='%B' "${commits[@]}" | grep -qiE "$GATE_MARKER"; then
+    continue
+  fi
+
+  red "✖ Push blocked: money-path change without a passed dual-review gate"
+  printf '%s' "$money_files" | sort -u | sed 's/^/    /'
+  ylw "  These files mutate or define the money path. Run the gate first:"
+  ylw "    say \"santa loop\" → .sanctuary/methodologies/dual-review-gate.md"
+  ylw "  On NICE, stamp the tip commit with a trailer:   Dual-Review: PASS"
+  ylw "  Emergency bypass (leaves a trace):  DUAL_REVIEW_OVERRIDE=\"reason\" git push"
+  ylw "  Native one-off bypass:              git push --no-verify"
+  fail=1
+done
+
+# Explicit, logged override — emergencies only; the reason is printed (the trace).
+if [ "$fail" -ne 0 ] && [ -n "${DUAL_REVIEW_OVERRIDE:-}" ]; then
+  ylw "⚠ DUAL_REVIEW_OVERRIDE set — push allowed without the gate."
+  ylw "  Reason: ${DUAL_REVIEW_OVERRIDE}"
+  exit 0
+fi
+
+exit "$fail"
