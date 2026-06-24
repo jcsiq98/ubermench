@@ -14,7 +14,14 @@ import { AppointmentsService } from '../appointments/appointments.service';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { TimezoneMigrationService } from '../workspace/timezone-migration.service';
 import { ProviderModelService } from '../provider-model/provider-model.service';
-import { ContactSource, PaymentMethod, Prisma } from '@prisma/client';
+import {
+  BusinessLoopType,
+  Contact,
+  ContactSource,
+  PaymentMethod,
+  PaymentLinkStatus,
+  Prisma,
+} from '@prisma/client';
 import { QueueService } from '../../common/queues/queue.service';
 import { QUEUE_NAMES } from '../../common/queues/queue.constants';
 import { AppointmentFollowupJobData } from '../../common/queues/processors/appointment-followup.processor';
@@ -65,6 +72,8 @@ import {
   extractPhoneFromText,
   parseDisambiguationChoice,
   buildDelegatedClientMessage,
+  buildCollectionReminderMessage,
+  buildReactivationClientMessage,
 } from './whatsapp-provider.pending-contacts';
 import {
   FINANCIAL_EVENT,
@@ -87,6 +96,7 @@ import {
   buildActivationHelpMessage,
   buildStripeOnboardingMessage,
 } from './trade-examples';
+import { BusinessLoopService } from '../business-loop/business-loop.service';
 
 const JUNK_CLIENT_NAMES = new Set([
   'ninguno',
@@ -186,6 +196,7 @@ export class WhatsAppProviderHandler {
     private attributionQueue: AttributionQueue,
     private exchangeRateService: ExchangeRateService,
     private ledgerQueryService: LedgerQueryService,
+    private businessLoopService: BusinessLoopService,
   ) {}
 
   // ─── Session management ──────────────────────────────────
@@ -960,6 +971,26 @@ export class WhatsAppProviderHandler {
             );
             break;
 
+          case AiIntent.REACTIVAR_CLIENTE:
+            await this.handleReactivarCliente(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+              providerName,
+            );
+            break;
+
+          case AiIntent.RECORDAR_COBRO_PENDIENTE:
+            await this.handleRecordarCobroPendiente(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
+              providerName,
+            );
+            break;
+
           case AiIntent.AGENDAR_CITA:
             await this.handleAgendarCita(
               phone,
@@ -1290,6 +1321,14 @@ export class WhatsAppProviderHandler {
         contactId: linked.contactId,
         date: parsedDate ?? undefined,
         sourceTextHash: srcHash,
+      });
+
+      await this.businessLoopService.convertRecentSentEvent({
+        providerId: providerProfileId,
+        contactId: linked.contactId,
+        clientName: linked.clientName,
+        incomeId: created.id,
+        amount,
       });
 
       let confirmation = this.incomeService.formatIncomeConfirmation(
@@ -1856,10 +1895,14 @@ export class WhatsAppProviderHandler {
     if (delegated && delegated.providerProfileId === providerProfileId) {
       if (isNegativeReply(text)) {
         await this.clearPendingDelegatedSend(phone);
+        const cancelMessage =
+          delegated.action === 'payment_link' && delegated.stripePaymentUrl
+            ? `Va, no le mando nada. El link queda por si lo necesitas:\n\n🔗 ${delegated.stripePaymentUrl}`
+            : 'Va, no le mando nada.';
         await this.sendAndRecord(
           phone,
-          `Va, no le mando nada. El link queda por si lo necesitas:\n\n🔗 ${delegated.stripePaymentUrl}`,
-          AiIntent.CREAR_LINK_COBRO,
+          cancelMessage,
+          this.intentForDelegatedAction(delegated.action),
         );
         return true;
       }
@@ -1871,17 +1914,22 @@ export class WhatsAppProviderHandler {
             delegated.message,
           );
           await this.contactsService.touchContact(delegated.contactId);
+          await this.businessLoopService.markSent(delegated.businessLoopEventId);
           await this.sendAndRecord(
             phone,
             `Listo, ya se lo mandé a *${delegated.clientName}*.`,
-            AiIntent.CREAR_LINK_COBRO,
+            this.intentForDelegatedAction(delegated.action),
           );
         } catch (err: any) {
           this.logger.error(`Delegated send failed: ${err.message}`);
+          const fallback =
+            delegated.action === 'payment_link' && delegated.stripePaymentUrl
+              ? `No pude enviarle el mensaje a ${delegated.clientName}. Aquí está el link para que se lo mandes tú:\n\n🔗 ${delegated.stripePaymentUrl}`
+              : `No pude enviarle el mensaje a ${delegated.clientName}. Mándaselo tú por ahora.`;
           await this.sendAndRecord(
             phone,
-            `No pude enviarle el mensaje a ${delegated.clientName}. Aquí está el link para que se lo mandes tú:\n\n🔗 ${delegated.stripePaymentUrl}`,
-            AiIntent.CREAR_LINK_COBRO,
+            fallback,
+            this.intentForDelegatedAction(delegated.action),
           );
         }
         return true;
@@ -1889,7 +1937,7 @@ export class WhatsAppProviderHandler {
       await this.sendAndRecord(
         phone,
         '¿Lo envío? Responde *sí* para mandarlo o *no* para cancelar.',
-        AiIntent.CREAR_LINK_COBRO,
+        this.intentForDelegatedAction(delegated.action),
       );
       return true;
     }
@@ -1929,7 +1977,7 @@ export class WhatsAppProviderHandler {
         }
 
         await this.clearPendingContactPhone(phone);
-        await this.continuePaymentLinkAfterContactResolved(
+        await this.continueContactActionAfterContactResolved(
           phone,
           pendingPhone.payload,
           providerName,
@@ -1983,7 +2031,7 @@ export class WhatsAppProviderHandler {
             .catch(() => null)
         )?.timezone ?? DEFAULT_TIMEZONE;
 
-      await this.continuePaymentLinkAfterContactResolved(
+      await this.continueContactActionAfterContactResolved(
         phone,
         pendingDisambig.payload,
         providerName,
@@ -1994,6 +2042,41 @@ export class WhatsAppProviderHandler {
     }
 
     return false;
+  }
+
+  private async continueContactActionAfterContactResolved(
+    phone: string,
+    payload: PaymentLinkFlowPayload,
+    providerName: string,
+    tz: string,
+    contactId: string,
+  ): Promise<void> {
+    if (payload.action === 'reactivation') {
+      await this.continueReactivationAfterContactResolved(
+        phone,
+        payload,
+        providerName,
+        contactId,
+      );
+      return;
+    }
+    if (payload.action === 'collection_reminder') {
+      await this.continueCollectionReminderAfterContactResolved(
+        phone,
+        payload,
+        providerName,
+        contactId,
+      );
+      return;
+    }
+
+    await this.continuePaymentLinkAfterContactResolved(
+      phone,
+      payload,
+      providerName,
+      tz,
+      contactId,
+    );
   }
 
   private async continuePaymentLinkAfterContactResolved(
@@ -2037,6 +2120,15 @@ export class WhatsAppProviderHandler {
       return;
     }
 
+    if (!payload.amount) {
+      await this.sendAndRecord(
+        phone,
+        'No tengo el monto del link de cobro. Intenta de nuevo con el monto.',
+        AiIntent.CREAR_LINK_COBRO,
+      );
+      return;
+    }
+
     try {
       const paymentLink = await this.paymentsService.createPaymentLink({
         providerId: payload.providerProfileId,
@@ -2073,6 +2165,167 @@ export class WhatsAppProviderHandler {
     }
   }
 
+  private async continueReactivationAfterContactResolved(
+    phone: string,
+    payload: PaymentLinkFlowPayload,
+    providerName: string,
+    contactId: string,
+  ): Promise<void> {
+    const contact = await this.contactsService.findById(
+      payload.providerProfileId,
+      contactId,
+    );
+    if (!contact) {
+      await this.sendAndRecord(
+        phone,
+        'No encontré ese contacto.',
+        AiIntent.REACTIVAR_CLIENTE,
+      );
+      return;
+    }
+
+    if (!contact.phone) {
+      await this.setPendingContactPhone(phone, {
+        kind: 'contact_phone',
+        payload,
+        clientName: contact.name,
+        contactId: contact.id,
+      });
+      await this.sendAndRecord(
+        phone,
+        `No tengo el teléfono de *${contact.name}*. Pásamelo y lo guardo para la próxima.`,
+        AiIntent.REACTIVAR_CLIENTE,
+      );
+      return;
+    }
+
+    const message = buildReactivationClientMessage({
+      clientName: contact.name,
+      providerDisplayName: providerName,
+      description: payload.messageHint,
+    });
+    const event = await this.businessLoopService.createProposedEvent({
+      providerId: payload.providerProfileId,
+      type: BusinessLoopType.REACTIVATION,
+      contactId: contact.id,
+      clientName: contact.name,
+      message,
+    });
+
+    await this.setPendingDelegatedSend(phone, {
+      kind: 'delegated_send',
+      action: 'reactivation',
+      providerProfileId: payload.providerProfileId,
+      businessLoopEventId: event.id,
+      contactId: contact.id,
+      clientPhone: contact.phone,
+      clientName: contact.name,
+      providerDisplayName: providerName,
+      message,
+      description: payload.messageHint,
+    });
+
+    await this.sendAndRecord(
+      phone,
+      `Le mando esto a *${contact.name}* (${formatPhoneForDisplay(contact.phone)}):\n\n` +
+        `"${message}"\n\n` +
+        '¿Lo envío?',
+      AiIntent.REACTIVAR_CLIENTE,
+    );
+  }
+
+  private async continueCollectionReminderAfterContactResolved(
+    phone: string,
+    payload: PaymentLinkFlowPayload,
+    providerName: string,
+    contactId: string,
+  ): Promise<void> {
+    const contact = await this.contactsService.findById(
+      payload.providerProfileId,
+      contactId,
+    );
+    if (!contact) {
+      await this.sendAndRecord(
+        phone,
+        'No encontré ese contacto.',
+        AiIntent.RECORDAR_COBRO_PENDIENTE,
+      );
+      return;
+    }
+
+    if (!contact.phone) {
+      await this.setPendingContactPhone(phone, {
+        kind: 'contact_phone',
+        payload,
+        clientName: contact.name,
+        contactId: contact.id,
+      });
+      await this.sendAndRecord(
+        phone,
+        `No tengo el teléfono de *${contact.name}*. Pásamelo y lo guardo para la próxima.`,
+        AiIntent.RECORDAR_COBRO_PENDIENTE,
+      );
+      return;
+    }
+
+    if (!payload.paymentLinkId || !payload.stripePaymentUrl || !payload.amount) {
+      await this.sendAndRecord(
+        phone,
+        'No encontré el link pendiente completo. Revisa tus cobros pendientes y vuelve a intentar.',
+        AiIntent.RECORDAR_COBRO_PENDIENTE,
+      );
+      return;
+    }
+
+    const message = buildCollectionReminderMessage({
+      clientName: contact.name,
+      providerDisplayName: providerName,
+      amount: payload.amount,
+      description: payload.description,
+      url: payload.stripePaymentUrl,
+    });
+    const event = await this.businessLoopService.createProposedEvent({
+      providerId: payload.providerProfileId,
+      type: BusinessLoopType.COLLECTION,
+      contactId: contact.id,
+      clientName: contact.name,
+      sourcePaymentLinkId: payload.paymentLinkId,
+      message,
+    });
+
+    await this.setPendingDelegatedSend(phone, {
+      kind: 'delegated_send',
+      action: 'collection_reminder',
+      providerProfileId: payload.providerProfileId,
+      businessLoopEventId: event.id,
+      paymentLinkId: payload.paymentLinkId,
+      contactId: contact.id,
+      clientPhone: contact.phone,
+      clientName: contact.name,
+      providerDisplayName: providerName,
+      message,
+      amount: payload.amount,
+      description: payload.description,
+      stripePaymentUrl: payload.stripePaymentUrl,
+    });
+
+    await this.sendAndRecord(
+      phone,
+      `Le mando este recordatorio a *${contact.name}* (${formatPhoneForDisplay(contact.phone)}):\n\n` +
+        `"${message}"\n\n` +
+        '¿Lo envío?',
+      AiIntent.RECORDAR_COBRO_PENDIENTE,
+    );
+  }
+
+  private intentForDelegatedAction(
+    action: PendingDelegatedSendState['action'],
+  ): AiIntent {
+    if (action === 'reactivation') return AiIntent.CLIENTES_INACTIVOS;
+    if (action === 'collection_reminder') return AiIntent.COBROS_PENDIENTES;
+    return AiIntent.CREAR_LINK_COBRO;
+  }
+
   private async proposeDelegatedPaymentLinkSend(
     phone: string,
     providerProfileId: string,
@@ -2104,6 +2357,7 @@ export class WhatsAppProviderHandler {
 
     await this.setPendingDelegatedSend(phone, {
       kind: 'delegated_send',
+      action: 'payment_link',
       providerProfileId,
       paymentLinkId: paymentLink.id,
       contactId,
@@ -2190,6 +2444,7 @@ export class WhatsAppProviderHandler {
     const sendToClient = data?.sendToClient === true;
 
     const payload: PaymentLinkFlowPayload = {
+      action: 'payment_link',
       providerProfileId,
       amount,
       description,
@@ -3217,6 +3472,247 @@ export class WhatsAppProviderHandler {
     );
   }
 
+  private async handleReactivarCliente(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
+    providerName = 'tu maestro',
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, 'No encontré tu perfil.');
+      return;
+    }
+
+    const clientName = this.sanitizeClientField(data?.clientName);
+    const contactId = this.sanitizeClientField(data?.contactId);
+    if (!clientName && !contactId) {
+      await this.sendAndRecord(
+        phone,
+        '¿A qué cliente quieres reactivar?',
+        AiIntent.REACTIVAR_CLIENTE,
+      );
+      return;
+    }
+
+    const resolution = await this.contactsService.resolveClientForSend(
+      providerProfileId,
+      {
+        clientName,
+        contactId,
+        timezone: tz,
+      },
+    );
+    const payload: PaymentLinkFlowPayload = {
+      action: 'reactivation',
+      providerProfileId,
+      clientName,
+      sendToClient: true,
+      messageHint: this.sanitizeClientField(data?.messageHint),
+    };
+
+    if (resolution.status === 'ok') {
+      await this.continueReactivationAfterContactResolved(
+        phone,
+        payload,
+        providerName,
+        resolution.contact.id,
+      );
+      return;
+    }
+
+    if (resolution.status === 'need_phone') {
+      await this.setPendingContactPhone(phone, {
+        kind: 'contact_phone',
+        payload,
+        clientName: resolution.clientName,
+        contactId: resolution.contactId,
+      });
+      await this.sendAndRecord(
+        phone,
+        `No tengo el teléfono de *${resolution.clientName}*. Pásamelo y lo guardo para la próxima.`,
+        AiIntent.REACTIVAR_CLIENTE,
+      );
+      return;
+    }
+
+    if (resolution.status === 'disambiguate') {
+      await this.setPendingContactDisambiguation(phone, {
+        kind: 'contact_disambiguation',
+        payload,
+        clientName: resolution.clientName,
+        candidateIds: resolution.candidates.map((c) => c.id),
+      });
+      await this.sendAndRecord(
+        phone,
+        this.formatContactDisambiguation(
+          resolution.clientName,
+          resolution.candidates,
+        ),
+        AiIntent.REACTIVAR_CLIENTE,
+      );
+      return;
+    }
+
+    await this.sendAndRecord(
+      phone,
+      `No encontré a ${clientName || 'ese cliente'} en tus contactos. Primero guárdame su teléfono.`,
+      AiIntent.REACTIVAR_CLIENTE,
+    );
+  }
+
+  private async handleRecordarCobroPendiente(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+    tz: string = DEFAULT_TIMEZONE,
+    providerName = 'tu maestro',
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(phone, 'No encontré tu perfil.');
+      return;
+    }
+
+    const paymentLinkId = this.sanitizeClientField(data?.paymentLinkId);
+    const clientName = this.sanitizeClientField(data?.clientName);
+    const now = new Date();
+    const links = await this.prisma.paymentLink.findMany({
+      where: {
+        providerId: providerProfileId,
+        status: PaymentLinkStatus.PENDING,
+        incomeId: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        ...(paymentLinkId
+          ? { id: paymentLinkId }
+          : clientName
+            ? { clientName: { contains: clientName, mode: 'insensitive' } }
+            : {}),
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 5,
+    });
+
+    if (links.length === 0) {
+      await this.sendAndRecord(
+        phone,
+        clientName
+          ? `No encontré cobros pendientes para ${clientName}.`
+          : 'No encontré cobros pendientes.',
+        AiIntent.RECORDAR_COBRO_PENDIENTE,
+      );
+      return;
+    }
+
+    if (links.length > 1 && !paymentLinkId) {
+      await this.sendAndRecord(
+        phone,
+        [
+          `Encontré varios cobros pendientes para ${clientName || 'ese cliente'}:`,
+          ...links.map((link, index) => {
+            const amount = this.formatMoney(Number(link.amount));
+            const desc = link.description ? ` — ${link.description}` : '';
+            return `${index + 1}. ${link.clientName || 'Cliente sin nombre'}: ${amount}${desc}`;
+          }),
+          'Dime cuál quieres recordar con el nombre exacto del cliente.',
+        ].join('\n'),
+        AiIntent.RECORDAR_COBRO_PENDIENTE,
+      );
+      return;
+    }
+
+    const link = links[0];
+    if (!link.stripePaymentUrl) {
+      await this.sendAndRecord(
+        phone,
+        'Ese cobro no tiene link de pago disponible.',
+        AiIntent.RECORDAR_COBRO_PENDIENTE,
+      );
+      return;
+    }
+
+    const resolution = await this.contactsService.resolveClientForSend(
+      providerProfileId,
+      {
+        clientName: link.clientName ?? undefined,
+        clientPhone: link.clientPhone ?? undefined,
+        contactId: link.contactId ?? undefined,
+        timezone: tz,
+      },
+    );
+    const payload: PaymentLinkFlowPayload = {
+      action: 'collection_reminder',
+      providerProfileId,
+      amount: Number(link.amount),
+      description: link.description ?? undefined,
+      clientName: link.clientName ?? undefined,
+      sendToClient: true,
+      paymentLinkId: link.id,
+      stripePaymentUrl: link.stripePaymentUrl,
+    };
+
+    if (resolution.status === 'ok') {
+      await this.continueCollectionReminderAfterContactResolved(
+        phone,
+        payload,
+        providerName,
+        resolution.contact.id,
+      );
+      return;
+    }
+
+    if (resolution.status === 'need_phone') {
+      await this.setPendingContactPhone(phone, {
+        kind: 'contact_phone',
+        payload,
+        clientName: resolution.clientName,
+        contactId: resolution.contactId,
+      });
+      await this.sendAndRecord(
+        phone,
+        `No tengo el teléfono de *${resolution.clientName}*. Pásamelo y lo guardo para la próxima.`,
+        AiIntent.RECORDAR_COBRO_PENDIENTE,
+      );
+      return;
+    }
+
+    if (resolution.status === 'disambiguate') {
+      await this.setPendingContactDisambiguation(phone, {
+        kind: 'contact_disambiguation',
+        payload,
+        clientName: resolution.clientName,
+        candidateIds: resolution.candidates.map((c) => c.id),
+      });
+      await this.sendAndRecord(
+        phone,
+        this.formatContactDisambiguation(
+          resolution.clientName,
+          resolution.candidates,
+        ),
+        AiIntent.RECORDAR_COBRO_PENDIENTE,
+      );
+      return;
+    }
+
+    await this.sendAndRecord(
+      phone,
+      `No tengo teléfono para ${link.clientName || 'ese cliente'}. Primero guárdame su teléfono.`,
+      AiIntent.RECORDAR_COBRO_PENDIENTE,
+    );
+  }
+
+  private formatContactDisambiguation(
+    clientName: string,
+    candidates: Contact[],
+  ): string {
+    const lines = [`Encontré varios contactos para *${clientName}*:`];
+    for (const [index, contact] of candidates.slice(0, 5).entries()) {
+      const phone = contact.phone ? ` — ${formatPhoneForDisplay(contact.phone)}` : '';
+      lines.push(`${index + 1}. ${contact.name}${phone}`);
+    }
+    lines.push('Dime el número de la lista o escribe *no* para cancelar.');
+    return lines.join('\n');
+  }
+
   private formatLedgerActivityLine(
     item: LedgerClientActivity,
     tz: string,
@@ -3326,6 +3822,14 @@ export class WhatsAppProviderHandler {
         estimatedPrice: data?.estimatedPrice
           ? Number(data.estimatedPrice)
           : undefined,
+      });
+
+      await this.businessLoopService.convertRecentSentEvent({
+        providerId: providerProfileId,
+        contactId: linked.contactId,
+        clientName: linked.clientName,
+        appointmentId: appointment.id,
+        amount: data?.estimatedPrice ? Number(data.estimatedPrice) : undefined,
       });
 
       let confirmation = this.appointmentsService.formatAppointmentConfirmation(

@@ -7,6 +7,8 @@ export enum AiIntent {
   CONSULTAR_CLIENTE = 'consultar_cliente',
   CLIENTES_INACTIVOS = 'clientes_inactivos',
   COBROS_PENDIENTES = 'cobros_pendientes',
+  REACTIVAR_CLIENTE = 'reactivar_cliente',
+  RECORDAR_COBRO_PENDIENTE = 'recordar_cobro_pendiente',
   AGENDAR_CITA = 'agendar_cita',
   CONFIRMAR_CLIENTE = 'confirmar_cliente',
   VER_AGENDA = 'ver_agenda',

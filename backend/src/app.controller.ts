@@ -15,6 +15,7 @@ import { PrismaService } from './prisma/prisma.service';
 import { RedisService } from './config/redis.service';
 import { QueueService } from './common/queues/queue.service';
 import { phoneLookupVariants } from './common/utils/phone.utils';
+import { BusinessLoopService } from './modules/business-loop/business-loop.service';
 
 @Controller()
 export class AppController {
@@ -24,6 +25,7 @@ export class AppController {
     private redis: RedisService,
     private config: ConfigService,
     private queueService: QueueService,
+    private businessLoopService: BusinessLoopService,
   ) {}
 
   /**
@@ -247,6 +249,66 @@ export class AppController {
         createdAt: u.createdAt,
       };
     });
+  }
+
+  // ─── Attributable pesos (A3) ─────────────────────────────
+
+  @Get('api/internal/attributable-pesos')
+  @Public()
+  async getAttributablePesos(
+    @Headers('x-verify-token') token: string,
+    @Query('phone') phoneParam?: string,
+    @Query('providerId') providerIdParam?: string,
+    @Query('days') daysParam?: string,
+    @Query('from') fromParam?: string,
+    @Query('to') toParam?: string,
+  ) {
+    const verifyToken = this.config.get<string>('WHATSAPP_VERIFY_TOKEN');
+    if (!token || token !== verifyToken) {
+      throw new ForbiddenException('Invalid verify token');
+    }
+
+    const days = Math.min(Math.max(parseInt(daysParam || '30', 10) || 30, 1), 180);
+    const parseDate = (raw?: string): Date | undefined => {
+      if (!raw) return undefined;
+      const parsed = new Date(raw);
+      return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+    };
+    const to = parseDate(toParam) ?? new Date();
+    const from =
+      parseDate(fromParam) ??
+      new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
+
+    let providerId = providerIdParam;
+    if (!providerId && phoneParam) {
+      const variants = this.phoneVariants(phoneParam);
+      const user = await this.prisma.user.findFirst({
+        where: { OR: variants.map((p) => ({ phone: p })) },
+        include: { providerProfile: { select: { id: true } } },
+      });
+      providerId = user?.providerProfile?.id;
+      if (!providerId) {
+        return {
+          window: { from: from.toISOString(), to: to.toISOString() },
+          phone: phoneParam,
+          totals: { amount: 0, count: 0, byType: [] },
+          events: [],
+        };
+      }
+    }
+
+    const result = await this.businessLoopService.getAttributablePesos({
+      providerId,
+      from,
+      to,
+    });
+
+    return {
+      window: { from: from.toISOString(), to: to.toISOString() },
+      ...(phoneParam ? { phone: phoneParam } : {}),
+      ...(providerId ? { providerId } : { scope: 'all_providers' }),
+      ...result,
+    };
   }
 
   // ─── Financial integrity (Cap. 45 — M0) ─────────────────

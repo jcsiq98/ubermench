@@ -28,6 +28,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { ExchangeRateModule } from './modules/exchange-rate/exchange-rate.module';
 import { LedgerQueryModule } from './modules/ledger/ledger-query.module';
+import { BusinessLoopModule } from './modules/business-loop/business-loop.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -116,6 +117,9 @@ const isProd = process.env.NODE_ENV === 'production';
 
     // Ledger read-side queries (A0)
     LedgerQueryModule,
+
+    // Business loop attribution (A3)
+    BusinessLoopModule,
 
     // WhatsApp (global)
     WhatsAppModule,

@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { IncomeService } from '../income/income.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { FinancialRateLimitService } from '../../common/financial-rate-limit.service';
+import { BusinessLoopService } from '../business-loop/business-loop.service';
 import {
   PaymentMethod,
   PaymentLinkStatus,
@@ -52,6 +53,7 @@ export class PaymentsService {
     private incomeService: IncomeService,
     private whatsappService: WhatsAppService,
     private rateLimit: FinancialRateLimitService,
+    private businessLoopService: BusinessLoopService,
   ) {
     const secretKey = this.config.get<string>('STRIPE_SECRET_KEY');
     if (secretKey && !secretKey.includes('REPLACE_ME')) {
@@ -348,6 +350,24 @@ export class PaymentsService {
         paidAt: new Date(),
         incomeId: income.id,
       },
+    });
+
+    await this.businessLoopService.convertByPaymentLink({
+      paymentLinkId,
+      incomeId: income.id,
+      amount: Number(paymentLink.amount),
+    });
+
+    // A reactivation can also close via a paid link (not just manually-logged
+    // income/citas), so credit it here too. Idempotent: only a still-SENT
+    // REACTIVATION event for this contact converts, and a COLLECTION on this
+    // same link was already handled above.
+    await this.businessLoopService.convertRecentSentEvent({
+      providerId: paymentLink.providerId,
+      contactId: paymentLink.contactId,
+      clientName: paymentLink.clientName,
+      incomeId: income.id,
+      amount: Number(paymentLink.amount),
     });
 
     this.logger.log(

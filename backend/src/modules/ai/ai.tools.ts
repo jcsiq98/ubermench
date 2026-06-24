@@ -59,6 +59,12 @@ export const TOOL_TO_INTENT: Record<
   cobros_pendientes: {
     intent: AiIntent.COBROS_PENDIENTES,
   },
+  reactivar_cliente: {
+    intent: AiIntent.REACTIVAR_CLIENTE,
+  },
+  recordar_cobro_pendiente: {
+    intent: AiIntent.RECORDAR_COBRO_PENDIENTE,
+  },
   agendar_cita: {
     intent: AiIntent.AGENDAR_CITA,
   },
@@ -465,6 +471,58 @@ export const AI_TOOLS: ChatCompletionTool[] = [
             type: 'number',
             description:
               'Máximo de cobros pendientes a mostrar. Default 5, máximo 10.',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'reactivar_cliente',
+      description:
+        'Preparar un mensaje para reactivar a un cliente inactivo. Usar cuando el usuario diga "mándale al primero", "reactiva a Mariana", "escríbele a la Sra. García". NO envía directo: el sistema siempre muestra el mensaje y pide confirmación explícita.',
+      parameters: {
+        type: 'object',
+        properties: {
+          clientName: {
+            type: 'string',
+            description:
+              'Nombre del cliente a reactivar. Si el usuario dijo "el primero", usa el nombre mostrado en la lista anterior si está disponible.',
+          },
+          contactId: {
+            type: 'string',
+            description:
+              'ID del contacto si viene de una lista estructurada. Normalmente no estará disponible para el LLM.',
+          },
+          messageHint: {
+            type: 'string',
+            description:
+              'Detalle opcional del servicio o motivo para personalizar el mensaje ("mantenimiento del boiler", "uñas", etc.).',
+          },
+        },
+        required: ['clientName'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'recordar_cobro_pendiente',
+      description:
+        'Preparar recordatorio de un cobro pendiente existente, reutilizando el link de pago ya creado. Usar cuando el usuario diga "recuérdale a Pedro", "mándale el cobro al primero", "cóbrale a Mariana" después de consultar pendientes. NO crea un link nuevo y NO envía sin confirmación.',
+      parameters: {
+        type: 'object',
+        properties: {
+          paymentLinkId: {
+            type: 'string',
+            description:
+              'ID del link pendiente si está disponible. Normalmente no lo estará para el LLM.',
+          },
+          clientName: {
+            type: 'string',
+            description:
+              'Nombre del cliente con cobro pendiente. Si dijo "el primero", usa el nombre mostrado en la lista anterior.',
           },
         },
       },

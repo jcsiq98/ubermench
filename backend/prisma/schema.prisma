@@ -94,6 +94,7 @@ model ProviderProfile {
   reminders         Reminder[]
   paymentLinks      PaymentLink[]
   contacts          Contact[]
+  businessLoopEvents BusinessLoopEvent[]
   serviceZones      ProviderServiceZone[]
   trustScore        TrustScore?
   location          ProviderLocation?
@@ -166,6 +167,7 @@ model Income {
   provider    ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
   contact     Contact?        @relation(fields: [contactId], references: [id], onDelete: SetNull)
   paymentLink PaymentLink?
+  businessLoopEvents BusinessLoopEvent[]
 
   @@index([providerId])
   @@index([providerId, contactId])
@@ -204,6 +206,7 @@ model PaymentLink {
   provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
   contact  Contact?        @relation(fields: [contactId], references: [id], onDelete: SetNull)
   income   Income?         @relation(fields: [incomeId], references: [id])
+  businessLoopEvents BusinessLoopEvent[]
 
   @@index([providerId])
   @@index([providerId, contactId])
@@ -290,6 +293,7 @@ model Appointment {
 
   provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
   contact  Contact?        @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  businessLoopEvents BusinessLoopEvent[]
 
   @@index([providerId])
   @@index([providerId, contactId])
@@ -317,6 +321,7 @@ model Contact {
   incomes      Income[]
   appointments Appointment[]
   paymentLinks PaymentLink[]
+  businessLoopEvents BusinessLoopEvent[]
 
   @@unique([providerId, phone])
   @@index([providerId])
@@ -329,6 +334,51 @@ enum ContactSource {
   INCOME
   APPOINTMENT
   PAYMENT_LINK
+}
+
+// ──────────────────────────────────────────────
+// Business Loop Attribution (A3 — attributable pesos)
+// ──────────────────────────────────────────────
+model BusinessLoopEvent {
+  id                  String             @id @default(uuid())
+  providerId          String             @map("provider_id")
+  contactId           String?            @map("contact_id")
+  clientName          String?            @map("client_name")
+  type                BusinessLoopType
+  status              BusinessLoopStatus @default(PROPOSED)
+  message             String             @db.Text
+  sourcePaymentLinkId String?            @map("source_payment_link_id")
+  sourceAppointmentId String?            @map("source_appointment_id")
+  sourceIncomeId      String?            @map("source_income_id")
+  amount              Decimal?           @db.Decimal(12, 2)
+  proposedAt          DateTime           @default(now()) @map("proposed_at")
+  sentAt              DateTime?          @map("sent_at")
+  convertedAt         DateTime?          @map("converted_at")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+
+  provider          ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  contact           Contact?        @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  sourcePaymentLink PaymentLink?    @relation(fields: [sourcePaymentLinkId], references: [id], onDelete: SetNull)
+  sourceAppointment Appointment?    @relation(fields: [sourceAppointmentId], references: [id], onDelete: SetNull)
+  sourceIncome      Income?         @relation(fields: [sourceIncomeId], references: [id], onDelete: SetNull)
+
+  @@index([providerId, type, status])
+  @@index([providerId, createdAt])
+  @@index([providerId, contactId])
+  @@index([sourcePaymentLinkId])
+  @@map("business_loop_events")
+}
+
+enum BusinessLoopType {
+  REACTIVATION
+  COLLECTION
+}
+
+enum BusinessLoopStatus {
+  PROPOSED
+  SENT
+  CONVERTED
 }
 
 enum AppointmentStatus {

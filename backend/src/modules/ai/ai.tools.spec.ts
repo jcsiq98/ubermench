@@ -12,8 +12,8 @@ const functionTools = AI_TOOLS.filter((t) => t.type === 'function') as Array<
 >;
 
 describe('AI Tools — Function Calling definitions', () => {
-  it('should define 33 tools', () => {
-    expect(AI_TOOLS).toHaveLength(33);
+  it('should define 35 tools', () => {
+    expect(AI_TOOLS).toHaveLength(35);
   });
 
   it('every tool should have a valid name and description', () => {
@@ -146,6 +146,22 @@ describe('Tool parameter schemas', () => {
 
     const cobrosPendientes = findTool('cobros_pendientes');
     expect(cobrosPendientes.function.description).toContain('links de pago');
+  });
+
+  it('money loop action tools prepare delegated messages without auto-send', () => {
+    const reactivar = findTool('reactivar_cliente');
+    const reactivarParams = reactivar.function.parameters as any;
+    expect(TOOL_TO_INTENT['reactivar_cliente'].intent).toBe(
+      AiIntent.REACTIVAR_CLIENTE,
+    );
+    expect(reactivarParams.required).toEqual(['clientName']);
+    expect(reactivar.function.description).toContain('confirmación explícita');
+
+    const recordar = findTool('recordar_cobro_pendiente');
+    expect(TOOL_TO_INTENT['recordar_cobro_pendiente'].intent).toBe(
+      AiIntent.RECORDAR_COBRO_PENDIENTE,
+    );
+    expect(recordar.function.description).toContain('NO crea un link nuevo');
   });
 
   it('agendar_cita requires date', () => {

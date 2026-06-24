@@ -6,11 +6,15 @@ export const PENDING_DELEGATED_SEND_PREFIX = 'wa_pending_delegated_send:';
 export const PENDING_CONTACT_FLOW_TTL = 600; // 10 minutes
 
 export interface PaymentLinkFlowPayload {
+  action?: 'payment_link' | 'reactivation' | 'collection_reminder';
   providerProfileId: string;
-  amount: number;
+  amount?: number;
   description?: string;
   clientName?: string;
   sendToClient: boolean;
+  paymentLinkId?: string;
+  stripePaymentUrl?: string;
+  messageHint?: string;
 }
 
 export interface PendingContactPhoneState {
@@ -29,16 +33,18 @@ export interface PendingContactDisambiguationState {
 
 export interface PendingDelegatedSendState {
   kind: 'delegated_send';
+  action: 'payment_link' | 'reactivation' | 'collection_reminder';
   providerProfileId: string;
-  paymentLinkId: string;
+  businessLoopEventId?: string;
+  paymentLinkId?: string;
   contactId: string;
   clientPhone: string;
   clientName: string;
   providerDisplayName: string;
   message: string;
-  amount: number;
+  amount?: number;
   description?: string;
-  stripePaymentUrl: string;
+  stripePaymentUrl?: string;
 }
 
 const AFFIRMATIVE = new Set([
@@ -131,5 +137,38 @@ export function buildDelegatedClientMessage(opts: {
     msg += ` (${opts.description})`;
   }
   msg += `.\n\n💳 Paga aquí: ${opts.url}\n\nPuedes pagar con tarjeta.`;
+  return msg;
+}
+
+export function buildReactivationClientMessage(opts: {
+  clientName: string;
+  providerDisplayName: string;
+  description?: string;
+}): string {
+  const reason = opts.description?.trim()
+    ? ` por ${opts.description.trim()}`
+    : '';
+  return (
+    `Hola ${opts.clientName}, soy el Chalán de ${opts.providerDisplayName}. ` +
+    `Hace rato que no vemos lo de tu servicio${reason}. ` +
+    '¿Quieres que mi maestro te agende una vuelta esta semana?'
+  );
+}
+
+export function buildCollectionReminderMessage(opts: {
+  clientName: string;
+  providerDisplayName: string;
+  amount: number;
+  description?: string;
+  url: string;
+}): string {
+  const amountFormatted = opts.amount.toLocaleString('es-MX');
+  let msg =
+    `Hola ${opts.clientName}, soy el Chalán de ${opts.providerDisplayName}. ` +
+    `Te recuerdo el pago pendiente de *$${amountFormatted}*`;
+  if (opts.description) {
+    msg += ` por ${opts.description}`;
+  }
+  msg += `.\n\n💳 Aquí está el link: ${opts.url}`;
   return msg;
 }
