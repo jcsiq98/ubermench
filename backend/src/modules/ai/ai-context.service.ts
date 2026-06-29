@@ -13,6 +13,9 @@ const MEMORY_COUNTER_PREFIX = 'memory_counter:';
 const MEMORY_EXTRACTION_THRESHOLD = 10;
 const MEMORY_COUNTER_TTL = 86400; // 24 hours
 
+// WhatsApp's customer service window: 24h from the user's last inbound.
+const SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class AiContextService {
   private readonly logger = new Logger(AiContextService.name);
@@ -74,6 +77,33 @@ export class AiContextService {
   async clearHistory(providerPhone: string): Promise<void> {
     const phone = canonicalizePhoneE164(providerPhone);
     await this.redis.del(`${CONTEXT_PREFIX}${phone}`);
+  }
+
+  /**
+   * Timestamp of the last inbound (role: "user") message from this phone,
+   * or null if we've never received one. Source of truth for WhatsApp's
+   * 24h customer service window.
+   */
+  async getLastInboundAt(providerPhone: string): Promise<Date | null> {
+    const phone = canonicalizePhoneE164(providerPhone);
+    const last = await this.prisma.conversationLog.findFirst({
+      where: { phone, role: 'user' },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    return last?.createdAt ?? null;
+  }
+
+  /**
+   * True when the phone is inside WhatsApp's 24h customer service window
+   * (they sent us a message in the last 24h), so free-form business
+   * messages are allowed. Outside the window, Meta only permits approved
+   * templates — proactive free-text senders MUST check this first.
+   */
+  async isWithinServiceWindow(providerPhone: string): Promise<boolean> {
+    const last = await this.getLastInboundAt(providerPhone);
+    if (!last) return false;
+    return Date.now() - last.getTime() < SERVICE_WINDOW_MS;
   }
 
   /**

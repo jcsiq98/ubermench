@@ -46,6 +46,21 @@ export class PersonalReminderProcessor extends WorkerHost {
       return;
     }
 
+    // Meta forbids free-text business-initiated messages outside the 24h
+    // customer service window. Until approved templates exist, suppress
+    // rather than violate (fail-safe). See AiContextService.isWithinServiceWindow.
+    if (!(await this.aiContextService.isWithinServiceWindow(providerPhone))) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'proactive_send_suppressed_out_of_window',
+          kind: 'personal_reminder',
+          reminderId,
+          providerPhone,
+        }),
+      );
+      return;
+    }
+
     try {
       const msg = `🔔 *Recordatorio:* ${description}`;
       await this.whatsappService.sendTextMessage(providerPhone, msg);

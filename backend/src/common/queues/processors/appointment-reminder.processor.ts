@@ -55,6 +55,21 @@ export class AppointmentReminderProcessor extends WorkerHost {
       return;
     }
 
+    // Meta forbids free-text business-initiated messages outside the 24h
+    // customer service window. Until approved templates exist, suppress
+    // rather than violate (fail-safe). See AiContextService.isWithinServiceWindow.
+    if (!(await this.aiContextService.isWithinServiceWindow(providerPhone))) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'proactive_send_suppressed_out_of_window',
+          kind: 'appointment_reminder',
+          appointmentId,
+          providerPhone,
+        }),
+      );
+      return;
+    }
+
     const timeStr = formatTime(new Date(scheduledAt), tz);
 
     const clientLabel = clientName || 'tu cliente';
