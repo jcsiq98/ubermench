@@ -2013,58 +2013,28 @@ export class WhatsAppProviderHandler {
       if (isAffirmativeReply(text)) {
         await this.clearPendingDelegatedSend(phone);
 
-        // Meta forbids free-text business-initiated messages outside the
-        // client's 24h window. Inactive clients (the reactivation target)
-        // are by definition out of window — and we don't track client
-        // inbound — so suppress the automated send and hand the message
-        // back to the provider to send from their own WhatsApp (fail-safe).
-        const clientInWindow = await this.aiContextService.isWithinServiceWindow(
-          delegated.clientPhone,
+        // We never auto-send free text to a client: Meta only allows it
+        // inside the client's 24h window, and we don't track client inbound
+        // (conversation_logs only holds provider↔Chalán messages). So hand
+        // the message back to the provider to send from their own WhatsApp.
+        // The loop event is left un-sent (no false attribution). Proper
+        // delivery waits on approved templates + opt-in.
+        this.logger.warn(
+          JSON.stringify({
+            event: 'proactive_send_suppressed_out_of_window',
+            kind: `delegated_${delegated.action}`,
+            businessLoopEventId: delegated.businessLoopEventId,
+          }),
         );
-        if (!clientInWindow) {
-          this.logger.warn(
-            JSON.stringify({
-              event: 'proactive_send_suppressed_out_of_window',
-              kind: `delegated_${delegated.action}`,
-              businessLoopEventId: delegated.businessLoopEventId,
-            }),
-          );
-          const handBack =
-            delegated.action === 'payment_link' && delegated.stripePaymentUrl
-              ? `No puedo escribirle yo a *${delegated.clientName}* (no te ha escrito en 24h, regla de WhatsApp). Mándaselo tú:\n\n${delegated.message}\n\n🔗 ${delegated.stripePaymentUrl}`
-              : `No puedo escribirle yo a *${delegated.clientName}* (no te ha escrito en 24h, regla de WhatsApp). Mándaselo tú:\n\n${delegated.message}`;
-          await this.sendAndRecord(
-            phone,
-            handBack,
-            this.intentForDelegatedAction(delegated.action),
-          );
-          return true;
-        }
-
-        try {
-          await this.whatsapp.sendTextMessage(
-            delegated.clientPhone,
-            delegated.message,
-          );
-          await this.contactsService.touchContact(delegated.contactId);
-          await this.businessLoopService.markSent(delegated.businessLoopEventId);
-          await this.sendAndRecord(
-            phone,
-            `Listo, ya se lo mandé a *${delegated.clientName}*.`,
-            this.intentForDelegatedAction(delegated.action),
-          );
-        } catch (err: any) {
-          this.logger.error(`Delegated send failed: ${err.message}`);
-          const fallback =
-            delegated.action === 'payment_link' && delegated.stripePaymentUrl
-              ? `No pude enviarle el mensaje a ${delegated.clientName}. Aquí está el link para que se lo mandes tú:\n\n🔗 ${delegated.stripePaymentUrl}`
-              : `No pude enviarle el mensaje a ${delegated.clientName}. Mándaselo tú por ahora.`;
-          await this.sendAndRecord(
-            phone,
-            fallback,
-            this.intentForDelegatedAction(delegated.action),
-          );
-        }
+        const handBack =
+          delegated.action === 'payment_link' && delegated.stripePaymentUrl
+            ? `Yo no le puedo escribir directo a *${delegated.clientName}* (regla de WhatsApp). Cópialo y mándaselo tú:\n\n${delegated.message}\n\n🔗 ${delegated.stripePaymentUrl}`
+            : `Yo no le puedo escribir directo a *${delegated.clientName}* (regla de WhatsApp). Cópialo y mándaselo tú:\n\n${delegated.message}`;
+        await this.sendAndRecord(
+          phone,
+          handBack,
+          this.intentForDelegatedAction(delegated.action),
+        );
         return true;
       }
       await this.sendAndRecord(
@@ -2991,7 +2961,7 @@ export class WhatsAppProviderHandler {
           { amount },
         );
 
-        if (!result) {
+        if (result.status === 'not_found') {
           const recent = await this.expenseService.getRecent(
             providerProfileId,
             10,
@@ -3015,7 +2985,7 @@ export class WhatsAppProviderHandler {
           }
         }
 
-        if (result) {
+        if (result.status === 'ok') {
           const desc =
             result.previous.description ||
             result.previous.category ||
@@ -3025,6 +2995,19 @@ export class WhatsAppProviderHandler {
             `✏️ *Gasto corregido:*\n\n` +
               `💸 $${Number(result.previous.amount).toLocaleString('es-MX')} → *$${amount.toLocaleString('es-MX')}*\n` +
               `📝 ${desc}`,
+          );
+        } else if (result.status === 'ambiguous') {
+          // Several expenses match — never guess which money row to edit.
+          const list = result.matches
+            .slice(0, 5)
+            .map(
+              (e) =>
+                `• ${e.description || e.category || 'sin descripción'} — $${Number(e.amount).toLocaleString('es-MX')}`,
+            )
+            .join('\n');
+          await this.sendAndRecord(
+            phone,
+            `Tengo varios gastos que coinciden con "${description}":\n\n${list}\n\n¿Cuál corrijo a *$${amount.toLocaleString('es-MX')}*? Dime cuál con más detalle.`,
           );
         } else {
           await this.sendAndRecord(

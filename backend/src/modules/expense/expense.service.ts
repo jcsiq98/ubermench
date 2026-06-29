@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
+import { Expense, Prisma } from '@prisma/client';
+
+export type EditByDescriptionResult =
+  | { status: 'ok'; previous: Expense; updated: Expense }
+  | { status: 'not_found' }
+  | { status: 'ambiguous'; matches: Expense[] };
 import {
   getWeekStartUtc,
   getMonthStartUtc,
@@ -214,15 +219,14 @@ export class ExpenseService {
       take: 20,
     });
 
-    const needle = description.toLowerCase();
+    const needle = description.trim().toLowerCase();
+    if (!needle) return null;
     const match = expenses.find((e) => {
       const desc = (e.description || '').toLowerCase();
       const cat = (e.category || '').toLowerCase();
       return (
-        desc.includes(needle) ||
-        needle.includes(desc) ||
-        cat.includes(needle) ||
-        needle.includes(cat)
+        (!!desc && (desc.includes(needle) || needle.includes(desc))) ||
+        (!!cat && (cat.includes(needle) || needle.includes(cat)))
       );
     });
 
@@ -265,17 +269,17 @@ export class ExpenseService {
     providerId: string,
     description: string,
     updates: { amount?: number },
-  ) {
+  ): Promise<EditByDescriptionResult> {
     if (
       !updates.amount ||
       !Number.isFinite(updates.amount) ||
       updates.amount <= 0
     ) {
-      return null;
+      return { status: 'not_found' };
     }
 
     const needle = description.trim().toLowerCase();
-    if (!needle) return null;
+    if (!needle) return { status: 'not_found' };
 
     const expenses = await this.prisma.expense.findMany({
       where: { providerId },
@@ -285,8 +289,8 @@ export class ExpenseService {
 
     // Guard against empty desc/cat: needle.includes('') is always true, so an
     // expense with a null description AND category would otherwise match any
-    // correction request and the wrong amount would be overwritten silently.
-    const match = expenses.find((e) => {
+    // correction request.
+    const matches = expenses.filter((e) => {
       const desc = (e.description || '').toLowerCase();
       const cat = (e.category || '').toLowerCase();
       return (
@@ -295,8 +299,11 @@ export class ExpenseService {
       );
     });
 
-    if (!match) return null;
+    if (matches.length === 0) return { status: 'not_found' };
+    // Never guess which money row to edit when several match — ask instead.
+    if (matches.length > 1) return { status: 'ambiguous', matches };
 
+    const match = matches[0];
     const updated = await this.prisma.expense.update({
       where: { id: match.id },
       data: { amount: new Prisma.Decimal(updates.amount) },
@@ -304,7 +311,7 @@ export class ExpenseService {
     this.logger.log(
       `Edited expense by description "${description}" (${match.id}): amount → ${updates.amount} for provider ${providerId}`,
     );
-    return { previous: match, updated };
+    return { status: 'ok', previous: match, updated };
   }
 
   async getRecent(providerId: string, limit = 5) {

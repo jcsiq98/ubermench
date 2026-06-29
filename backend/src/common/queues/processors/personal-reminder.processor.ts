@@ -34,21 +34,10 @@ export class PersonalReminderProcessor extends WorkerHost {
       `Processing personal reminder ${reminderId}: "${description}"`,
     );
 
-    const claimed = await this.prisma.reminder.updateMany({
-      where: { id: reminderId, status: 'PENDING' },
-      data: { status: 'SENT' },
-    });
-
-    if (claimed.count === 0) {
-      this.logger.warn(
-        `Skipping reminder ${reminderId}: already processed (not PENDING)`,
-      );
-      return;
-    }
-
     // Meta forbids free-text business-initiated messages outside the 24h
-    // customer service window. Until approved templates exist, suppress
-    // rather than violate (fail-safe). See AiContextService.isWithinServiceWindow.
+    // customer service window. Check BEFORE claiming the reminder so an
+    // out-of-window reminder is not marked SENT without being delivered.
+    // Left PENDING; the markStaleReminders sweeper reconciles it later.
     if (!(await this.aiContextService.isWithinServiceWindow(providerPhone))) {
       this.logger.warn(
         JSON.stringify({
@@ -57,6 +46,18 @@ export class PersonalReminderProcessor extends WorkerHost {
           reminderId,
           providerPhone,
         }),
+      );
+      return;
+    }
+
+    const claimed = await this.prisma.reminder.updateMany({
+      where: { id: reminderId, status: 'PENDING' },
+      data: { status: 'SENT' },
+    });
+
+    if (claimed.count === 0) {
+      this.logger.warn(
+        `Skipping reminder ${reminderId}: already processed (not PENDING)`,
       );
       return;
     }

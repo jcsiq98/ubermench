@@ -57,6 +57,21 @@ export class AppointmentFollowupProcessor extends WorkerHost {
       return;
     }
 
+    // Meta forbids free-text business-initiated messages outside the 24h
+    // customer service window. Suppress rather than violate (fail-safe)
+    // until approved templates exist.
+    if (!(await this.aiContextService.isWithinServiceWindow(providerPhone))) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'proactive_send_suppressed_out_of_window',
+          kind: 'appointment_followup',
+          appointmentId,
+          providerPhone,
+        }),
+      );
+      return;
+    }
+
     const timeStr = formatTime(new Date(scheduledAt), tz);
 
     const clientLabel = clientName || 'tu cliente';

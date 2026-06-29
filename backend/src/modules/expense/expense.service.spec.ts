@@ -241,7 +241,7 @@ describe('ExpenseService.editByDescription', () => {
     return { service, update };
   }
 
-  it('edits the expense whose description matches the needle', async () => {
+  it('edits the unique expense whose description matches the needle', async () => {
     const { service, update } = makeServiceWithExpenses([
       { id: 'gorditas', description: 'gorditas', category: 'comida', amount: 110 },
       { id: 'gasolina', description: 'gasolina', category: 'transporte', amount: 534 },
@@ -251,7 +251,8 @@ describe('ExpenseService.editByDescription', () => {
       amount: 574,
     });
 
-    expect(result?.previous.id).toBe('gasolina');
+    expect(result.status).toBe('ok');
+    expect(result.status === 'ok' && result.previous.id).toBe('gasolina');
     expect(update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'gasolina' } }),
     );
@@ -267,19 +268,32 @@ describe('ExpenseService.editByDescription', () => {
       amount: 574,
     });
 
-    expect(result?.previous.id).toBe('gasolina');
+    expect(result.status === 'ok' && result.previous.id).toBe('gasolina');
     expect(update).not.toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'blank' } }),
     );
   });
 
-  it('returns null for a non-finite or non-positive amount', async () => {
+  it('does NOT edit (asks) when several expenses match the needle', async () => {
+    const { service, update } = makeServiceWithExpenses([
+      { id: 'luz-1', description: 'luz', category: 'servicios', amount: 500 },
+      { id: 'luz-2', description: 'luz oficina', category: 'servicios', amount: 800 },
+    ]);
+
+    const result = await service.editByDescription('p1', 'luz', { amount: 999 });
+
+    expect(result.status).toBe('ambiguous');
+    expect(result.status === 'ambiguous' && result.matches).toHaveLength(2);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('does not edit for a non-finite or non-positive amount', async () => {
     const { service, update } = makeServiceWithExpenses([
       { id: 'gasolina', description: 'gasolina', category: 'transporte', amount: 534 },
     ]);
 
-    expect(await service.editByDescription('p1', 'gasolina', { amount: Infinity })).toBeNull();
-    expect(await service.editByDescription('p1', 'gasolina', { amount: -5 })).toBeNull();
+    expect((await service.editByDescription('p1', 'gasolina', { amount: Infinity })).status).toBe('not_found');
+    expect((await service.editByDescription('p1', 'gasolina', { amount: -5 })).status).toBe('not_found');
     expect(update).not.toHaveBeenCalled();
   });
 });
