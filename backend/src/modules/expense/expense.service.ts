@@ -266,7 +266,16 @@ export class ExpenseService {
     description: string,
     updates: { amount?: number },
   ) {
-    if (!updates.amount || updates.amount <= 0) return null;
+    if (
+      !updates.amount ||
+      !Number.isFinite(updates.amount) ||
+      updates.amount <= 0
+    ) {
+      return null;
+    }
+
+    const needle = description.trim().toLowerCase();
+    if (!needle) return null;
 
     const expenses = await this.prisma.expense.findMany({
       where: { providerId },
@@ -274,15 +283,15 @@ export class ExpenseService {
       take: 20,
     });
 
-    const needle = description.toLowerCase();
+    // Guard against empty desc/cat: needle.includes('') is always true, so an
+    // expense with a null description AND category would otherwise match any
+    // correction request and the wrong amount would be overwritten silently.
     const match = expenses.find((e) => {
       const desc = (e.description || '').toLowerCase();
       const cat = (e.category || '').toLowerCase();
       return (
-        desc.includes(needle) ||
-        needle.includes(desc) ||
-        cat.includes(needle) ||
-        needle.includes(cat)
+        (!!desc && (desc.includes(needle) || needle.includes(desc))) ||
+        (!!cat && (cat.includes(needle) || needle.includes(cat)))
       );
     });
 

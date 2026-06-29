@@ -224,3 +224,62 @@ describe('ExpenseService — currency metadata', () => {
     expect(msg).toContain('Tipo de cambio: 18.5 (2026-06-21)');
   });
 });
+
+describe('ExpenseService.editByDescription', () => {
+  function makeServiceWithExpenses(expenses: any[]) {
+    const update = jest.fn().mockImplementation(({ where }) => ({
+      id: where.id,
+    }));
+    const prisma = {
+      expense: {
+        findMany: jest.fn().mockResolvedValue(expenses),
+        update,
+      },
+    };
+    const rateLimit = { assertWithinLimits: jest.fn() };
+    const service = new ExpenseService(prisma as any, rateLimit as any);
+    return { service, update };
+  }
+
+  it('edits the expense whose description matches the needle', async () => {
+    const { service, update } = makeServiceWithExpenses([
+      { id: 'gorditas', description: 'gorditas', category: 'comida', amount: 110 },
+      { id: 'gasolina', description: 'gasolina', category: 'transporte', amount: 534 },
+    ]);
+
+    const result = await service.editByDescription('p1', 'gasolina', {
+      amount: 574,
+    });
+
+    expect(result?.previous.id).toBe('gasolina');
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'gasolina' } }),
+    );
+  });
+
+  it('does NOT match an expense with null description and category (empty-string bug)', async () => {
+    const { service, update } = makeServiceWithExpenses([
+      { id: 'blank', description: null, category: null, amount: 999 },
+      { id: 'gasolina', description: 'gasolina', category: 'transporte', amount: 534 },
+    ]);
+
+    const result = await service.editByDescription('p1', 'gasolina', {
+      amount: 574,
+    });
+
+    expect(result?.previous.id).toBe('gasolina');
+    expect(update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'blank' } }),
+    );
+  });
+
+  it('returns null for a non-finite or non-positive amount', async () => {
+    const { service, update } = makeServiceWithExpenses([
+      { id: 'gasolina', description: 'gasolina', category: 'transporte', amount: 534 },
+    ]);
+
+    expect(await service.editByDescription('p1', 'gasolina', { amount: Infinity })).toBeNull();
+    expect(await service.editByDescription('p1', 'gasolina', { amount: -5 })).toBeNull();
+    expect(update).not.toHaveBeenCalled();
+  });
+});
