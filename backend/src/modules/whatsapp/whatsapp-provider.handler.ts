@@ -800,13 +800,19 @@ export class WhatsAppProviderHandler {
         const wsCtx =
           await this.workspaceService.getWorkspaceContext(providerProfileId);
         tz = wsCtx.timezone || DEFAULT_TIMEZONE;
-        const [recentExpenses, activeRecurring, providerModel, todayAppts] =
-          await Promise.all([
-            this.expenseService.getRecent(providerProfileId, 5),
-            this.recurringExpenseService.listActive(providerProfileId),
-            this.providerModelService.getProviderModel(providerProfileId),
-            this.appointmentsService.getTodayAgenda(providerProfileId, tz),
-          ]);
+        const [
+          recentExpenses,
+          activeRecurring,
+          providerModel,
+          todayAppts,
+          contacts,
+        ] = await Promise.all([
+          this.expenseService.getRecent(providerProfileId, 5),
+          this.recurringExpenseService.listActive(providerProfileId),
+          this.providerModelService.getProviderModel(providerProfileId),
+          this.appointmentsService.getTodayAgenda(providerProfileId, tz),
+          this.contactsService.listContacts(providerProfileId, 20),
+        ]);
 
         workspaceContext = {
           ...wsCtx,
@@ -828,6 +834,10 @@ export class WhatsAppProviderHandler {
             clientName: a.clientName || undefined,
             description: a.description || undefined,
             address: a.address || undefined,
+          })),
+          savedContacts: contacts.map((c) => ({
+            name: c.name,
+            hasPhone: !!c.phone,
           })),
         };
       } catch (err: any) {
@@ -1121,6 +1131,15 @@ export class WhatsAppProviderHandler {
               phone,
               aiResponse.data,
               providerProfileId,
+            );
+            break;
+
+          case AiIntent.ENVIAR_MENSAJE_CONTACTO:
+            await this.handleEnviarMensajeContacto(
+              phone,
+              aiResponse.data,
+              providerProfileId,
+              tz,
             );
             break;
 
@@ -1882,6 +1901,91 @@ export class WhatsAppProviderHandler {
       phone,
       `${header}\n\n${this.contactsService.formatContactList(contacts)}`,
       AiIntent.BUSCAR_CONTACTOS,
+    );
+  }
+
+  // ─── Assisted send: prepare a wa.me link for a saved contact ──────
+  // WhatsApp's Cloud API forbids free-text business-initiated messages to
+  // people outside the 24h window, so Chalán does NOT send directly here:
+  // it builds a wa.me link the provider taps to send from their own phone.
+  private async handleEnviarMensajeContacto(
+    phone: string,
+    data: Record<string, any> | undefined,
+    providerProfileId?: string,
+    tz?: string,
+  ): Promise<void> {
+    if (!providerProfileId) {
+      await this.sendAndRecord(
+        phone,
+        '❌ No se encontró tu perfil de proveedor.',
+      );
+      return;
+    }
+
+    const contactName = this.sanitizeClientField(data?.contactName);
+    const contactPhone = this.sanitizeClientField(data?.contactPhone);
+    const message = (data?.message ?? '').toString().trim();
+
+    if (!contactName && !contactPhone) {
+      await this.sendAndRecord(
+        phone,
+        '🤔 ¿A quién le quieres mandar el mensaje?',
+        AiIntent.ENVIAR_MENSAJE_CONTACTO,
+      );
+      return;
+    }
+    if (!message) {
+      await this.sendAndRecord(
+        phone,
+        `🤔 ¿Qué le quieres decir a *${contactName || contactPhone}*?`,
+        AiIntent.ENVIAR_MENSAJE_CONTACTO,
+      );
+      return;
+    }
+
+    const resolution = await this.contactsService.resolveClientForSend(
+      providerProfileId,
+      { clientName: contactName, clientPhone: contactPhone, timezone: tz },
+    );
+
+    if (resolution.status === 'need_phone') {
+      await this.sendAndRecord(
+        phone,
+        `Tengo a *${resolution.clientName}* guardado pero sin número. Pásame su teléfono y te armo el mensaje.`,
+        AiIntent.ENVIAR_MENSAJE_CONTACTO,
+      );
+      return;
+    }
+
+    if (resolution.status === 'disambiguate') {
+      const names = resolution.candidates.map((c) => `• ${c.name}`).join('\n');
+      await this.sendAndRecord(
+        phone,
+        `Tengo varios que coinciden con *${resolution.clientName}*:\n\n${names}\n\n¿A cuál le mando?`,
+        AiIntent.ENVIAR_MENSAJE_CONTACTO,
+      );
+      return;
+    }
+
+    if (resolution.status !== 'ok') {
+      await this.sendAndRecord(
+        phone,
+        `No tengo guardado a *${contactName || contactPhone}*. Dime su número y lo guardo, o mándame "guarda a ${contactName || 'X'} con el número ...".`,
+        AiIntent.ENVIAR_MENSAJE_CONTACTO,
+      );
+      return;
+    }
+
+    const digits = resolution.phone.replace(/\D/g, '');
+    const link = `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+    await this.contactsService.touchContact(resolution.contact.id);
+
+    await this.sendAndRecord(
+      phone,
+      `Listo, toca el link y se le manda a *${resolution.contact.name}*:\n\n` +
+        `🔗 ${link}\n\n` +
+        `Mensaje: "${message}"`,
+      AiIntent.ENVIAR_MENSAJE_CONTACTO,
     );
   }
 
@@ -2833,12 +2937,91 @@ export class WhatsAppProviderHandler {
       return;
     }
 
+    if (action === 'edit_by_description') {
+      const description = data?.description;
+      const amount = data?.amount;
+      if (!description) {
+        await this.sendAndRecord(
+          phone,
+          '🤔 ¿Cuál gasto quieres corregir? Dime la descripción.\n\nEjemplo: *"La gasolina es 574, no 534"*',
+        );
+        return;
+      }
+      if (!amount || typeof amount !== 'number' || amount <= 0) {
+        await this.sendAndRecord(
+          phone,
+          `🤔 ¿A cuánto quieres corregir el gasto de "${description}"?`,
+        );
+        return;
+      }
+
+      try {
+        let result = await this.expenseService.editByDescription(
+          providerProfileId,
+          description,
+          { amount },
+        );
+
+        if (!result) {
+          const recent = await this.expenseService.getRecent(
+            providerProfileId,
+            10,
+          );
+          const options = recent
+            .map((e) => e.description || e.category)
+            .filter((d): d is string => !!d);
+
+          if (options.length > 0) {
+            const matched = await this.aiService.matchToList(
+              description,
+              options,
+            );
+            if (matched) {
+              result = await this.expenseService.editByDescription(
+                providerProfileId,
+                matched,
+                { amount },
+              );
+            }
+          }
+        }
+
+        if (result) {
+          const desc =
+            result.previous.description ||
+            result.previous.category ||
+            'Sin descripción';
+          await this.sendAndRecord(
+            phone,
+            `✏️ *Gasto corregido:*\n\n` +
+              `💸 $${Number(result.previous.amount).toLocaleString('es-MX')} → *$${amount.toLocaleString('es-MX')}*\n` +
+              `📝 ${desc}`,
+          );
+        } else {
+          await this.sendAndRecord(
+            phone,
+            `🤔 No encontré un gasto con "${description}". Escribe *"¿cómo voy?"* para ver tus gastos recientes.`,
+          );
+        }
+      } catch (error: any) {
+        this.logger.error(
+          `Error editing expense by description: ${error.message}`,
+        );
+        await this.sendAndRecord(
+          phone,
+          '❌ No se pudo editar el gasto. Intenta de nuevo.',
+        );
+      }
+      return;
+    }
+
     await this.sendAndRecord(
       phone,
       '🤔 No entendí qué quieres hacer con el gasto. Puedes:\n\n' +
         '• *"Borra el último gasto"*\n' +
         '• *"Borra el gasto de material"*\n' +
-        '• *"El último gasto era 300, no 200"*',
+        '• *"El último gasto era 300, no 200"*\n' +
+        '• *"La gasolina es 574, no 534"*',
     );
   }
 

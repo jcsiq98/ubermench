@@ -25,6 +25,7 @@ export enum AiIntent {
   CREAR_LINK_COBRO = 'crear_link_cobro',
   GUARDAR_CONTACTO = 'guardar_contacto',
   BUSCAR_CONTACTOS = 'buscar_contactos',
+  ENVIAR_MENSAJE_CONTACTO = 'enviar_mensaje_contacto',
   ACTIVAR_COBROS = 'activar_cobros',
   CONFIGURAR_ZONA_HORARIA = 'configurar_zona_horaria',
   VER_INGRESOS_PROYECTADOS = 'ver_ingresos_proyectados',
@@ -163,6 +164,11 @@ export interface TodayAppointmentContext {
   address?: string;
 }
 
+export interface SavedContactContext {
+  name: string;
+  hasPhone: boolean;
+}
+
 export type FactCategory = 'personal' | 'negocio' | 'clientes' | 'preferencias' | 'patrones';
 
 export interface StructuredFact {
@@ -213,4 +219,5 @@ export interface WorkspaceContextDto {
   activeRecurringExpenses?: ActiveRecurringContext[];
   providerModel?: import('../provider-model/provider-model.types').ProviderModel | null;
   todayAppointments?: TodayAppointmentContext[];
+  savedContacts?: SavedContactContext[];
 }

@@ -229,6 +229,18 @@ function buildWorkspaceSection(ctx?: WorkspaceContextDto): string {
     sections.push('## Citas de hoy\nNo tiene citas agendadas para hoy.');
   }
 
+  // --- Saved contacts ---
+  if (ctx.savedContacts && ctx.savedContacts.length > 0) {
+    const contactLines = ctx.savedContacts.map(
+      (c) => `- ${c.name}${c.hasPhone ? '' : ' (sin teléfono guardado)'}`,
+    );
+    sections.push(
+      '## Contactos guardados\n' +
+        'Personas que el proveedor tiene guardadas. Si pide mandarle un mensaje a alguno ("mándale a X", "escríbele a X"), usa la tool enviar_mensaje_contacto con su nombre.\n' +
+        contactLines.join('\n'),
+    );
+  }
+
   if (sections.length === 0) return '';
 
   return (

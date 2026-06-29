@@ -12,8 +12,8 @@ const functionTools = AI_TOOLS.filter((t) => t.type === 'function') as Array<
 >;
 
 describe('AI Tools — Function Calling definitions', () => {
-  it('should define 35 tools', () => {
-    expect(AI_TOOLS).toHaveLength(35);
+  it('should define 37 tools', () => {
+    expect(AI_TOOLS).toHaveLength(37);
   });
 
   it('every tool should have a valid name and description', () => {

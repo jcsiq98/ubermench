@@ -261,6 +261,43 @@ export class ExpenseService {
     return { previous: last, updated };
   }
 
+  async editByDescription(
+    providerId: string,
+    description: string,
+    updates: { amount?: number },
+  ) {
+    if (!updates.amount || updates.amount <= 0) return null;
+
+    const expenses = await this.prisma.expense.findMany({
+      where: { providerId },
+      orderBy: { date: 'desc' },
+      take: 20,
+    });
+
+    const needle = description.toLowerCase();
+    const match = expenses.find((e) => {
+      const desc = (e.description || '').toLowerCase();
+      const cat = (e.category || '').toLowerCase();
+      return (
+        desc.includes(needle) ||
+        needle.includes(desc) ||
+        cat.includes(needle) ||
+        needle.includes(cat)
+      );
+    });
+
+    if (!match) return null;
+
+    const updated = await this.prisma.expense.update({
+      where: { id: match.id },
+      data: { amount: new Prisma.Decimal(updates.amount) },
+    });
+    this.logger.log(
+      `Edited expense by description "${description}" (${match.id}): amount → ${updates.amount} for provider ${providerId}`,
+    );
+    return { previous: match, updated };
+  }
+
   async getRecent(providerId: string, limit = 5) {
     return this.prisma.expense.findMany({
       where: { providerId },

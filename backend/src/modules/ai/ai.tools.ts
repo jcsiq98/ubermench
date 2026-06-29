@@ -31,6 +31,10 @@ export const TOOL_TO_INTENT: Record<
     intent: AiIntent.GESTIONAR_GASTO,
     defaultData: { action: 'edit_last' },
   },
+  corregir_gasto_por_descripcion: {
+    intent: AiIntent.GESTIONAR_GASTO,
+    defaultData: { action: 'edit_by_description' },
+  },
   crear_gasto_recurrente: {
     intent: AiIntent.GESTIONAR_GASTO_RECURRENTE,
     defaultData: { action: 'create' },
@@ -114,6 +118,9 @@ export const TOOL_TO_INTENT: Record<
   },
   buscar_contactos: {
     intent: AiIntent.BUSCAR_CONTACTOS,
+  },
+  enviar_mensaje_contacto: {
+    intent: AiIntent.ENVIAR_MENSAJE_CONTACTO,
   },
   activar_cobros: {
     intent: AiIntent.ACTIVAR_COBROS,
@@ -266,7 +273,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'corregir_ultimo_gasto',
-      description: 'Corregir/editar el monto del último gasto registrado.',
+      description:
+        'Corregir/editar el monto del ÚLTIMO gasto registrado, cuando el usuario no especifica cuál ("el último era 300, no 200").',
       parameters: {
         type: 'object',
         properties: {
@@ -276,6 +284,29 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
         },
         required: ['amount'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'corregir_gasto_por_descripcion',
+      description:
+        'Corregir/editar el monto de un gasto específico identificado por su nombre o descripción ("la gasolina es 574, no 534", "cambia el gasto de luz a 2000"). Úsalo cuando el usuario nombra CUÁL gasto corregir, no necesariamente el último.',
+      parameters: {
+        type: 'object',
+        properties: {
+          description: {
+            type: 'string',
+            description:
+              'Nombre o descripción del gasto a corregir. Usar la descripción exacta de "Gastos recientes" si está disponible.',
+          },
+          amount: {
+            type: 'number',
+            description: 'El monto correcto.',
+          },
+        },
+        required: ['description', 'amount'],
       },
     },
   },
@@ -1021,6 +1052,35 @@ export const AI_TOOLS: ChatCompletionTool[] = [
               'Nombre o parte del nombre a buscar. Vacío para listar todos.',
           },
         },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'enviar_mensaje_contacto',
+      description:
+        'Preparar un mensaje de WhatsApp para un contacto guardado y devolver un link listo para enviarlo con un toque. Usar cuando el proveedor pide mandarle un mensaje a alguien que NO es una acción de cobranza ni reactivación de cliente ("mándale a David...", "escríbele a mi mamá...", "dile a Juan que..."). No envía directamente: arma el mensaje y el proveedor lo manda él mismo.',
+      parameters: {
+        type: 'object',
+        properties: {
+          contactName: {
+            type: 'string',
+            description:
+              'Nombre del contacto guardado al que se le quiere mandar el mensaje. Usar el nombre tal como aparece en "Contactos guardados".',
+          },
+          contactPhone: {
+            type: 'string',
+            description:
+              'Teléfono del contacto, solo si el proveedor lo dicta en el mensaje y no está guardado.',
+          },
+          message: {
+            type: 'string',
+            description:
+              'El texto del mensaje a enviar, redactado en la voz del proveedor (no de Chalán).',
+          },
+        },
+        required: ['contactName', 'message'],
       },
     },
   },
