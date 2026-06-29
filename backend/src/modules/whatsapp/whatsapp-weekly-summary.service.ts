@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WhatsAppService } from './whatsapp.service';
+import { AiContextService } from '../ai/ai-context.service';
 import { getLocalHour, getLocalDayOfWeek, DEFAULT_TIMEZONE } from '../../common/utils/timezone.utils';
 
 @Injectable()
@@ -11,6 +12,7 @@ export class WhatsAppWeeklySummaryService {
   constructor(
     private prisma: PrismaService,
     private whatsapp: WhatsAppService,
+    private aiContextService: AiContextService,
   ) {}
 
   @Cron('0 * * * 0') // Every hour on Sundays
@@ -61,6 +63,20 @@ export class WhatsAppWeeklySummaryService {
 
         if (bestDay && bestDay[1] > 0) {
           msg += `\nMejor día: ${bestDay[0]} ($${bestDay[1].toLocaleString('es-MX')})`;
+        }
+
+        // Meta forbids free-text business-initiated messages outside the
+        // 24h customer service window. Suppress rather than violate until
+        // approved templates exist (fail-safe).
+        if (!(await this.aiContextService.isWithinServiceWindow(provider.user.phone))) {
+          this.logger.warn(
+            JSON.stringify({
+              event: 'proactive_send_suppressed_out_of_window',
+              kind: 'weekly_summary',
+              providerPhone: provider.user.phone,
+            }),
+          );
+          continue;
         }
 
         await this.whatsapp.sendTextMessage(provider.user.phone, msg);

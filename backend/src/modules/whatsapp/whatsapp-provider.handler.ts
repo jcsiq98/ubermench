@@ -2012,6 +2012,35 @@ export class WhatsAppProviderHandler {
       }
       if (isAffirmativeReply(text)) {
         await this.clearPendingDelegatedSend(phone);
+
+        // Meta forbids free-text business-initiated messages outside the
+        // client's 24h window. Inactive clients (the reactivation target)
+        // are by definition out of window — and we don't track client
+        // inbound — so suppress the automated send and hand the message
+        // back to the provider to send from their own WhatsApp (fail-safe).
+        const clientInWindow = await this.aiContextService.isWithinServiceWindow(
+          delegated.clientPhone,
+        );
+        if (!clientInWindow) {
+          this.logger.warn(
+            JSON.stringify({
+              event: 'proactive_send_suppressed_out_of_window',
+              kind: `delegated_${delegated.action}`,
+              businessLoopEventId: delegated.businessLoopEventId,
+            }),
+          );
+          const handBack =
+            delegated.action === 'payment_link' && delegated.stripePaymentUrl
+              ? `No puedo escribirle yo a *${delegated.clientName}* (no te ha escrito en 24h, regla de WhatsApp). Mándaselo tú:\n\n${delegated.message}\n\n🔗 ${delegated.stripePaymentUrl}`
+              : `No puedo escribirle yo a *${delegated.clientName}* (no te ha escrito en 24h, regla de WhatsApp). Mándaselo tú:\n\n${delegated.message}`;
+          await this.sendAndRecord(
+            phone,
+            handBack,
+            this.intentForDelegatedAction(delegated.action),
+          );
+          return true;
+        }
+
         try {
           await this.whatsapp.sendTextMessage(
             delegated.clientPhone,
