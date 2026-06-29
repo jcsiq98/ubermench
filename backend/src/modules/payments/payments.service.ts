@@ -6,6 +6,7 @@ import { IncomeService } from '../income/income.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { FinancialRateLimitService } from '../../common/financial-rate-limit.service';
 import { BusinessLoopService } from '../business-loop/business-loop.service';
+import { AiContextService } from '../ai/ai-context.service';
 import {
   PaymentMethod,
   PaymentLinkStatus,
@@ -54,6 +55,7 @@ export class PaymentsService {
     private whatsappService: WhatsAppService,
     private rateLimit: FinancialRateLimitService,
     private businessLoopService: BusinessLoopService,
+    private aiContextService: AiContextService,
   ) {
     const secretKey = this.config.get<string>('STRIPE_SECRET_KEY');
     if (secretKey && !secretKey.includes('REPLACE_ME')) {
@@ -177,16 +179,29 @@ export class PaymentsService {
         previousStatus !== StripeOnboardingStatus.ACTIVE &&
         provider.user?.phone
       ) {
-        await this.whatsappService
-          .sendTextMessage(
-            provider.user.phone,
-            '✅ *¡Tu cuenta de cobros está activa!*\n\nYa puedes generar links de cobro para tus clientes.\n\nPrueba diciendo: *"Cóbrale 500 al señor García por revisión eléctrica"*',
-          )
-          .catch((err) =>
-            this.logger.error(
-              `Failed to notify provider ${provider.user.phone} about Stripe activation: ${err.message}`,
-            ),
+        // Meta forbids free-text outside the 24h window; suppress + log
+        // rather than violate until an approved template exists (fail-safe).
+        const phone = provider.user.phone;
+        if (await this.aiContextService.isWithinServiceWindow(phone)) {
+          await this.whatsappService
+            .sendTextMessage(
+              phone,
+              '✅ *¡Tu cuenta de cobros está activa!*\n\nYa puedes generar links de cobro para tus clientes.\n\nPrueba diciendo: *"Cóbrale 500 al señor García por revisión eléctrica"*',
+            )
+            .catch((err) =>
+              this.logger.error(
+                `Failed to notify provider ${phone} about Stripe activation: ${err.message}`,
+              ),
+            );
+        } else {
+          this.logger.warn(
+            JSON.stringify({
+              event: 'proactive_send_suppressed_out_of_window',
+              kind: 'stripe_activation',
+              providerPhone: phone,
+            }),
           );
+        }
       }
     }
   }
@@ -383,16 +398,29 @@ export class PaymentsService {
       const descLabel = paymentLink.description
         ? ` por ${paymentLink.description}`
         : '';
-      await this.whatsappService
-        .sendTextMessage(
-          providerPhone,
-          `💰 *¡Pago recibido!*\n\n${clientLabel} pagó *$${amountFormatted}*${descLabel}.\n\nYa quedó registrado en tus ingresos.`,
-        )
-        .catch((err) =>
-          this.logger.error(
-            `Failed to notify provider ${providerPhone}: ${err.message}`,
-          ),
+      // Stripe webhook timing is decoupled from the provider's last inbound,
+      // so this routinely fires outside the 24h window. Suppress + log rather
+      // than send free text and risk the number (fail-safe until templates).
+      if (await this.aiContextService.isWithinServiceWindow(providerPhone)) {
+        await this.whatsappService
+          .sendTextMessage(
+            providerPhone,
+            `💰 *¡Pago recibido!*\n\n${clientLabel} pagó *$${amountFormatted}*${descLabel}.\n\nYa quedó registrado en tus ingresos.`,
+          )
+          .catch((err) =>
+            this.logger.error(
+              `Failed to notify provider ${providerPhone}: ${err.message}`,
+            ),
+          );
+      } else {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'proactive_send_suppressed_out_of_window',
+            kind: 'payment_received',
+            providerPhone,
+          }),
         );
+      }
     }
   }
 

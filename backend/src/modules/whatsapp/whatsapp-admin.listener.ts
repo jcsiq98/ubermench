@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { WhatsAppService } from './whatsapp.service';
+import { AiContextService } from '../ai/ai-context.service';
 
 /**
  * Notifies providers via WhatsApp when an admin resolves their application.
@@ -11,7 +12,30 @@ import { WhatsAppService } from './whatsapp.service';
 export class WhatsAppAdminListener {
   private readonly logger = new Logger(WhatsAppAdminListener.name);
 
-  constructor(private whatsapp: WhatsAppService) {}
+  constructor(
+    private whatsapp: WhatsAppService,
+    private aiContextService: AiContextService,
+  ) {}
+
+  // Admin resolution timing is decoupled from the applicant's last inbound,
+  // so these can fall outside WhatsApp's 24h window where Meta only allows
+  // approved templates. Suppress + log rather than violate (fail-safe).
+  // NOTE: the approval message is onboarding-critical — it should become an
+  // approved template ASAP so a slow approval still reaches the user.
+  private async suppressedOutOfWindow(
+    phone: string,
+    kind: string,
+  ): Promise<boolean> {
+    if (await this.aiContextService.isWithinServiceWindow(phone)) return false;
+    this.logger.warn(
+      JSON.stringify({
+        event: 'proactive_send_suppressed_out_of_window',
+        kind,
+        providerPhone: phone,
+      }),
+    );
+    return true;
+  }
 
   @OnEvent('application.approved')
   async handleApplicationApproved(payload: {
@@ -20,6 +44,11 @@ export class WhatsAppAdminListener {
     tier: number;
   }) {
     try {
+      if (
+        await this.suppressedOutOfWindow(payload.phone, 'application_approved')
+      ) {
+        return;
+      }
       const name = payload.name ? ` ${payload.name}` : '';
       await this.whatsapp.sendTextMessage(
         payload.phone,
@@ -39,6 +68,11 @@ export class WhatsAppAdminListener {
     reason: string;
   }) {
     try {
+      if (
+        await this.suppressedOutOfWindow(payload.phone, 'application_rejected')
+      ) {
+        return;
+      }
       const name = payload.name ? ` ${payload.name}` : '';
       await this.whatsapp.sendTextMessage(
         payload.phone,
