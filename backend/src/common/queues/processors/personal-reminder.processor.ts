@@ -35,10 +35,15 @@ export class PersonalReminderProcessor extends WorkerHost {
     );
 
     // Meta forbids free-text business-initiated messages outside the 24h
-    // customer service window. Check BEFORE claiming the reminder so an
-    // out-of-window reminder is not marked SENT without being delivered.
-    // Left PENDING; the markStaleReminders sweeper reconciles it later.
+    // customer service window. We can't deliver it and can't re-enqueue,
+    // so close it out as CANCELLED — NOT left PENDING, because the
+    // markStaleReminders sweeper would otherwise flip a stale PENDING row
+    // to SENT, falsely recording a delivery that never happened.
     if (!(await this.aiContextService.isWithinServiceWindow(providerPhone))) {
+      await this.prisma.reminder.updateMany({
+        where: { id: reminderId, status: 'PENDING' },
+        data: { status: 'CANCELLED' },
+      });
       this.logger.warn(
         JSON.stringify({
           event: 'proactive_send_suppressed_out_of_window',
