@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ExpenseService } from './expense.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { IncomeService } from '../income/income.service';
+import { AiContextService } from '../ai/ai-context.service';
 import { AppointmentStatus, Prisma } from '@prisma/client';
 import {
   getLocalHour,
@@ -21,7 +22,28 @@ export class RecurringExpenseService {
     private expenseService: ExpenseService,
     private whatsappService: WhatsAppService,
     private incomeService: IncomeService,
+    private aiContextService: AiContextService,
   ) {}
+
+  /**
+   * Meta forbids free-text business-initiated messages outside the 24h
+   * customer service window. Proactive cron notifications must check this
+   * and suppress + log rather than violate (fail-safe) until templates exist.
+   */
+  private async suppressedOutOfWindow(
+    phone: string,
+    kind: string,
+  ): Promise<boolean> {
+    if (await this.aiContextService.isWithinServiceWindow(phone)) return false;
+    this.logger.warn(
+      JSON.stringify({
+        event: 'proactive_send_suppressed_out_of_window',
+        kind,
+        providerPhone: phone,
+      }),
+    );
+    return true;
+  }
 
   async create(dto: {
     providerId: string;
@@ -199,7 +221,10 @@ export class RecurringExpenseService {
         });
 
         const phone = recurring.provider?.user?.phone;
-        if (phone) {
+        if (
+          phone &&
+          !(await this.suppressedOutOfWindow(phone, 'recurring_expense_notice'))
+        ) {
           this.whatsappService
             .sendTextMessage(
               phone,
@@ -251,6 +276,10 @@ export class RecurringExpenseService {
         `🔔 *Recordatorio:* mañana se registran estos gastos fijos:\n\n` +
         lines.join('\n') +
         `\n\nSe registrarán automáticamente a medianoche.`;
+
+      if (await this.suppressedOutOfWindow(phone, 'recurring_expense_reminder')) {
+        continue;
+      }
 
       this.whatsappService
         .sendTextMessage(phone, msg)
@@ -325,6 +354,10 @@ export class RecurringExpenseService {
         }
       } catch (err: any) {
         this.logger.warn(`Failed to get weekly income for briefing: ${err.message}`);
+      }
+
+      if (await this.suppressedOutOfWindow(phone, 'morning_briefing')) {
+        continue;
       }
 
       this.whatsappService

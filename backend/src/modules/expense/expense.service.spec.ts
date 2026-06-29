@@ -297,3 +297,53 @@ describe('ExpenseService.editByDescription', () => {
     expect(update).not.toHaveBeenCalled();
   });
 });
+
+describe('ExpenseService.deleteByDescription', () => {
+  function makeServiceWithExpenses(expenses: any[]) {
+    const del = jest.fn().mockImplementation(({ where }) => ({ id: where.id }));
+    const prisma = {
+      expense: {
+        findMany: jest.fn().mockResolvedValue(expenses),
+        delete: del,
+      },
+    };
+    const rateLimit = { assertWithinLimits: jest.fn() };
+    const service = new ExpenseService(prisma as any, rateLimit as any);
+    return { service, del };
+  }
+
+  it('deletes the unique matching expense', async () => {
+    const { service, del } = makeServiceWithExpenses([
+      { id: 'gasolina', description: 'gasolina', category: 'transporte', amount: 534 },
+    ]);
+
+    const result = await service.deleteByDescription('p1', 'gasolina');
+
+    expect(result.status).toBe('ok');
+    expect(del).toHaveBeenCalledWith({ where: { id: 'gasolina' } });
+  });
+
+  it('does NOT delete (asks) when several expenses match — deletion is irreversible', async () => {
+    const { service, del } = makeServiceWithExpenses([
+      { id: 'luz-1', description: 'luz', category: 'servicios', amount: 500 },
+      { id: 'luz-2', description: 'luz oficina', category: 'servicios', amount: 800 },
+    ]);
+
+    const result = await service.deleteByDescription('p1', 'luz');
+
+    expect(result.status).toBe('ambiguous');
+    expect(result.status === 'ambiguous' && result.matches).toHaveLength(2);
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it('does NOT match a null description/category row', async () => {
+    const { service, del } = makeServiceWithExpenses([
+      { id: 'blank', description: null, category: null, amount: 999 },
+    ]);
+
+    const result = await service.deleteByDescription('p1', 'gasolina');
+
+    expect(result.status).toBe('not_found');
+    expect(del).not.toHaveBeenCalled();
+  });
+});

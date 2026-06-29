@@ -6,6 +6,24 @@ export type EditByDescriptionResult =
   | { status: 'ok'; previous: Expense; updated: Expense }
   | { status: 'not_found' }
   | { status: 'ambiguous'; matches: Expense[] };
+
+export type DeleteByDescriptionResult =
+  | { status: 'ok'; deleted: Expense }
+  | { status: 'not_found' }
+  | { status: 'ambiguous'; matches: Expense[] };
+
+/** Bidirectional substring match, guarding empty desc/cat (needle.includes('') is always true). */
+function expenseMatchesNeedle(
+  e: { description: string | null; category: string | null },
+  needle: string,
+): boolean {
+  const desc = (e.description || '').toLowerCase();
+  const cat = (e.category || '').toLowerCase();
+  return (
+    (!!desc && (desc.includes(needle) || needle.includes(desc))) ||
+    (!!cat && (cat.includes(needle) || needle.includes(cat)))
+  );
+}
 import {
   getWeekStartUtc,
   getMonthStartUtc,
@@ -212,31 +230,31 @@ export class ExpenseService {
     return last;
   }
 
-  async deleteByDescription(providerId: string, description: string) {
+  async deleteByDescription(
+    providerId: string,
+    description: string,
+  ): Promise<DeleteByDescriptionResult> {
+    const needle = description.trim().toLowerCase();
+    if (!needle) return { status: 'not_found' };
+
     const expenses = await this.prisma.expense.findMany({
       where: { providerId },
       orderBy: { date: 'desc' },
       take: 20,
     });
 
-    const needle = description.trim().toLowerCase();
-    if (!needle) return null;
-    const match = expenses.find((e) => {
-      const desc = (e.description || '').toLowerCase();
-      const cat = (e.category || '').toLowerCase();
-      return (
-        (!!desc && (desc.includes(needle) || needle.includes(desc))) ||
-        (!!cat && (cat.includes(needle) || needle.includes(cat)))
-      );
-    });
+    const matches = expenses.filter((e) => expenseMatchesNeedle(e, needle));
 
-    if (!match) return null;
+    if (matches.length === 0) return { status: 'not_found' };
+    // Deletion is irreversible — never guess which money row when several match.
+    if (matches.length > 1) return { status: 'ambiguous', matches };
 
+    const match = matches[0];
     await this.prisma.expense.delete({ where: { id: match.id } });
     this.logger.log(
       `Deleted expense by description "${description}" (${match.id}) for provider ${providerId}`,
     );
-    return match;
+    return { status: 'ok', deleted: match };
   }
 
   async editLast(providerId: string, updates: { amount?: number }) {
@@ -287,17 +305,7 @@ export class ExpenseService {
       take: 20,
     });
 
-    // Guard against empty desc/cat: needle.includes('') is always true, so an
-    // expense with a null description AND category would otherwise match any
-    // correction request.
-    const matches = expenses.filter((e) => {
-      const desc = (e.description || '').toLowerCase();
-      const cat = (e.category || '').toLowerCase();
-      return (
-        (!!desc && (desc.includes(needle) || needle.includes(desc))) ||
-        (!!cat && (cat.includes(needle) || needle.includes(cat)))
-      );
-    });
+    const matches = expenses.filter((e) => expenseMatchesNeedle(e, needle));
 
     if (matches.length === 0) return { status: 'not_found' };
     // Never guess which money row to edit when several match — ask instead.

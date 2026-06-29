@@ -2842,12 +2842,12 @@ export class WhatsAppProviderHandler {
       }
 
       try {
-        let deleted = await this.expenseService.deleteByDescription(
+        let result = await this.expenseService.deleteByDescription(
           providerProfileId,
           description,
         );
 
-        if (!deleted) {
+        if (result.status === 'not_found') {
           const recent = await this.expenseService.getRecent(
             providerProfileId,
             10,
@@ -2862,7 +2862,7 @@ export class WhatsAppProviderHandler {
               options,
             );
             if (matched) {
-              deleted = await this.expenseService.deleteByDescription(
+              result = await this.expenseService.deleteByDescription(
                 providerProfileId,
                 matched,
               );
@@ -2870,12 +2870,27 @@ export class WhatsAppProviderHandler {
           }
         }
 
-        if (deleted) {
+        if (result.status === 'ok') {
           const desc =
-            deleted.description || deleted.category || 'Sin descripción';
+            result.deleted.description ||
+            result.deleted.category ||
+            'Sin descripción';
           await this.sendAndRecord(
             phone,
-            `🗑️ *Gasto eliminado:*\n\n💸 $${Number(deleted.amount).toLocaleString('es-MX')} — ${desc}`,
+            `🗑️ *Gasto eliminado:*\n\n💸 $${Number(result.deleted.amount).toLocaleString('es-MX')} — ${desc}`,
+          );
+        } else if (result.status === 'ambiguous') {
+          // Deletion is irreversible — never guess which money row to delete.
+          const list = result.matches
+            .slice(0, 5)
+            .map(
+              (e) =>
+                `• ${e.description || e.category || 'sin descripción'} — $${Number(e.amount).toLocaleString('es-MX')}`,
+            )
+            .join('\n');
+          await this.sendAndRecord(
+            phone,
+            `Tengo varios gastos que coinciden con "${description}":\n\n${list}\n\n¿Cuál borro? Dime cuál con más detalle.`,
           );
         } else {
           await this.sendAndRecord(
