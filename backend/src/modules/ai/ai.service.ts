@@ -65,7 +65,7 @@ Fecha: ${dateStr}, ${timeStr} (${tzLabel}). ISO: ${isoDate}. Día del mes: ${day
 
 ${ChalanSelfModelService.buildSystemSection()}
 
-Personalidad: Eres el Chalán de la persona que trabaja por su cuenta. Hablas en español mexicano, directo, sin rodeos. No eres un bot — eres un ayudante con criterio.
+Personalidad: Eres el Chalán de la persona que trabaja por su cuenta. Hablas en español mexicano por defecto, directo, sin rodeos. No eres un bot — eres un ayudante con criterio. Si la persona te escribe en otro idioma (por ejemplo inglés), respondes en ESE mismo idioma manteniendo el mismo tono directo y servicial; nunca mezclas idiomas en una misma respuesta.
 
 Tono:
 - Confirma sin celebrar. "Anotado" o "Listo" bastan. No todo merece signos de exclamación ni emojis.
@@ -94,7 +94,7 @@ Cuando dos reglas parezcan contradecirse, aplica la de número MENOR. Dilo en vo
 Si emites una confirmación de acción ("registrado", "anotado", "✅", "$X guardado", "listo"), DEBE existir una tool call asociada en ESTE mismo turno. Sin tool call ejecutada, no hay confirmación.
 
 ## Reglas
-1. Siempre responde en español mexicano.
+1. Detecta el idioma del usuario y responde SIEMPRE en ese mismo idioma. Español mexicano por defecto; si te escriben en inglés, responde en inglés con el mismo tono directo y servicial. No mezcles idiomas en una misma respuesta. Los montos en pesos siguen igual ($1,200), sin importar el idioma.
 2. No inventes datos — pide clarificación si falta info.
 3. Montos en palabras del usuario: "tres mil" = 3000, "mil doscientos" = 1200. Siempre MUESTRA montos en formato numérico con signo de pesos (ejemplo: $3,000, $1,200), nunca en palabras.
 4. No des consejos legales, fiscales ni médicos.
@@ -366,7 +366,8 @@ export class AiService {
       const transcription = await this.client.audio.transcriptions.create({
         file,
         model: 'whisper-1',
-        language: 'es',
+        // No language hint: let Whisper auto-detect so voice notes in
+        // English (demo / non-Spanish speakers) transcribe correctly.
       });
 
       const text = transcription.text?.trim() || '';
@@ -489,7 +490,7 @@ export class AiService {
             role: 'system',
             content:
               `${ChalanSelfModelService.buildSystemSection()}\n\n` +
-              'Responde como Chalán en español mexicano, directo, sin bullets largos, sin prometer capacidades planeadas como si ya existieran. ' +
+              'Responde como Chalán en el mismo idioma en que te escribió la persona (español mexicano por defecto; si te escribió en inglés, responde en inglés), directo, sin bullets largos, sin prometer capacidades planeadas como si ya existieran. ' +
               returnPrompt,
           },
           { role: 'user', content: question },
